@@ -93,7 +93,8 @@ Ciclo normal:
 3. Al fusionarse, `cleanup` borra la rama corta.
 4. **Promoción por lote**: PR `dev` → `main` cuando `dev` está verde. No se promociona feature por feature; `dev` acumula y `main` recibe un bloque cerrado.
 5. **La promoción sí necesita una persona.** `.github/CODEOWNERS` + `require_code_owner_review` en `Protect main` exigen la aprobación de `@orl92` o `@yoelvismr`; la de un bot no cuenta, porque un bot no puede ser code owner. Es **una** aprobación por release, no por PR.
-6. Al fusionarse la promoción, CI corre en `main` y `deploy.yml` despliega. Etiquetar: `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD`.
+6. Al fusionarse la promoción, CI corre en `main` y `deploy-production.yml` intenta desplegar. **Hoy no despliega nada**: el job tiene `if: vars.DEPLOY_ENABLED == 'true'` y esa variable no existe mientras no haya servidor, así que termina en gris (`skipped`). Etiquetar igual: `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD`.
+7. **Inmediatamente después, mergear `main` de vuelta a `dev`** (PR `main` → `dev`). El merge de release crea en `main` un commit que `dev` no tiene, y con `strict_required_status_checks_policy: true` la siguiente promoción saldría `BEHIND` aunque el contenido sea idéntico: la comprobación es de ascendencia de commits, no de árboles. Este paso aplica a **cada release**, no solo a los hotfixes.
 
 Hotfix (el único caso que entra directo a `main`):
 
