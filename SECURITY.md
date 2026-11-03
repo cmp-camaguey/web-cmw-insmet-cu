@@ -14,7 +14,7 @@ El proyecto se desarrolla sobre Django 5.2. Solo la versión más reciente de `m
 Las vulnerabilidades se gestionan de forma **privada** hasta su resolución. No abras issues públicos con detalles de seguridad.
 
 1. **Reporta a través de GitHub Security Advisories** si es posible:
-   `https://github.com/orl92/web-cmw-insmet-cu/security/advisories`
+   `https://github.com/cmp-camaguey/web-cmw-insmet-cu/security/advisories`
 2. O contacta por correo institucional: `admin@cmw.insmet.cu`
 
 ### Qué incluir en el reporte
