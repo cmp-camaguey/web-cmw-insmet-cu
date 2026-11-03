@@ -2,7 +2,7 @@
 # Instalador del portal del CMP Camaguey. Auto-contenido: no lee NADA del
 # checkout antes de clonarlo, asi que se puede ejecutar como archivo suelto.
 #
-#   curl -fsSL https://raw.githubusercontent.com/orl92/web-cmw-insmet-cu/main/deploy/install.sh \
+#   curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
 #       | sudo bash -s -- --help
 #
 # Que instala, en este orden (el orden es una dependencia, no una preferencia):
@@ -55,7 +55,7 @@ set -Eeuo pipefail
 # El repo se clona con `git clone` (no con curl|tar) porque el deploy depende de
 # un checkout real: deploy.sh hace `git fetch`/`checkout` en produccion y
 # aborta si el directorio no es un repo.
-REPO_URL=${REPO_URL:-https://github.com/orl92/web-cmw-insmet-cu.git}
+REPO_URL=${REPO_URL:-https://github.com/cmp-camaguey/web-cmw-insmet-cu.git}
 REPO_REF=${REPO_REF:-main}
 APP_DIR=${APP_DIR:-/srv/webcmp}
 SERVICE_USER=${SERVICE_USER:-webcmp}
@@ -456,7 +456,7 @@ usage() {
     cat <<'EOF'
 Instalador de web-cmw-insmet-cu. Un solo archivo, sin checkout previo:
 
-  curl -fsSL https://raw.githubusercontent.com/orl92/web-cmw-insmet-cu/main/deploy/install.sh \
+  curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
       | sudo bash -s -- --help
 
 Uso:

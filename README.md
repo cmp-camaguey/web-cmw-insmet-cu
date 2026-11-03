@@ -39,7 +39,7 @@ para correos y PDFs. Interfaz y configuración en español (`es-mx`, `America/Ha
 Requiere **Python 3.14** (el CI la fija y ruff apunta a `py314`).
 
 ```bash
-git clone https://github.com/orl92/web-cmw-insmet-cu.git
+git clone https://github.com/cmp-camaguey/web-cmw-insmet-cu.git
 cd web-cmw-insmet-cu
 
 # Dependencias del sistema para PDFs (wkhtmltopdf) y MySQL (libmysqlclient)
@@ -442,7 +442,7 @@ sudo systemctl restart webcmp
 ### 3. Código, venv y `.env`
 
 ```bash
-sudo -u webcmp git clone https://github.com/orl92/web-cmw-insmet-cu.git /srv/webcmp
+sudo -u webcmp git clone https://github.com/cmp-camaguey/web-cmw-insmet-cu.git /srv/webcmp
 cd /srv/webcmp
 sudo -u webcmp python3.14 -m venv .venv
 sudo -u webcmp .venv/bin/pip install -r requirements/prod.txt

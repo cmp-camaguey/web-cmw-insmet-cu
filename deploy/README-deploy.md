@@ -100,6 +100,177 @@ Manual:
 sudo /usr/local/sbin/webcmp-deploy <commit-anterior>
 ```
 
+## El servidor en Proxmox (antes de instalar)
+
+Esta seccion termina donde empieza `install.sh`. Todo lo de abajo se hace **una
+vez**, en la consola de Proxmox, y no lo automatiza nada de este repo.
+
+### Contenedor LXC
+
+Se despliega en un contenedor LXC sin privilegios, no en una VM. Y conviene decir
+por que eso es seguro **en este proyecto concreto**, porque la primera version de
+este documento decia lo contrario:
+
+`install.sh` no toca nada del host. No hace `mount`, ni `sysctl`, ni `modprobe`,
+ni maneja `apparmor`, ni red con `iptables`. Lo que hace es `apt-get`, crear un
+usuario, `python -m venv`, unidades systemd propias, `nginx` y PostgreSQL/Redis
+como servicios. Todo eso corre dentro de un LXC con systemd, que es el PID 1 del
+contenedor: `systemctl enable --now webcmp` funciona igual que en una VM.
+
+La regla de "nada de systemd en contenedores" aplica a contenedores sin init
+propio (imagenes de Docker hechas para correr un solo proceso). Proxmox no es
+ese caso: entrega un sistema completo y systemd arranca como PID 1.
+
+### Lo unico que si rompe: la version de Python
+
+Este es el requisito que hay que respetar, y no es negociable:
+
+```
+MIN_PYTHON=(3 14)
+```
+
+`scripts/generate_env.py` usa PEP 758 (`except A, B:`, sin parentesis), que
+existe **solo desde Python 3.14**. Con 3.12 o 3.13 el generador no compila y el
+error no menciona la version: dice `multiple exception types must be
+parenthesized`. Por eso `install.sh` chequea la version al arrancar y aborta con
+un mensaje que si la nombra.
+
+Consecuencia practica: **el template tiene que traer Python 3.14**. Ubuntu 24.04
+trae 3.12. Comprueba antes de crear nada:
+
+```bash
+pveam update
+pveam available --section system | grep -i 'ubuntu-26'
+```
+
+Si no aparece un template de Ubuntu 26.04 (o el que corresponda con 3.14), las
+opciones son agregar el PPA de deadsnakes al contenedor o compilar Python a mano.
+Las dos funcionan, las dos son trabajo extra que se evita eligiendo bien el
+template.
+
+### Crear el contenedor
+
+Ajusta storage (`local-zfs`), red y el nombre del template a lo que liste
+`pveam available` en tu nodo:
+
+```bash
+pct create 120 local:vztmpl/ubuntu-26.04-standard_26.04-1_amd64.tar.zst \
+  --hostname webcmp \
+  --cores 4 --memory 8192 --swap 2048 \
+  --rootfs local-zfs:60 \
+  --net0 name=eth0,bridge=vmbr0,ip=10.0.0.50/24,gw=10.0.0.1 \
+  --nameserver 1.1.1.1 \
+  --unprivileged 1 \
+  --onboot 1 \
+  --timezone America/Havana
+
+pct start 120
+pct exec 120 -- bash -lc 'apt-get update && apt-get -y full-upgrade'
+```
+
+Notas sobre esas banderas:
+
+- **`--unprivileged 1`**: no hace falta privilegiado. Nada del despliegue monta
+  nada. Efecto lateral: los archivos de `/srv/webcmp` aparecen en el host con
+  UID `100000 + uid`, que solo importa si alguien va a leerlos desde el host.
+- **`--swap 2048`**: sin esto el contenedor no tiene swap propio y un pico de
+  memoria mata un worker de Gunicorn en vez de paginar. El swap del LXC se
+  cuenta contra el host, no es gratis.
+- **Sin `nesting=1`**: eso es para Docker dentro del contenedor. Aca no hay
+  Docker, y activarlo solo amplia la superficie.
+- **`--rootfs` en storage con snapshots**: ZFS o LVM-thin. Sobre storage tipo
+  `dir`, `pct snapshot` no existe y el paso siguiente se cae del plan.
+- **`--memory` es un limite de cgroup**: si PostgreSQL y los workers lo superan,
+  el kernel mata procesos *dentro* del contenedor. `free` dentro del contenedor
+  muestra la memoria del host, asi que no sirve para diagnosticar — mira
+  `pct status 120 --verbose` o el grafico del nodo.
+
+### Dimensiones
+
+Lo que carga el contenedor es PostgreSQL, Redis, Gunicorn (workers) y ~114 MB de
+estaticos que `collectstatic` reescribe en cada deploy.
+
+| Recurso | Recomendado | Minimo |
+| --- | --- | --- |
+| vCPU | 4 | 2 |
+| RAM | 8 GB | 4 GB |
+| Disco | 60 GB | 30 GB |
+
+Con 2 vCPU el primer `collectstatic` (hashear y comprimir en gzip+brotli) tarda
+varios minutos y el deploy se acerca al timeout de 30 min del workflow. No es
+solo lentitud: es margen que se pierde.
+
+El disco crece con `media/`, los PDFs que sube la gente y los backups de
+PostgreSQL. 60 GB no es capricho, es el punto donde un dump mensual todavia no
+duele.
+
+### Sistema y red
+
+- **Ubuntu 26.04 LTS** (o el template que traiga Python 3.14), x86_64. El
+  instalador asume `apt`.
+- **Zona horaria `America/Havana`**, igual que `TIME_ZONE` del proyecto. Si no
+  coinciden, las fechas de los avisos y los logs se leen en dos relojes
+  distintos.
+- **IP fija**, no DHCP. En Proxmox se fija en `--net0 ip=...` o se cambia despues
+  con `pct set 120 --net0 ...`. Un servidor de produccion con IP dinamica es un
+  incidente esperando su turno.
+- **Nombre en DNS** que coincida **exactamente** con tres cosas: el
+  `EXTERNAL_HOSTNAME` del `.env`, el `PublicHostname` de `deploy.env` y el
+  `server_name` de Nginx. Si difieren, el health check entra con un nombre que
+  el sitio no reconoce y responde `DisallowedHost`.
+
+### Snapshot antes del primer `install.sh`
+
+Toma un snapshot del contenedor recien creado y con la red configurada,
+**antes** de correr el instalador:
+
+```bash
+pct snapshot 120 pre-install
+```
+
+Ese primer paso toca apt, crea usuarios, bases y vhosts: si sale mal a medias,
+`pct rollback 120 pre-install` cuesta un minuto y volver a mano cuesta una
+tarde. Requiere storage con soporte de snapshots (ver arriba); si el tuyo no lo
+tiene, el equivalente es `vzdump 120 --mode snapshot --compress zstd` a un
+storage de backup.
+
+### El punto que hay que decidir antes de encender el deploy
+
+Un runner hospedado de GitHub hace `ssh` **desde internet** al puerto 22 del
+servidor. Si el contenedor vive en la red de Proxmox, detras del firewall del
+CMT, el deploy automatico **no llega** — y eso no es un bug que se arregla en el
+workflow.
+
+Antes de crear `DEPLOY_ENABLED=true`, comprueba que existe el camino:
+
+```bash
+# desde una maquina fuera de la red del CMT
+nc -vz <host> 22
+ssh -p 22 deploy@<host> 'echo ok'
+```
+
+Si eso no responde, las opciones son las de **Lo que el workflow NO puede
+hacer**, y la buena noticia es que no bloquean nada: `webcmp-deploy` corre a
+mano en el servidor y hace exactamente el mismo procedimiento, con los mismos
+gates y el mismo rollback. Lo unico que pierdes es que se dispare solo.
+
+Por eso el orden es: **primero el sitio arriba y desplegable a mano; despues,
+si hay conectividad, el automatico.** Al reves se depura el sitio y el CI al
+mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
+
+### Checklist antes de instalar
+
+- [ ] Contenedor LXC creado (sin privilegios, sin `nesting`), x86_64
+- [ ] Template con **Python 3.14** verificado (`install.sh` aborta si no)
+- [ ] 2 vCPU / 4 GB / 30 GB como piso; 4/8/60 si el portal va a tener trafico real
+- [ ] `--swap` asignado (sin swap, un pico mata un worker)
+- [ ] Rootfs en storage con snapshots (ZFS / LVM-thin) o backup tomado
+- [ ] IP fija
+- [ ] Nombre en DNS resoluble desde donde se va a probar
+- [ ] Zona horaria `America/Havana`
+- [ ] Snapshot `pre-install` tomado
+- [ ] Puerto 22 alcanzable desde donde se va a correr el deploy (o decision explicita de desplegar a mano)
+
 ## Instalacion en el servidor (una vez)
 
 Hay dos caminos. El instalador es el que corresponde; el manual queda como
@@ -116,7 +287,7 @@ migraciones, estaticos, las dos unidades systemd, el vhost de Nginx y el
 Primero, ver que va a hacer, sin tocar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/orl92/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
     | sudo bash -s -- --dry-run
 ```
 
@@ -125,7 +296,7 @@ adivina en un pipe escribe el `.env` equivocado y nadie lo ve hasta que el sitio
 responde `DisallowedHost`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/orl92/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
     | sudo bash -s
 ```
 
