@@ -93,7 +93,8 @@ Ciclo normal:
 3. Al fusionarse, `cleanup` borra la rama corta.
 4. **Promoción por lote**: PR `dev` → `main` cuando `dev` está verde. No se promociona feature por feature; `dev` acumula y `main` recibe un bloque cerrado.
 5. **La promoción sí necesita una persona.** `.github/CODEOWNERS` + `require_code_owner_review` en `Protect main` exigen la aprobación de `@orl92` o `@yoelvismr`; la de un bot no cuenta, porque un bot no puede ser code owner. Es **una** aprobación por release, no por PR.
-6. Al fusionarse la promoción, CI corre en `main` y `deploy.yml` despliega. Etiquetar: `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD`.
+6. Al fusionarse la promoción, CI corre en `main` y `deploy-production.yml` intenta desplegar. **Hoy no despliega nada**: el job tiene `if: vars.DEPLOY_ENABLED == 'true'` y esa variable no existe mientras no haya servidor, así que termina en gris (`skipped`). Etiquetar igual: `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD`.
+7. **Inmediatamente después, mergear `main` de vuelta a `dev`** (PR `main` → `dev`). El merge de release crea en `main` un commit que `dev` no tiene, y con `strict_required_status_checks_policy: true` la siguiente promoción saldría `BEHIND` aunque el contenido sea idéntico: la comprobación es de ascendencia de commits, no de árboles. Este paso aplica a **cada release**, no solo a los hotfixes.
 
 Hotfix (el único caso que entra directo a `main`):
 
@@ -103,8 +104,9 @@ Hotfix (el único caso que entra directo a `main`):
 Secuencia de activación (el orden importa):
 
 - `require_code_owner_review` en `Protect main` **sólo protege cuando `.github/CODEOWNERS` ya está en `main`**, porque GitHub lee ese archivo de la rama base del PR. Activarlo antes no rompe nada (sin archivo no hay code owners que exigir), pero tampoco protege. Orden: mergear a `dev` → promover a `main` con una aprobación humana → activar la regla.
-- Los `required_status_checks` ya están activos en `Protect main` (8 contextos: `Detect affected apps`, `Tests (Django)`, `Lint (Ruff)`, `Templates (djlint)`, `Pre-commit hooks`, `Bandit SAST`, `Security (pip-audit + migrations)`, `Deploy check (check --deploy)`) y son el gate real de ambas ramas. Si un PR renombra o borra un job, el check requerido nunca reporta y el merge queda bloqueado: **fail-closed**.
-- `strict_required_status_checks_policy: true`: el PR tiene que estar al día con su rama base antes de mergear.
+- Los `required_status_checks` están activos en **las dos** ramas, con los mismos 8 contextos: `Detect affected apps`, `Tests (Django)`, `Lint (Ruff)`, `Templates (djlint)`, `Pre-commit hooks`, `Bandit SAST`, `Security (pip-audit + migrations)`, `Deploy check (check --deploy)`. Si un PR renombra o borra un job, el check requerido nunca reporta y el merge queda bloqueado: **fail-closed**.
+- `strict_required_status_checks_policy`: **`true` en `main`, `false` en `dev`**. En `main` el release tiene que haberse probado contra lo último que hay en la rama. En `dev` no: con PRs semanales de Dependabot y `allow_update_branch: false`, exigir ponerse al día deja cada bump `BEHIND` esperando una actualización manual.
+- Que `dev` tenga required checks **no es opcional aunque no exigiera aprobación**: GitHub sólo permite habilitar auto-merge (`enablePullRequestAutoMerge`) en un PR cuya rama base tenga reglas de protección con required status checks. Sin ellos, `gh pr merge --auto` falla con `Pull request Branch does not have required protected branch rules` y `dependabot-auto-merge.yml` termina en rojo.
 
 ## CI — tests selectivos
 

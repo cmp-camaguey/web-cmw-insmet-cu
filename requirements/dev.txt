@@ -1,8 +1,8 @@
 -r base.txt
-ruff==0.17.2
+ruff==0.17.3
 bandit==1.9.4
 pip-audit==2.10.1
-djlint==1.47.0
+djlint==1.47.1
 pre-commit==4.7.0
 django-debug-toolbar==8.0.0
 setuptools==84.2.1
