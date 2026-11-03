@@ -103,8 +103,9 @@ Hotfix (el único caso que entra directo a `main`):
 Secuencia de activación (el orden importa):
 
 - `require_code_owner_review` en `Protect main` **sólo protege cuando `.github/CODEOWNERS` ya está en `main`**, porque GitHub lee ese archivo de la rama base del PR. Activarlo antes no rompe nada (sin archivo no hay code owners que exigir), pero tampoco protege. Orden: mergear a `dev` → promover a `main` con una aprobación humana → activar la regla.
-- Los `required_status_checks` ya están activos en `Protect main` (8 contextos: `Detect affected apps`, `Tests (Django)`, `Lint (Ruff)`, `Templates (djlint)`, `Pre-commit hooks`, `Bandit SAST`, `Security (pip-audit + migrations)`, `Deploy check (check --deploy)`) y son el gate real de ambas ramas. Si un PR renombra o borra un job, el check requerido nunca reporta y el merge queda bloqueado: **fail-closed**.
-- `strict_required_status_checks_policy: true`: el PR tiene que estar al día con su rama base antes de mergear.
+- Los `required_status_checks` están activos en **las dos** ramas, con los mismos 8 contextos: `Detect affected apps`, `Tests (Django)`, `Lint (Ruff)`, `Templates (djlint)`, `Pre-commit hooks`, `Bandit SAST`, `Security (pip-audit + migrations)`, `Deploy check (check --deploy)`. Si un PR renombra o borra un job, el check requerido nunca reporta y el merge queda bloqueado: **fail-closed**.
+- `strict_required_status_checks_policy`: **`true` en `main`, `false` en `dev`**. En `main` el release tiene que haberse probado contra lo último que hay en la rama. En `dev` no: con PRs semanales de Dependabot y `allow_update_branch: false`, exigir ponerse al día deja cada bump `BEHIND` esperando una actualización manual.
+- Que `dev` tenga required checks **no es opcional aunque no exigiera aprobación**: GitHub sólo permite habilitar auto-merge (`enablePullRequestAutoMerge`) en un PR cuya rama base tenga reglas de protección con required status checks. Sin ellos, `gh pr merge --auto` falla con `Pull request Branch does not have required protected branch rules` y `dependabot-auto-merge.yml` termina en rojo.
 
 ## CI — tests selectivos
 
