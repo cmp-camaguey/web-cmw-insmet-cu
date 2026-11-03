@@ -100,6 +100,91 @@ Manual:
 sudo /usr/local/sbin/webcmp-deploy <commit-anterior>
 ```
 
+## La VM en Proxmox (antes de instalar)
+
+Esta seccion termina donde empieza `install.sh`. Todo lo de abajo se hace **una
+vez**, en la consola de Proxmox, y no lo automatiza nada de este repo.
+
+### Maquina virtual, no LXC
+
+Usa VM. Un contenedor LXC puede correr systemd, pero este despliegue necesita
+unidades propias, PostgreSQL con su propio usuario y Redis escuchando en local;
+cada una de esas piezas asume un init real. El dia que algo no arranque vas a
+estar depurando el contenedor en vez del servicio.
+
+### Dimensiones
+
+Lo que carga la VM es PostgreSQL, Redis, Gunicorn (workers) y ~114 MB de
+estaticos que `collectstatic` reescribe en cada deploy.
+
+| Recurso | Recomendado | Minimo |
+| --- | --- | --- |
+| vCPU | 4 | 2 |
+| RAM | 8 GB | 4 GB |
+| Disco | 60 GB | 30 GB |
+
+Con 2 vCPU el primer `collectstatic` (hashear y comprimir en gzip+brotli) tarda
+varios minutos y el deploy se acerca al timeout de 30 min del workflow. No es
+solo lentitud: es margen que se pierde.
+
+El disco crece con `media/`, los PDFs que sube la gente y los backups de
+PostgreSQL. 60 GB no es capricho, es el punto donde un dump mensual todavia no
+duele.
+
+### Sistema y red
+
+- **Ubuntu 26.04 LTS**, x86_64. Es lo que se probo; el instalador asume `apt`.
+- **Zona horaria `America/Havana`**, igual que `TIME_ZONE` del proyecto. Si no
+  coinciden, las fechas de los avisos y los logs se leen en dos relojes
+  distintos.
+- **IP fija**, o reserva DHCP por MAC en el router. Una VM de produccion con IP
+  dinamica es un incidente esperando su turno.
+- **Nombre en DNS** que coincida **exactamente** con tres cosas: el
+  `EXTERNAL_HOSTNAME` del `.env`, el `PublicHostname` de `deploy.env` y el
+  `server_name` de Nginx. Si difieren, el health check entra con un nombre que
+  el sitio no reconoce y responde `DisallowedHost`.
+
+### Snapshot antes del primer `install.sh`
+
+Toma un snapshot de la VM recien creada y con la red configurada, **antes** de
+correr el instalador. Ese primer paso toca apt, crea usuarios, bases y vhosts:
+si sale mal a medias, volver al snapshot cuesta un minuto y volver a mano cuesta
+una tarde.
+
+### El punto que hay que decidir antes de encender el deploy
+
+Un runner hospedado de GitHub hace `ssh` **desde internet** al puerto 22 del
+servidor. Si la VM vive en la red de Proxmox, detras del firewall del CMT, el
+deploy automatico **no llega** — y eso no es un bug que se arregla en el
+workflow.
+
+Antes de crear `DEPLOY_ENABLED=true`, comprueba que existe el camino:
+
+```bash
+# desde una maquina fuera de la red del CMT
+nc -vz <host> 22
+ssh -p 22 deploy@<host> 'echo ok'
+```
+
+Si eso no responde, las opciones son las de **Lo que el workflow NO puede
+hacer**, y la buena noticia es que no bloquean nada: `webcmp-deploy` corre a
+mano en el servidor y hace exactamente el mismo procedimiento, con los mismos
+gates y el mismo rollback. Lo unico que pierdes es que se dispare solo.
+
+Por eso el orden es: **primero el sitio arriba y desplegable a mano; despues,
+si hay conectividad, el automatico.** Al reves se depura el sitio y el CI al
+mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
+
+### Checklist antes de instalar
+
+- [ ] VM creada (no LXC), Ubuntu 26.04, x86_64
+- [ ] 2 vCPU / 4 GB / 30 GB como piso; 4/8/60 si el portal va a tener trafico real
+- [ ] IP fija o reserva DHCP
+- [ ] Nombre en DNS resoluble desde donde se va a probar
+- [ ] Zona horaria `America/Havana`
+- [ ] Snapshot tomado
+- [ ] Puerto 22 alcanzable desde donde se va a correr el deploy (o decision explicita de desplegar a mano)
+
 ## Instalacion en el servidor (una vez)
 
 Hay dos caminos. El instalador es el que corresponde; el manual queda como
@@ -116,7 +201,7 @@ migraciones, estaticos, las dos unidades systemd, el vhost de Nginx y el
 Primero, ver que va a hacer, sin tocar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/orl92/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
     | sudo bash -s -- --dry-run
 ```
 
@@ -125,7 +210,7 @@ adivina en un pipe escribe el `.env` equivocado y nadie lo ve hasta que el sitio
 responde `DisallowedHost`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/orl92/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
     | sudo bash -s
 ```
 
