@@ -1,0 +1,36 @@
+{% if request.user.is_superuser %}
+  <div class="nav-item dropdown d-flex"
+       id="update-navbar"
+       data-status-url="{% url 'dashboard:update_status' %}"
+       data-request-url="{% url 'dashboard:update_request' %}"
+       data-csrf-token="{{ csrf_token }}">
+    <a href="#"
+       class="nav-link px-0 position-relative"
+       data-bs-toggle="dropdown"
+       data-bs-auto-close="outside"
+       aria-label="Actualizaciones del servidor">
+      <i class="icon ti ti-refresh"
+         id="update-navbar-icon"
+         data-bs-toggle="tooltip"
+         data-bs-placement="bottom"
+         title="Actualizaciones del servidor"></i>
+      <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle d-none"
+            id="update-navbar-badge"
+            aria-hidden="true"></span>
+    </a>
+    <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow"
+         style="min-width: 19rem">
+      <div class="px-3 py-2">
+        <div class="fw-bold" id="update-navbar-title">Actualizaciones</div>
+        <div class="text-secondary small mt-1" id="update-navbar-text">Comprobando…</div>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div class="px-3 pb-2">
+        <button type="button"
+                class="btn btn-sm btn-primary w-100 d-none"
+                id="update-navbar-button">Actualizar ahora</button>
+        <div class="text-secondary small mt-2" id="update-navbar-detail"></div>
+      </div>
+    </div>
+  </div>
+{% endif %}

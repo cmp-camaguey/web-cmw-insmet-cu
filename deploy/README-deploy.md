@@ -487,6 +487,83 @@ sudo /usr/local/sbin/webcmp-deploy <sha-o-rama>
 
 Desde GitHub, el boton **Run workflow** hace lo mismo y deja registro en Actions.
 
+## El boton "Actualizar" del panel
+
+Un superusuario ve en el **navbar del dashboard** un icono de refresco; cuando el
+servidor no esta en el ultimo commit de `main`, le aparece un punto rojo. Al
+abrirlo, el desplegable muestra el rango `deployed → latest` y el boton. Vive en el
+layout, asi que aparece en todas las paginas del dashboard, no solo en el index. El
+commit desplegado sale de `/etc/webcmp/deployed` (lo escribe `deploy.sh`), y el
+ultimo de `main` de un `git ls-remote` contra el repositorio publico: sin
+credenciales, sin clave y sin tocar el checkout.
+
+Lo que hace el boton **no** es desplegar. Escribe un archivo y se va:
+
+```
+Django (webcmp)  --escribe-->  /var/lib/webcmp/deploy-request
+                                        |
+                                systemd .path (PathExists=)
+                                        |
+                                        v
+                          webcmp-autodeploy (usuario: deploy)
+                                        |
+                              sudo -n /usr/local/sbin/webcmp-deploy <sha>
+                                        |
+                                        v
+                          escribe /var/lib/webcmp/deploy-status.json
+```
+
+Ese rodeo es la pieza de seguridad del cambio. `webcmp` tiene el shell en
+`/bin/false` y ningun sudo, a proposito. Darle sudo sobre `webcmp-deploy` convertiria
+cualquier RCE de Django en root; escribir un archivo no. `deploy` ya tenia la unica
+regla de sudoers que existe, y este cambio no le agrega ninguna.
+
+El ejecutor **no confia en el SHA del archivo**: lo resuelve el mismo con `git
+ls-remote` sobre `refs/heads/main`. Aunque el proceso web este comprometido y escriba
+lo que quiera, lo maximo que consigue es desplegar lo que ya esta en `main`.
+
+### Archivos y permisos
+
+| Ruta | Dueno | Modo |
+|---|---|---|
+| `/etc/webcmp/deployed` | `root:root` | 0644 |
+| `/var/lib/webcmp` | `deploy:webcmp` | 2775 |
+| `/var/lib/webcmp/deploy-request` | `webcmp:webcmp` | 0644 |
+| `/var/lib/webcmp/deploy-status.json` | `deploy:webcmp` | 0644 |
+| `/usr/local/sbin/webcmp-autodeploy` | `root:root` | 0755 |
+
+El 2775 del directorio lleva setgid a proposito: hace que el archivo de peticion y
+el de estado nazcan con grupo `webcmp` los escriba quien los escriba, asi que cada
+lado puede leer lo que escribio el otro.
+
+`install.sh` crea todo esto en `setup_autodeploy()`. Si se corre con
+`--skip-deploy-scaffold`, el boton no se instala (necesita el usuario `deploy`).
+
+### Apagarlo
+
+```bash
+sudo systemctl disable --now webcmp-autodeploy.path
+sudo rm -f /var/lib/webcmp/deploy-request
+```
+
+A partir de ahi el dashboard sigue mostrando el aviso, pero la peticion queda en
+disco y nadie la recoge. El deploy por workflow y el manual no se tocan.
+
+### Diagnosticar
+
+```bash
+systemctl status webcmp-autodeploy.path
+journalctl -u webcmp-autodeploy -n 50
+cat /var/lib/webcmp/deploy-status.json
+cat /etc/webcmp/deployed
+```
+
+Si el panel se queda en "Desplegando..." para siempre, el ejecutor murio antes de
+escribir `failed`. Pasada una hora el panel deja de creer ese estado
+(`RUN_STALE_SECONDS`) y vuelve a mostrar el aviso con el boton; el estado crudo
+sigue en el archivo. La fuente de verdad es `journalctl`, no el panel.
+
+
 ## Lo que el workflow NO puede hacer
 
 Un runner hospedado de GitHub Actions hace `ssh` por el puerto 22. Si el servidor

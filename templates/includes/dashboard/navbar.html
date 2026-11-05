@@ -10,9 +10,10 @@
             aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
     </button>
-    <div class="navbar-nav flex-row order-md-last">
+    <div class="navbar-nav flex-row order-md-last gap-2">
+      {% include 'includes/dashboard/update_navbar.html' %}
       <!-- Tema Claro|Oscuro -->
-      <div class="d-none d-md-flex">
+      <div class="nav-item d-none d-md-flex">
         <a href="?theme=dark"
            class="nav-link px-0 hide-theme-dark"
            title="Habilitar el modo oscuro"

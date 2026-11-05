@@ -14,9 +14,9 @@
     <a class="navbar-brand navbar-brand-autodark"
        href="{% url 'home:landing' %}"
        aria-label="Ir al inicio">{% include 'includes/logo.html' with class='navbar-brand-image' %}</a>
-    <div class="navbar-nav flex-row order-md-last">
+    <div class="navbar-nav flex-row order-md-last gap-2">
       <!-- Tema Claro|Oscuro -->
-      <div class="d-none d-md-flex">
+      <div class="nav-item d-none d-md-flex">
         <a href="?theme=dark"
            class="nav-link px-0 hide-theme-dark"
            title="Habilitar el modo oscuro"

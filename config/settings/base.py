@@ -482,3 +482,23 @@ LOGGING = {
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# --- Actualizaciones desde el panel (change 025-update-web-deploy) ----------
+# El chequeo lee el repo publico con `git ls-remote` sobre HTTPS: sin
+# credenciales y sin escribir nada en el checkout del servidor.
+UPDATE_REPO_URL = os.getenv(
+    'UPDATE_REPO_URL', 'https://github.com/cmp-camaguey/web-cmw-insmet-cu.git'
+)
+UPDATE_BRANCH_REF = os.getenv('UPDATE_BRANCH_REF', 'refs/heads/main')
+# `deploy.sh` escribe aca el commit que quedo sirviendo (una linea, 0644).
+UPDATE_DEPLOYED_SHA_FILE = os.getenv('UPDATE_DEPLOYED_SHA_FILE', '/etc/webcmp/deployed')
+# El usuario de despliegue escribe aca el estado del ultimo intento (JSON).
+UPDATE_STATUS_FILE = os.getenv('UPDATE_STATUS_FILE', '/var/lib/webcmp/deploy-status.json')
+# El panel escribe la peticion; una unidad systemd .path la recoge al aparecer.
+UPDATE_REQUEST_FILE = os.getenv('UPDATE_REQUEST_FILE', '/var/lib/webcmp/deploy-request')
+# Cuanto dura el resultado de `git ls-remote` en cache, y cuanto se espera al
+# remoto. El panel es de administracion: 5 minutos de cache evitan que cada
+# visita al dashboard abra una conexion, y 8 segundos acotan lo que puede
+# bloquear una peticion cuando GitHub no responde.
+UPDATE_CHECK_TTL = int(os.getenv('UPDATE_CHECK_TTL', '300'))
+UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '8'))
