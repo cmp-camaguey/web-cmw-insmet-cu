@@ -1,0 +1,23 @@
+[Unit]
+Description=Despliegue pedido desde el panel (change 025-update-web-deploy)
+Documentation=file:/srv/webcmp/deploy/README-deploy.md
+# La red tiene que estar arriba: el script resuelve refs/heads/main con
+# git ls-remote antes de desplegar.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# El usuario de despliegue, no root. Tiene UNA regla de sudoers
+# (/usr/local/sbin/webcmp-deploy) y este script no pide ninguna otra.
+User=deploy
+# El grupo del servicio: /var/lib/webcmp es deploy:webcmp, y el estado que este
+# script escribe tiene que poder leerlo el proceso web.
+Group=webcmp
+ExecStart=/usr/local/sbin/webcmp-autodeploy
+# Un deploy con collectstatic en un contenedor de 2 vCPU ronda los 10 minutos.
+# 45 es margen de sobra y evita que systemd mate a mitad de un `migrate`.
+TimeoutStartSec=45min
+# Si falla, el estado ya quedo escrito como `failed` y el panel lo muestra. No
+# se reintenta solo: un reintento automatico de una migracion rota es un bucle.
+Restart=no

@@ -1,0 +1,13 @@
+[Unit]
+Description=Vigila la peticion de despliegue del panel (change 025-update-web-deploy)
+Documentation=file:/srv/webcmp/deploy/README-deploy.md
+
+[Path]
+# El panel (usuario `webcmp`) crea este archivo y se desentiende; systemd lo
+# recoge y arranca el servicio. Es la pieza que convierte un boton web en un
+# despliegue sin darle sudo al proceso web y sin abrir un endpoint publico.
+PathExists=/var/lib/webcmp/deploy-request
+Unit=webcmp-autodeploy.service
+
+[Install]
+WantedBy=multi-user.target
