@@ -24,7 +24,7 @@ repos:
         exclude: "static/|staticfiles/|\\.secrets\\.baseline$|.*\\.min\\.js$|.*\\.map$"
 
   - repo: https://github.com/djlint/djlint
-    rev: v1.47.1
+    rev: v1.49.9
     hooks:
       - id: djlint-django
       - id: djlint-reformat-django
