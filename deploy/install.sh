@@ -1297,7 +1297,9 @@ echo "  distro: $PRETTY_NAME ($DISTRO_ID)"
 
 command -v apt-get >/dev/null 2>&1 || die "apt-get no esta disponible."
 command -v openssl >/dev/null 2>&1 || warn "openssl no esta: se necesita para el certificado autofirmado."
-command -v curl >/dev/null 2>&1 || warn "curl no esta: se necesita para certbot y para el health check."
+# curl se instala con APT_PACKAGES (el health check de cada deploy depende de el),
+# asi que aca no se avisa: un aviso que dice "falta curl" y trescientas lineas
+# despues lo instala entrena al operador a ignorar los avisos.
 
 # Python >= MIN_PYTHON. El motivo concreto esta en el comment de MIN_PYTHON
 # arriba; aca solo se traduce a un error que lo dice.
@@ -1661,6 +1663,12 @@ APT_PACKAGES=(
     git
     sudo
     ca-certificates
+    # curl NO es opcional ni decorativo: `webcmp-deploy` lo usa en el health
+    # check de CADA deploy, y sin el el deploy muere al final con un `000` que
+    # no dice "falta curl". Antes solo se avisaba en el preflight y se asumia
+    # que la imagen lo traia -- en un contenedor minimo no lo trae, y el
+    # instalador terminaba en verde con un deploy roto.
+    curl
     openssl
     python3
     python3-venv
