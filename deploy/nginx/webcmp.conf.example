@@ -48,9 +48,9 @@ server {
 server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
-    ssl_certificate /etc/nginx/certificate/web.cmw.insmet.cu.crt;
-    ssl_certificate_key /etc/nginx/certificate/web.cmw.insmet.cu.key;
-    server_name web.cmw.insmet.cu;
+    ssl_certificate /etc/nginx/certificate/www.meteocamaguey.cu.crt;
+    ssl_certificate_key /etc/nginx/certificate/www.meteocamaguey.cu.key;
+    server_name www.meteocamaguey.cu;
     access_log /var/log/nginx/webcmp-access.log;
     error_log /var/log/nginx/webcmp-error.log;
 

@@ -435,8 +435,8 @@ servidor no lo escucha nadie y el health check fallaria siempre.
 
 ```bash
 # En /etc/webcmp/deploy.env, solo con PROXY_MODE=external
-HEALTHCHECK_URL=http://web.cmw.insmet.cu/
-HEALTHCHECK_RESOLVE=web.cmw.insmet.cu:80:127.0.0.1
+HEALTHCHECK_URL=http://www.meteocamaguey.cu/
+HEALTHCHECK_RESOLVE=www.meteocamaguey.cu:80:127.0.0.1
 ```
 
 `webcmp-deploy --configure` reescribe ese archivo preguntando lo mismo, y
@@ -480,7 +480,7 @@ sudo chown webcmp:webcmp /srv/webcmp/.env     # Django corre como webcmp
 sudo chmod 600 /srv/webcmp/.env
 ```
 
-Ahi va el hostname real: el generador escribe `EXTERNAL_HOSTNAME=cmw.insmet.cu` por
+Ahi va el hostname real: el generador escribe `EXTERNAL_HOSTNAME=www.meteocamaguey.cu` por
 default y no tiene flag para cambiarlo, asi que `EXTERNAL_HOSTNAME`,
 `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` y `CORS_ALLOWED_ORIGINS` hay que
 editarlos a mano. Si no, el sitio responde `DisallowedHost` a cada peticion.

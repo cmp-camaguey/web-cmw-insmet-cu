@@ -1310,15 +1310,27 @@ fi
 
 step 1 "Configuracion (todo tiene default; Enter para conservarlo)"
 
-EXTERNAL_HOSTNAME=$(ask PUBLIC_HOSTNAME "${PUBLIC_HOSTNAME:-meteocamaguey.cu}" \
+EXTERNAL_HOSTNAME=$(ask PUBLIC_HOSTNAME "${PUBLIC_HOSTNAME:-www.meteocamaguey.cu}" \
     'Dominio publico del sitio (EXTERNAL_HOSTNAME del .env, server_name de Nginx, SNI del health check)' \
     valid_hostname) || die 'Dominio invalido.'
 
-USE_WWW=$(ask_one_of USE_WWW si 'Sirve tambien en www?' \
-    'si: anade www.<dominio> al vhost, al ALLOWED_HOSTS y al certificado' \
-    'no: solo el dominio sin www') || die 'Opcion invalida.'
+# El alias se CALCULA, no se prefija. Con un canonico que ya es `www.x`,
+# `www.$EXTERNAL_HOSTNAME` daria `www.www.x`: un nombre que no existe en DNS y
+# que hace fallar la emision del certificado con un error de validacion de
+# dominio. En ese caso el alias es el dominio sin `www`, y el default es `no`
+# porque la URL publicada es la que lleva `www`.
+if [[ "$EXTERNAL_HOSTNAME" == www.* ]]; then
+    ALIAS_HOSTNAME=${EXTERNAL_HOSTNAME#www.}
+    ALIAS_DEFAULT=no
+else
+    ALIAS_HOSTNAME=www.$EXTERNAL_HOSTNAME
+    ALIAS_DEFAULT=si
+fi
+USE_WWW=$(ask_one_of USE_WWW "$ALIAS_DEFAULT" "Sirve tambien en $ALIAS_HOSTNAME?" \
+    "si: anade $ALIAS_HOSTNAME al vhost, al ALLOWED_HOSTS y al certificado" \
+    'no: solo el dominio publico') || die 'Opcion invalida.'
 if [ "$USE_WWW" = si ]; then
-    WWW_HOSTNAME=www.$EXTERNAL_HOSTNAME
+    WWW_HOSTNAME=$ALIAS_HOSTNAME
 else
     WWW_HOSTNAME=
 fi
@@ -2436,9 +2448,9 @@ render_vhost() {
         "/srv/webcmp<>$APP_DIR"
         "/run/webcmp/gunicorn.sock<>$GUNICORN_SOCKET"
         "/var/www/webcmp-errors<>$NGINX_ERROR_ROOT"
-        "/etc/nginx/certificate/web.cmw.insmet.cu.crt<>$TLS_CERT"
-        "/etc/nginx/certificate/web.cmw.insmet.cu.key<>$TLS_KEY"
-        "server_name web.cmw.insmet.cu;<>$SERVER_NAME_LINE"
+        "/etc/nginx/certificate/www.meteocamaguey.cu.crt<>$TLS_CERT"
+        "/etc/nginx/certificate/www.meteocamaguey.cu.key<>$TLS_KEY"
+        "server_name www.meteocamaguey.cu;<>$SERVER_NAME_LINE"
         "listen 80 default_server;<>listen $HTTP_PORT default_server;"
         "listen [::]:80 default_server;<>listen [::]:$HTTP_PORT default_server;"
         "listen 443 ssl default_server;<>listen $HTTPS_PORT ssl default_server;"
@@ -3136,7 +3148,7 @@ elif [ "$PROXY_MODE" = external ]; then
     PROTOCOL_SCHEME=${PROTOCOL_SCHEME:-https}
 fi
 if [ "$DRY_RUN" -eq 0 ]; then
-    printf '       %s://%s/\n\n' "${PROTOCOL_SCHEME:-http}" "${PUBLIC_HOSTNAME:-meteocamaguey.cu}"
+    printf '       %s://%s/\n\n' "${PROTOCOL_SCHEME:-http}" "${PUBLIC_HOSTNAME:-www.meteocamaguey.cu}"
 fi
 
 if [ "$DRY_RUN" -eq 0 ] && [ "$INTERACTIVE" -eq 1 ] && [ "${#ANSWER_SOURCES[@]}" -gt 0 ]; then

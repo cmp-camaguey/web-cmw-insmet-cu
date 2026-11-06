@@ -3,7 +3,7 @@
 Sistema web del **Centro Meteorológico Provincial Camagüey** (CMP): portal público
 meteorológico, panel administrativo y API REST para terceros.
 
-**Producción:** [https://web.cmw.insmet.cu](https://web.cmw.insmet.cu)
+**Producción:** [https://www.meteocamaguey.cu](https://www.meteocamaguey.cu)
 
 Django 5.2 + Django REST Framework sobre PostgreSQL, interfaz con
 [Tabler](https://tabler.io/), servidor Gunicorn detrás de Nginx y un worker de Huey
@@ -546,7 +546,7 @@ que poder leerlo. La `ENCRYPTION_KEY` queda en root y el `.env` en 600: entrar a
 grupo `webcmp` (lo necesita Nginx, ver el paso 5) no da acceso a ninguna de las dos.
 
 Después de generar el `.env` hay que **cambiar el hostname**: el generador escribe
-`EXTERNAL_HOSTNAME=cmw.insmet.cu` por default y no tiene flag para pasarlo, así
+`EXTERNAL_HOSTNAME=www.meteocamaguey.cu` por default y no tiene flag para pasarlo, así
 que hay que editar a mano `EXTERNAL_HOSTNAME`, `ALLOWED_HOSTS`,
 `CSRF_TRUSTED_ORIGINS` y `CORS_ALLOWED_ORIGINS`. Si no, el sitio responde
 `DisallowedHost` a cada petición.
@@ -763,7 +763,7 @@ sudo systemd-run --pipe --wait --uid=webcmp \
   -p Environment=PRODUCTION=1 --working-directory=/srv/webcmp \
   /srv/webcmp/.venv/bin/python manage.py check --deploy
 
-curl -I https://web.cmw.insmet.cu
+curl -I https://www.meteocamaguey.cu
 ```
 
 `check --deploy` tiene que salir con 0 issues. Lo único tolerado es `security.W008` (el
@@ -848,8 +848,8 @@ esta máquina. Con proxy externo hay que cambiarlos, porque el 443 de acá no lo
 escucha nadie:
 
 ```bash
-HEALTHCHECK_URL=http://web.cmw.insmet.cu/
-HEALTHCHECK_RESOLVE=web.cmw.insmet.cu:80:127.0.0.1
+HEALTHCHECK_URL=http://www.meteocamaguey.cu/
+HEALTHCHECK_RESOLVE=www.meteocamaguey.cu:80:127.0.0.1
 ```
 
 Así el health check atraviesa el Nginx local —vhost, `/media/` y socket
