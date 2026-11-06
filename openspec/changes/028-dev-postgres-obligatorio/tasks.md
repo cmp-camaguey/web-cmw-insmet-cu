@@ -41,7 +41,8 @@
 
 - [x] 6.1 Tests focalizados en verde sobre PostgreSQL
 - [x] 6.2 Suite completa sobre PostgreSQL (1472 tests OK)
-- [ ] 6.3 PR a `dev` (draft hasta que entre `v0.1.2`)
+- [x] 6.3 PR a `dev` (draft hasta que entre `v0.1.2`) — hecho: PR #133, squash
+      `d5febab`
 - [x] 6.4 `.env` local apuntado a PostgreSQL, `add_stations_data` ejecutado (6
       estaciones) y superusuario creado por el desarrollador
 - [ ] 6.5 `gentle-ai sdd-archive` cuando esté en `main`

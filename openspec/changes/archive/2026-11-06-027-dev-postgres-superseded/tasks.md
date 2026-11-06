@@ -1,5 +1,11 @@
 # 027-dev-postgres — tareas
 
+> **Estado: SUSTITUIDO por `028-dev-postgres-obligatorio`.** Las casillas sin
+> marcar no son trabajo pendiente: se resolvieron dentro de 028 (rol y base
+> `webcmp_dev`, `migrate` y suite completa sobre PostgreSQL) o quedaron sin
+> objeto al eliminarse `DEV_USE_DB_ENGINE`. Se dejan como estaban para no
+> reescribir el registro.
+
 ## 1. Perfil `dev`
 
 - [x] 1.1 `DEV_USE_DB_ENGINE` en `config/settings/dev.py`; sin el flag, SQLite
