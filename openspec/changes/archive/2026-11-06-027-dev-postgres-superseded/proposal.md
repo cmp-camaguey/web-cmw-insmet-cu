@@ -1,5 +1,14 @@
 # 027-dev-postgres
 
+> **Estado: SUSTITUIDO por `028-dev-postgres-obligatorio`.** 027 dejaba
+> PostgreSQL detrás de `DEV_USE_DB_ENGINE=True` y SQLite como default. 028 quitó
+> el flag y retiró SQLite de los tres perfiles (PR #133, `d5febab`), así que lo
+> que 027 proponía ya no existe en el código y sus tareas pendientes quedaron
+> cubiertas o sin objeto. Se archiva como historia, no como trabajo por hacer.
+>
+> El texto de abajo se conserva tal como estaba, incluida la línea siguiente, que
+> describe el estado anterior a 028.
+
 > **Estado: implementado en la rama `feat/dev-postgres`.** No cambia el
 > comportamiento por defecto de desarrollo: SQLite sigue ganando sin opt-in.
 
