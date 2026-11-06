@@ -263,6 +263,50 @@ Por eso el orden es: **primero el sitio arriba y desplegable a mano; despues,
 si hay conectividad, el automatico.** Al reves se depura el sitio y el CI al
 mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
 
+### Topologia con Nginx Proxy Manager externo
+
+El caso del proveedor: NPM corre en Docker **en otra maquina** y termina TLS
+ahi. `install.sh` lo soporta con `PROXY_MODE=external`, y esa opcion **si
+instala Nginx en el LXC**:
+
+```text
+Navegador --https--> NPM (otra maquina) --http--> LXC:80 Nginx --> socket unix --> Gunicorn
+```
+
+El Nginx del contenedor no es un lujo: es el unico que puede servir `/media/` y
+`/static/` desde ese filesystem. Django no sirve media con `DEBUG=False` y
+WhiteNoise solo sirve `staticfiles`, asi que sin el Nginx, el logo, el favicon y
+cada PDF subido dan 404 mientras el resto del sitio "funciona". Gunicorn sigue
+escuchando **solo** en el socket unix: no se expone en la red en ninguna de las
+dos topologias.
+
+Lo que se configura en NPM:
+
+| Campo | Valor |
+| --- | --- |
+| Scheme | `http` (NPM habla HTTP con el LXC; el TLS lo pone el) |
+| Forward Hostname / IP | IP de LAN del LXC |
+| Forward Port | puerto HTTP del instalador (80 por defecto) |
+| Websockets Support | on (el grafico de sounding las usa) |
+| SSL | Let's Encrypt en NPM; el dominio tiene que resolver a NPM |
+
+No hacen falta Custom Locations ni headers extra: el `X-Forwarded-Proto` que
+manda NPM lo **propaga** el vhost HTTP (`map`), no lo reescribe con `$scheme`.
+Si lo reescribiera, Django no veria la peticion como segura y el login entraria
+en un bucle de logout sin un solo error en el log.
+
+El puerto HTTP del LXC tiene que quedar alcanzable **solo** desde la maquina del
+NPM. El instalador no toca el firewall y lo imprime como advertencia:
+
+```bash
+sudo ufw allow from <IP_DEL_NPM> to any port 80 proto tcp
+sudo ufw deny 80/tcp
+```
+
+El health check del deploy atraviesa ese Nginx por HTTP (`HEALTHCHECK_URL` +
+`HEALTHCHECK_RESOLVE` a `127.0.0.1:$HTTP_PORT`), asi que un vhost roto o un
+`/media/` sin servir no quedan en verde.
+
 ### Checklist antes de instalar
 
 - [ ] Contenedor LXC creado (sin privilegios, sin `nesting`), x86_64
@@ -275,6 +319,8 @@ mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
 - [ ] Zona horaria `America/Havana`
 - [ ] Snapshot `pre-install` tomado
 - [ ] Puerto 22 alcanzable desde donde se va a correr el deploy (o decision explicita de desplegar a mano)
+- [ ] Topologia de proxy decidida: TLS en Nginx local (`nginx-local`) o en un NPM externo (`external`)
+- [ ] Con NPM externo: IP o subred del NPM, para limitar el firewall del puerto HTTP del LXC
 
 ## Instalacion en el servidor (una vez)
 
@@ -381,12 +427,17 @@ sudo systemctl restart nginx     # reinicio, no reload: los grupos se leen al
                                   # crear los workers
 ```
 
-El `deploy.env` del camino manual sale de `deploy.env.example`, que ya trae los
-mismos `HEALTHCHECK_*` que escribe el instalador: `HEALTHCHECK_URL`,
-`HEALTHCHECK_RESOLVE`, `HEALTHCHECK_UNIX_SOCKET`, `HEALTHCHECK_HOST_HEADER` y
-`HEALTHCHECK_INSECURE`. Para el proxy externo (opcion B), el health check va al
-socket unix y no a `https://`; para Nginx local, a `https://` con
-`HEALTHCHECK_RESOLVE` apuntando a `127.0.0.1`.
+El `deploy.env` del camino manual sale de `deploy.env.example`, que **no define
+ninguna `HEALTHCHECK_*`**. Sin ellas el health check va al 443 de `127.0.0.1`
+con el SNI de `PUBLIC_HOSTNAME`, que es lo correcto con Nginx local y TLS en
+esta maquina. Con proxy externo hay que agregarlas a mano: el 443 de este
+servidor no lo escucha nadie y el health check fallaria siempre.
+
+```bash
+# En /etc/webcmp/deploy.env, solo con PROXY_MODE=external
+HEALTHCHECK_URL=http://web.cmw.insmet.cu/
+HEALTHCHECK_RESOLVE=web.cmw.insmet.cu:80:127.0.0.1
+```
 
 `webcmp-deploy --configure` reescribe ese archivo preguntando lo mismo, y
 `webcmp-deploy --check` valida la configuracion sin desplegar nada.

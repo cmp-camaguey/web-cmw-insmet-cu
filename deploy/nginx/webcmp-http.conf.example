@@ -1,0 +1,116 @@
+# Configuracion de Nginx para el portal del CMP Camaguey DETRAS DE UN PROXY
+# EXTERNO que termina TLS (Nginx Proxy Manager en otra maquina).
+#
+# Este archivo NO hace TLS. Escucha HTTP y cumple dos funciones que el proxy
+# externo no puede cumplir desde otra maquina:
+#
+#   1. Servir /media/ y /static/ desde el filesystem del checkout.
+#      Django no sirve media/ con DEBUG=False (config/urls.py solo agrega esa
+#      ruta si DEBUG_TOOLBAR_ENABLED), y WhiteNoise solo sirve staticfiles.
+#      Sin este vhost, el logo y el favicon de TODAS las paginas dan 404, igual
+#      que los PDFs de avisos, contratos, certificados y publicaciones.
+#
+#   2. Hacer de proxy local a Gunicorn por el socket unix, para que Gunicorn
+#      no tenga que escuchar en la red.
+#
+#   Navegador --https--> NPM (otra maquina) --http--> este Nginx --> socket unix
+#
+# Instalado por deploy/install.sh con PROXY_MODE=external. Si se instala a mano:
+#
+#   sudo cp deploy/nginx/webcmp-http.conf.example /etc/nginx/sites-available/webcmp.conf
+#   sudo ln -s /etc/nginx/sites-available/webcmp.conf /etc/nginx/sites-enabled/
+#   sudo usermod -aG webcmp www-data
+#   sudo systemctl restart nginx      # restart, no reload: los grupos se leen al
+#                                     # crear los workers
+#
+# El directorio del proxy_cache_path NO lo crea Nginx: su mkdir() no es
+# recursivo y si falta el padre, `nginx -t` muere con
+# `mkdir() "/cache/nginx/tmpfs" failed (2: No such file or directory)`.
+#
+#   sudo mkdir -p /cache/nginx/tmpfs && sudo chown www-data:www-data /cache/nginx/tmpfs
+#
+# www-data TIENE que estar en el grupo webcmp: el socket sale 0770
+# webcmp:webcmp y sin el grupo cada respuesta es 502 con
+# "connect() failed (13: Permission denied)" en el log.
+
+proxy_cache_path /cache/nginx/tmpfs levels=1:2 keys_zone=webcmp:100m max_size=100m inactive=3h use_temp_path=off;
+
+# EL DETALLE QUE ROMPE EL LOGIN SI SE COPIA MAL.
+#
+# El vhost de nginx-local hace `proxy_set_header X-Forwarded-Proto $scheme`.
+# Aca $scheme es `http`, y ese header SOBREESCRIBE el `https` que manda NPM.
+# Django dejaria de ver la peticion como segura, SECURE_PROXY_SSL_HEADER no
+# haria match, las cookies de sesion y CSRF SECURE no se enviarian y el usuario
+# entraria en un bucle de logout sin un solo error en el log.
+#
+# `map` propaga el valor recibido y cae a $scheme solo cuando NO viene header,
+# que es el caso de alguien entrando directo por la LAN (nunca el de produccion).
+map $http_x_forwarded_proto $webcmp_forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
+upstream webcmp {
+    server unix:/run/webcmp/gunicorn.sock fail_timeout=0;
+}
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name web.cmw.insmet.cu;
+
+    access_log /var/log/nginx/webcmp-access.log;
+    error_log /var/log/nginx/webcmp-error.log;
+
+    # Mismos headers que el vhost con TLS, con el proto del map en lugar de
+    # $scheme. Se repiten en `location /` porque Nginx descarta los del nivel
+    # padre en cuanto la location declara uno propio (ver el comentario largo de
+    # deploy/nginx/webcmp.conf.example).
+    proxy_set_header X-Forwarded-Proto $webcmp_forwarded_proto;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_redirect off;
+
+    # 300s: la exportacion de graficos y los PDFs server-side tardan. Con el
+    # default de 60s, un pronostico largo se ve como un 504.
+    proxy_read_timeout 300s;
+    proxy_connect_timeout 75s;
+
+    client_max_body_size 20M;  # adjuntos PDF de avisos y reportes
+
+    location /media/  {
+        alias /srv/webcmp/media/;
+    }
+
+    location /static/ {
+        alias /srv/webcmp/staticfiles/;
+    }
+
+    location /static/admin/ {
+        alias /srv/webcmp/staticfiles/admin/;
+    }
+
+    location / {
+        proxy_pass http://webcmp;
+
+        # Repetidos a proposito: si se borran de aca, Django vuelve a rechazar
+        # el Host y el sitio entero responde 400 sin que Nginx registre error.
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $webcmp_forwarded_proto;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+
+        # Requerido por las websockets del grafico de sounding.
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # Pagina de error estatica: 502/503/504 los genera este Nginx cuando
+    # Gunicorn no responde, momento en que Django tampoco puede dibujar nada.
+    error_page 502 503 504 /50x.html;
+
+    location = /50x.html {
+        internal;
+        root /var/www/webcmp-errors;
+    }
+}
