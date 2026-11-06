@@ -148,6 +148,10 @@ opciones son agregar el PPA de deadsnakes al contenedor o compilar Python a mano
 Las dos funcionan, las dos son trabajo extra que se evita eligiendo bien el
 template.
 
+Por la misma razon los workflows de CI fijan `runs-on: ubuntu-26.04`. Correr
+`check --deploy` y los tests en otra imagen valida un sistema que no es el que
+sirve el sitio, y el verde no dice nada sobre el servidor real.
+
 ### Crear el contenedor
 
 Ajusta storage (`local-zfs`), red y el nombre del template a lo que liste
