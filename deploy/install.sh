@@ -2946,11 +2946,16 @@ step 1 "Configuracion del deploy en $CONFIG_FILE"
 # default se aplique) hace que la config de un servidor nuevo sea invisible:
 # nadie puede ver de donde sale el host del health check.
 if [ "$CONFIG_FILE_EXISTS" -eq 1 ]; then
+    # Las ramas estaban INVERTIDAS: responder "si" a "Actualizar ..." dejaba
+    # CONFIG_WRITTEN=0 y avisaba "se conserva", asi que la unica forma de que el
+    # archivo se reescribiera era responder que NO. En una re-corrida donde se
+    # cambio PUBLIC_HOSTNAME, el health check seguia apuntando al host viejo y el
+    # deploy fallaba con el sitio perfecto.
     if ask_yes_no no "Actualizar $CONFIG_FILE con lo respondido?"; then
-        warn "$CONFIG_FILE se conserva. Si el health check falla, empeza por ese archivo."
-        CONFIG_WRITTEN=0
-    else
         CONFIG_WRITTEN=1
+    else
+        CONFIG_WRITTEN=0
+        warn "$CONFIG_FILE se conserva. Si el health check falla, empeza por ese archivo."
     fi
 else
     CONFIG_WRITTEN=1

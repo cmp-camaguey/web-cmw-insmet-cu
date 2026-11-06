@@ -326,11 +326,21 @@ Dos formas de validar el login sin el NPM:
 
 ```bash
 systemctl status webcmp webcmp-huey --no-pager
-curl -sI http://127.0.0.1/ | head -1
+
+# El Host importa: ALLOWED_HOSTS lleva solo el dominio, asi que un pedido con
+# Host: 127.0.0.1 lo rechaza Django con 400 y Nginx no registra nada. Es el
+# mismo motivo por el que el health check usa --resolve.
+H='Host: www.meteocamaguey.cu'
+
+curl -sI -H "$H" http://127.0.0.1/ | head -1
+curl -s -o /dev/null -w '%{http_code}\n' -H "$H" http://127.0.0.1/api/doc/
+# Los estaticos los sirve Nginx, no Django: aca el Host da igual.
 curl -s -o /dev/null -w '%{http_code}\n' \
     http://127.0.0.1/static/dist/css/tabler.min.css
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/api/doc/
 ```
+
+`/api/doc/` tiene que dar `200` y `/` un `200` o `302`. Un `400` en los dos es
+`ALLOWED_HOSTS`, no un deploy roto.
 
 ### Checklist antes de instalar
 
