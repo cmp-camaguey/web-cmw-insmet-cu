@@ -16,10 +16,18 @@ permissions:
   contents: read
   pull-requests: read
 
+# El runner va fijado a Ubuntu 26.04 porque es el SO de produccion, no por
+# novedad: `install.sh` exige Python 3.14 (PEP 758 en scripts/generate_env.py) y
+# 26.04 lo trae de fabrica mientras 24.04 trae 3.12. Validar `check --deploy` en
+# una imagen distinta a la del servidor da un verde que no significa nada.
+#
+# Fijado y no `ubuntu-latest` porque ese label migra cuando GitHub lo decide: con
+# el pin, cambiar el default no mueve el CI por sorpresa. Mismo criterio en todos
+# los workflows.
 jobs:
   detect:
     name: Detect affected apps
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       meteo: ${{ steps.paths.outputs.meteo }}
       api: ${{ steps.paths.outputs.api }}
@@ -31,9 +39,9 @@ jobs:
       publications: ${{ steps.paths.outputs.publications }}
       full: ${{ steps.paths.outputs.full }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: paths
         with:
           filters: |
@@ -57,11 +65,11 @@ jobs:
   test:
     name: Tests (Django)
     needs: detect
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -106,11 +114,11 @@ jobs:
 
   deploy-check:
     name: Deploy check (check --deploy)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -138,11 +146,11 @@ jobs:
 
   lint:
     name: Lint (Ruff)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -158,11 +166,11 @@ jobs:
 
   security:
     name: Security (pip-audit + migrations)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -185,11 +193,11 @@ jobs:
 
   templates:
     name: Templates (djlint)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -208,11 +216,11 @@ jobs:
 
   precommit:
     name: Pre-commit hooks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip

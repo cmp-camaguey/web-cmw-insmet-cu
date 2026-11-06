@@ -63,6 +63,9 @@ SERVICE_GROUP=${SERVICE_GROUP:-$SERVICE_USER}
 SERVICE_SHELL=${SERVICE_SHELL:-/usr/sbin/nologin}
 DEPLOY_LOGIN_USER=${DEPLOY_LOGIN_USER:-deploy}
 SCRIPT_PATH=${SCRIPT_PATH:-/usr/local/sbin/webcmp-deploy}
+# Ejecutor del boton "Actualizar" del panel (change 025-update-web-deploy).
+AUTODEPLOY_SCRIPT=${AUTODEPLOY_SCRIPT:-/usr/local/sbin/webcmp-autodeploy}
+AUTODEPLOY_STATE_DIR=${AUTODEPLOY_STATE_DIR:-/var/lib/webcmp}
 CONFIG_DIR=${CONFIG_DIR:-/etc/webcmp}
 CONFIG_FILE=${CONFIG_FILE:-$CONFIG_DIR/deploy.env}
 ENCRYPTION_ENV=${ENCRYPTION_ENV:-$CONFIG_DIR/encryption.env}
@@ -86,6 +89,8 @@ vhost_src=$APP_DIR/deploy/nginx/webcmp.conf.example
 # vhost de Nginx, el health check de deploy.sh y el unit.
 GUNICORN_UNIT=${GUNICORN_UNIT:-webcmp}
 HUEY_UNIT=${HUEY_UNIT:-webcmp-huey}
+# El .path se habilita y vigila; el .service lo arranca systemd, nunca a mano.
+AUTODEPLOY_UNIT=${AUTODEPLOY_UNIT:-webcmp-autodeploy}
 GUNICORN_SOCKET=${GUNICORN_SOCKET:-/run/$GUNICORN_UNIT/gunicorn.sock}
 
 # scripts/generate_env.py usa PEP 758 (except sin parentesis, `except A, B:`),
@@ -2948,10 +2953,88 @@ $pubkey
 EOF
 }
 
+# --- C.11b Boton "Actualizar" del panel (change 025-update-web-deploy) ------
+#
+# Tres piezas, cada una con el privilegio minimo que necesita:
+#
+#   /var/lib/webcmp             deploy:webcmp 2775 -> el panel escribe la
+#                               peticion, el ejecutor escribe el estado, y
+#                               ninguno de los dos necesita privilegios extra.
+#   webcmp-autodeploy.path      systemd observa el archivo y arranca el
+#                               servicio cuando aparece.
+#   webcmp-autodeploy.service   corre como el usuario de despliegue, que ya
+#                               tiene la UNICA regla de sudoers existente.
+#
+# El proceso web (`webcmp`, shell /bin/false) jamas ejecuta nada: escribe un
+# archivo. Esa es la razon de todo el diseno, y por eso este cambio no agrega ni
+# una linea de sudoers ni un endpoint que ejecute comandos.
+setup_autodeploy() {
+    local tmp
+
+    log "Boton 'Actualizar' del panel (ejecutor: $DEPLOY_LOGIN_USER)"
+
+    # 2775 y no 0755: el proceso web tiene que PODER crear el archivo de
+    # peticion dentro. El bit setgid (el 2) hace que el archivo nazca con grupo
+    # $SERVICE_GROUP lo cree quien lo cree, asi que el ejecutor puede borrar la
+    # peticion que escribio webcmp y el panel puede leer el estado que escribio
+    # deploy. Sin el, cada lado crea archivos que el otro no puede tocar.
+    ensure_dir "$AUTODEPLOY_STATE_DIR" 2775 "$DEPLOY_LOGIN_USER" "$SERVICE_GROUP"
+
+    if [ -f "$APP_DIR/deploy/autodeploy.sh" ] \
+        || need_checkout 'se instalaria webcmp-autodeploy desde deploy/autodeploy.sh'
+    then
+        # root:root en /usr/local/sbin, NUNCA dentro del checkout: ese
+        # directorio lo escribe $SERVICE_USER, y un ejecutor que corre con sudo
+        # y vive en un directorio escribible por el proceso web es la escalada
+        # mas directa que existe.
+        install_if_changed "$APP_DIR/deploy/autodeploy.sh" "$AUTODEPLOY_SCRIPT" 0755 root root
+    fi
+
+    if [ -f "$APP_DIR/deploy/systemd/webcmp-autodeploy.service" ] \
+        || need_checkout 'se renderizaria webcmp-autodeploy.service'
+    then
+        tmp=$(mktemp)
+        render_template "$APP_DIR/deploy/systemd/webcmp-autodeploy.service" "$tmp" \
+            "/srv/webcmp<>$APP_DIR" \
+            "User=deploy<>User=$DEPLOY_LOGIN_USER" \
+            "Group=webcmp<>Group=$SERVICE_GROUP" \
+            || { rm -f "$tmp"; die "No se pudo renderizar webcmp-autodeploy.service."; }
+        install_if_changed "$tmp" "/etc/systemd/system/$AUTODEPLOY_UNIT.service" 0644 root root
+        rm -f "$tmp"
+    fi
+
+    if [ -f "$APP_DIR/deploy/systemd/webcmp-autodeploy.path" ] \
+        || need_checkout 'se renderizaria webcmp-autodeploy.path'
+    then
+        tmp=$(mktemp)
+        # El `Unit=` del .path se renderiza tambien: si alguien cambia
+        # AUTODEPLOY_UNIT, un .path que siga apuntando al nombre viejo queda
+        # habilitado y nunca dispara nada, sin un solo error que lo delate.
+        render_template "$APP_DIR/deploy/systemd/webcmp-autodeploy.path" "$tmp" \
+            "/srv/webcmp<>$APP_DIR" \
+            "Unit=webcmp-autodeploy.service<>Unit=$AUTODEPLOY_UNIT.service" \
+            || { rm -f "$tmp"; die "No se pudo renderizar webcmp-autodeploy.path."; }
+        install_if_changed "$tmp" "/etc/systemd/system/$AUTODEPLOY_UNIT.path" 0644 root root
+        rm -f "$tmp"
+    fi
+
+    run systemctl daemon-reload
+    # `enable --now` deja el .path vigilando. No se arranca el .service: se
+    # dispara cuando aparece la peticion, y arrancarlo ahora desplegaria sin que
+    # nadie lo haya pedido.
+    run systemctl enable --now "$AUTODEPLOY_UNIT.path"
+
+    echo "  peticion: $AUTODEPLOY_STATE_DIR/deploy-request"
+    echo "  ejecutor: $AUTODEPLOY_SCRIPT (usuario $DEPLOY_LOGIN_USER)"
+    echo "  estado:   journalctl -u $AUTODEPLOY_UNIT"
+}
+
 if [ "$SKIP_DEPLOY_SCAFFOLD" -eq 1 ]; then
     log "Andamiaje de deploy automatico: omitido (--skip-deploy-scaffold)"
+    log "Boton 'Actualizar' del panel: omitido (necesita el usuario $DEPLOY_LOGIN_USER)"
 else
     setup_deploy_scaffold
+    setup_autodeploy
 fi
 
 # --- C.12 Arranque de los servicios --------------------------------------

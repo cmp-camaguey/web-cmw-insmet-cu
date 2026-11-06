@@ -29,7 +29,14 @@ MIDDLEWARE = [mw for mw in MIDDLEWARE if mw != whitenoise_middleware] + [
     'debug_toolbar.middleware.DebugToolbarMiddleware'
 ]
 
-DATABASES = get_database_config(is_production=IS_PRODUCTION, prefer_sqlite=True)
+# Opt-in explicito para probar Postgres en local. `DB_ENGINE` por si solo NO
+# cambia la base de datos de dev: un `.env` copiado de produccion haria que la
+# laptop escribiera en la base real, que es justo lo que impide
+# `test_sqlite_wins_over_db_engine_env`. Con `DEV_USE_DB_ENGINE=True` y
+# `DB_ENGINE=postgresql` (mas DB_NAME/USER/PASS/HOST) dev usa el motor de
+# verdad; sin el flag, sqlite como siempre.
+DEV_USE_DB_ENGINE = os.getenv('DEV_USE_DB_ENGINE', 'False') == 'True'
+DATABASES = get_database_config(is_production=IS_PRODUCTION, prefer_sqlite=not DEV_USE_DB_ENGINE)
 
 if external_hostname := os.getenv('EXTERNAL_HOSTNAME', ''):
     apply_external_hostname(external_hostname, ['http://'])

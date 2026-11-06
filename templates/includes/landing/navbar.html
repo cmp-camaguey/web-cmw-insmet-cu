@@ -14,7 +14,7 @@
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="landing-navbar">
-      <ul class="navbar-nav ms-auto align-items-lg-center">
+      <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
         <li class="nav-item">
           <a class="nav-link" href="{% url 'home:institution_mission' %}">Misión</a>
         </li>
@@ -24,7 +24,7 @@
         <li class="nav-item">
           <a class="nav-link" href="{% url 'home:institution_about' %}">Quiénes Somos</a>
         </li>
-        <div class="d-none d-md-flex">
+        <div class="nav-item d-none d-md-flex">
           <a href="?theme=dark"
              class="nav-link px-0 hide-theme-dark"
              title="Habilitar el modo oscuro"
@@ -40,7 +40,7 @@
             <i class="icon ti ti-sun"></i>
           </a>
         </div>
-        <li class="nav-item mt-2 mt-md-0 ms-lg-3">
+        <li class="nav-item mt-2 mt-md-0">
           {% if request.user.is_authenticated %}
             <a class="btn btn-primary" href="{% url 'home:index' %}">Inicio</a>
           {% else %}

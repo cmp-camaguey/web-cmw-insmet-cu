@@ -40,6 +40,10 @@ set -Eeuo pipefail
 
 readonly LOCKFILE=/var/lock/webcmp-deploy.lock
 readonly CONFIG=/etc/webcmp/deploy.env
+# Commit que quedo sirviendo, para el panel (change 025-update-web-deploy).
+# Lo escribe este script y no el panel: el proceso web no puede saber con
+# certeza que commit se aplico, solo lo sabe el que lo aplico.
+readonly DEPLOYED_STATE=/etc/webcmp/deployed
 
 log() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mAVISO:\033[0m %s\n' "$*" >&2; }
@@ -908,6 +912,14 @@ esac
 # Desarma la trampa antes de imprimir el resumen: si fallara un `git rev-parse`
 # aca, el rollback intentaria volver al commit anterior... que es este mismo.
 trap - ERR EXIT
+
+# Estado para el panel: el commit que quedo sirviendo. Se escribe al final y de
+# forma atomica porque el panel lo lee en cada visita al dashboard; un archivo a
+# medias haria que "hay actualizacion" parpadee sin motivo.
+install -d -m 0755 "$(dirname "$DEPLOYED_STATE")"
+gitapp rev-parse HEAD > "$DEPLOYED_STATE.tmp"
+chmod 0644 "$DEPLOYED_STATE.tmp"
+mv -f "$DEPLOYED_STATE.tmp" "$DEPLOYED_STATE"
 
 log "Desplegado $(gitapp rev-parse --short HEAD)."
 printf '  Web:  %s\n' "$hc_url"
