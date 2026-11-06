@@ -11,5 +11,11 @@
 - [x] T5. `install.sh`: health check de `deploy.env` en modo externo por HTTP a
       través de Nginx.
 - [x] T6. `deploy/README-deploy.md`: documentar la topología de dos capas.
-- [ ] T7. Verificación: `bash -n`, `ruff`/`djlint` sin cambios, `--dry-run` del
+- [x] T7. Verificación: `bash -n`, `ruff`/`djlint` sin cambios, `--dry-run` del
       instalador (lo corre el usuario, exige root y TTY).
+
+      Ejecutado el 2026-11-06 en el contenedor de destino: `--dry-run` completo
+      sin abortar, instalacion real en verde, y sobre la topologia de dos capas
+      real (`PROXY_MODE=external`, TLS en el NPM) `webcmp-deploy --check` cierra
+      con `Todo lo chequeado esta bien.` y el vhost local responde `200` en `/`,
+      `/api/doc/` y en los estaticos servidos por Nginx.
