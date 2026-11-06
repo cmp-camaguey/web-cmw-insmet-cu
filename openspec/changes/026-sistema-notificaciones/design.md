@@ -17,15 +17,13 @@ class Notification(models.Model):
         ERROR = 'error', 'Error'
 
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    recipient = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='notifications'
-    )
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     severity = models.CharField(max_length=10, choices=Severity.choices)
-    source = models.CharField(max_length=20)          # 'huey' | 'invoice' | 'deploy' | 'warning'
+    source = models.CharField(max_length=20)  # 'huey' | 'invoice' | 'deploy' | 'warning'
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True)
     url = models.CharField(max_length=500, blank=True)  # ruta relativa, no absoluta
-    dedupe_key = models.CharField(max_length=64)        # sha256 hex
+    dedupe_key = models.CharField(max_length=64)  # sha256 hex
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
@@ -46,9 +44,9 @@ constraints = [
     ),
 ]
 indexes = [
-    models.Index(fields=['recipient', 'read_at']),          # contador
-    models.Index(fields=['recipient', '-created_at']),      # lista
-    models.Index(fields=['expires_at']),                    # poda
+    models.Index(fields=['recipient', 'read_at']),  # contador
+    models.Index(fields=['recipient', '-created_at']),  # lista
+    models.Index(fields=['expires_at']),  # poda
 ]
 ```
 
@@ -158,8 +156,8 @@ crea un endpoint nuevo ni un segundo `setInterval`.
 Management command `notificar_podar`, idempotente:
 
 ```python
-read_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_READ)    # 30
-unread_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_UNREAD) # 90
+read_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_READ)  # 30
+unread_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_UNREAD)  # 90
 ```
 
 - Borra leidas con `read_at < read_cutoff`.
@@ -189,9 +187,9 @@ SquidStats: un proceso web con N workers no es el lugar para un reloj.
 
 ```python
 NOTIFICATIONS_ENABLED = env.bool('NOTIFICATIONS_ENABLED', default=True)
-NOTIFICATIONS_RETENTION_READ = 30     # dias
-NOTIFICATIONS_RETENTION_UNREAD = 90   # dias
-NOTIFICATIONS_MAX_VISIBLE = 10        # entradas del desplegable
+NOTIFICATIONS_RETENTION_READ = 30  # dias
+NOTIFICATIONS_RETENTION_UNREAD = 90  # dias
+NOTIFICATIONS_MAX_VISIBLE = 10  # entradas del desplegable
 ```
 
 Apagado: no se crean filas, no se renderiza el icono, la poda sigue corriendo
