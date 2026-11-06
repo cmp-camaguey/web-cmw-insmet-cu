@@ -297,7 +297,7 @@ if [ -n "${PIP:-}" ]; then
 else
     PIP_CMD=("$PYTHON" -m pip)
 fi
-: "${PUBLIC_HOSTNAME:=web.cmw.insmet.cu}"
+: "${PUBLIC_HOSTNAME:=www.meteocamaguey.cu}"
 # Modo de proxy declarado por el instalador. NO decide nada en este script: el
 # health check se despacha por las claves HEALTHCHECK_* de mas abajo. Se guarda
 # porque es el dato que hace falta para explicar un deploy bloqueado ("no hay
@@ -359,11 +359,11 @@ validate_healthcheck_target() {
     [ -z "$HEALTHCHECK_URL" ] && return 0
     valid_url "$HEALTHCHECK_URL" || die "HEALTHCHECK_URL invalida: '$HEALTHCHECK_URL'.
   Tiene que empezar por http:// o https:// y traer un host no vacio, sin espacios.
-  Ejemplos validos:  https://web.cmw.insmet.cu/   o   http://localhost/
+  Ejemplos validos:  https://www.meteocamaguey.cu/   o   http://localhost/
   O borrar la variable y dejar el default (443 en 127.0.0.1 con SNI)."
     if [ -n "$HEALTHCHECK_RESOLVE" ] && ! valid_resolve "$HEALTHCHECK_RESOLVE"; then
         die "HEALTHCHECK_RESOLVE invalido: '$HEALTHCHECK_RESOLVE'.
-  Formato de curl --resolve: host:port:ip. Ejemplo: web.cmw.insmet.cu:443:127.0.0.1
+  Formato de curl --resolve: host:port:ip. Ejemplo: www.meteocamaguey.cu:443:127.0.0.1
   O la palabra 'none' para que el health check salga por DNS de verdad."
     fi
 }

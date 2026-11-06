@@ -78,7 +78,7 @@ if not os.getenv('SITE_URL', '').strip():
         'y restablecimiento de contraseña) necesitan la URL pública del sitio, y esa URL '
         'no se puede adivinar: un enlace a un host interno no lo puede abrir el '
         'destinatario. Defina SITE_URL en el archivo .env (por ejemplo '
-        'SITE_URL=https://cmw.insmet.cu/) y regenere el archivo con '
+        'SITE_URL=https://www.meteocamaguey.cu/) y regenere el archivo con '
         '`python scripts/generate_env.py --production`.'
     )
 

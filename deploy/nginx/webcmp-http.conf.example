@@ -57,7 +57,7 @@ upstream webcmp {
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    server_name web.cmw.insmet.cu;
+    server_name www.meteocamaguey.cu;
 
     access_log /var/log/nginx/webcmp-access.log;
     error_log /var/log/nginx/webcmp-error.log;

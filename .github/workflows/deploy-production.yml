@@ -1,6 +1,6 @@
 name: Deploy production
 
-# Despliegue a https://web.cmw.insmet.cu.
+# Despliegue a https://www.meteocamaguey.cu.
 #
 # HISTORIA DEL BUG (2026-10): este archivo nunca fue valido para GitHub porque
 # `environment:` estaba en la raiz del workflow, y esa clave solo existe a nivel
@@ -57,7 +57,7 @@ permissions:
 
 jobs:
   deploy:
-    name: Deploy to web.cmw.insmet.cu
+    name: Deploy to www.meteocamaguey.cu
     runs-on: ubuntu-26.04
 
     # Opt-in, porque todavia no hay servidor de produccion: mientras la variable
