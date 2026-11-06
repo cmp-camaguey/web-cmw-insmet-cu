@@ -19,11 +19,18 @@
             aria-hidden="true"></span>
     </a>
     <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow"
-         style="min-width: 19rem">
+         style="min-width: 22rem;
+                max-width: 92vw">
       <div class="px-3 py-2">
         <div class="fw-bold" id="update-navbar-title">Actualizaciones</div>
         <div class="text-secondary small mt-1" id="update-navbar-text">Comprobando…</div>
       </div>
+      {% comment %}
+        La lista se llena por JS con textContent, nunca con innerHTML: el mensaje
+        de un commit lo escribe cualquiera que pueda pushear a main.
+      {% endcomment %}
+      <ul class="list-unstyled mb-0 pt-1 d-none" id="update-navbar-commits">
+      </ul>
       <div class="dropdown-divider"></div>
       <div class="px-3 pb-2">
         <button type="button"

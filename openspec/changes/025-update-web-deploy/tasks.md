@@ -18,6 +18,10 @@
 - [x] 2.5 `static/dist/js/dashboard-update.js` (polling 60 s / 2 s, JS vanilla)
 - [x] 2.6 Tests de render: el aviso aparece para superusuario en cualquier
       página del dashboard y no para staff
+- [x] 2.7 Mensajes de los commits pendientes en el desplegable: API pública de
+      GitHub (`compare`), cache 300 s / 60 s, degradación a los SHA si falla, y
+      render con `textContent`. 19 tests nuevos (49 en
+      `apps.dashboard.tests.test_update`; 1471 en la suite completa)
 
 ## 3. Ejecutor privilegiado
 

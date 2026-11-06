@@ -114,6 +114,34 @@ webcmp-autodeploy.path` y ya.
 El `.service` no se arranca nunca a mano: se dispararía un despliegue que nadie
 pidió.
 
+## Qué cambió: los mensajes de los commits
+
+El desplegable decía `a1b2c3d → e4f5g6h`, que no alcanza para decidir. Ahora,
+cuando el estado es `available`, el endpoint añade `commits`: hasta 10 entradas
+con `sha` corto, `subject` y `author`, leídas de
+`GET /repos/<org>/<repo>/compare/{deployed}...{latest}` — la API pública de
+GitHub, sin token.
+
+Tres decisiones que sostienen esto:
+
+- **Solo en `available`.** En `up_to_date` no hay rango que comparar, y en
+  `unknown` no hay con qué. Una consulta por carga del panel gastaría el límite
+  anónimo (60/h) sin mostrar nada.
+- **Cacheada aparte, con clave por rango.** `dashboard:update:compare:{A}:{B}`,
+  300 s en éxito y 60 s en fallo. La clave lleva los dos SHA: después de
+  desplegar, el rango viejo ya no describe nada.
+- **Informativa, nunca parte del contrato de estado.** Si la API falla, responde
+  403 o 404, `commits` es `null` y `state` sigue siendo `available`. Un fallo de
+  la API no puede degradar la única información que decide si actualizar.
+
+El render es con `textContent`, jamás `innerHTML`: el mensaje de un commit lo
+escribe cualquiera que pueda pushear a `main`, y el panel es del administrador.
+Un test lee el JS y falla si aparece una asignación de `innerHTML` o
+`insertAdjacentHTML`.
+
+`dashboard:update_request` llama `build_state(include_commits=False)`: el `POST`
+decide con los SHA y no tiene por qué esperar una segunda salida de red.
+
 ## Riesgos aceptados
 
 - **El panel puede pedir deploys.** Un superusuario comprometido puede forzar

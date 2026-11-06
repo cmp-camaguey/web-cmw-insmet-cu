@@ -58,6 +58,49 @@ SHALL accept the value only from one of `up_to_date`, `available`, `running` or
 - WHEN consulta `dashboard:update_status`
 - THEN la respuesta es 403, no un redirect al login (la vista es JSON)
 
+### Requirement: UPDATE-COMMITS
+
+The system SHALL include the messages of the pending commits in
+`dashboard:update_status` when `state` is `available`, and this information SHALL
+be informative only: a failure obtaining it SHALL NOT change `state`.
+
+#### Scenario: Hay actualización y la API responde
+
+- GIVEN `state` es `available`, con desplegado `A` y último `B`
+- WHEN un superusuario consulta el estado
+- THEN `commits.commits` contiene hasta 10 entradas con `sha` corto, `subject` y `author`
+- AND `subject` es solo la primera línea del mensaje del commit
+- AND `commits.total` es el número de commits del rango y `truncated` indica si se
+  mostraron menos de los que hay
+
+#### Scenario: La API falla o limita
+
+- GIVEN la API pública responde 403 (límite anónimo), 404, error de red o JSON inválido
+- WHEN se consulta el estado
+- THEN `state` sigue siendo `available` y los SHA se reportan igual
+- AND `commits` es `null`, no una lista vacía, para distinguir "no se pudo consultar"
+  de "no hay mensajes"
+- AND el fallo se cachea 60 segundos, mientras el éxito se cachea 300
+
+#### Scenario: No hay rango que comparar
+
+- GIVEN `state` es `up_to_date` o `unknown`
+- WHEN se consulta el estado
+- THEN el sistema NO consulta la API de comparación
+
+#### Scenario: La petición de despliegue no paga la consulta
+
+- GIVEN `state` es `available`
+- WHEN un superusuario hace `POST` a `dashboard:update_request`
+- THEN la respuesta se decide solo con los SHA
+- AND no espera a la API de comparación
+
+#### Scenario: Un mensaje de commit es contenido no confiable
+
+- GIVEN un mensaje de commit contiene HTML o una etiqueta con manejador de eventos
+- WHEN el panel lo muestra
+- THEN se inserta como texto y NO se interpreta como HTML
+
 ### Requirement: UPDATE-REQUEST
 
 The system SHALL create the deploy request file with `O_CREAT | O_EXCL`, so that
