@@ -4,6 +4,7 @@ drf-spectacular==0.30.0
 drf-spectacular-sidecar==2026.10.1
 drf-redesign==0.6.0
 python-dotenv==1.2.4
+psycopg[binary]==3.3.8
 cryptography==50.0.2
 Pillow==13.0.0
 huey==3.5.4
