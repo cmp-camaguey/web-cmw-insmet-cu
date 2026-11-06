@@ -1712,7 +1712,16 @@ fi
 DB_SERVER_PACKAGE=postgresql
 if ! command -v psql >/dev/null 2>&1; then
     warn "No encontre el cliente de PostgreSQL (psql) en el servidor."
-    if ask_yes_no no "Instalar $DB_SERVER_PACKAGE con apt?"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        # En --dry-run no hay a quien preguntar: `ask_yes_no` devuelve el
+        # default, que aca es `no`, y la rama del `else` mataba el dry-run con
+        # "Sin postgresql no se puede crear el rol y la base". Un dry-run que
+        # aborta en un contenedor limpio no sirve para nada, y el contenedor
+        # limpio es exactamente donde se corre. Se imprime el plan de la rama
+        # que el operador va a elegir en la corrida real.
+        printf '  [dry-run] apt-get install -y %s (si se responde "si" en la corrida real)\n' \
+            "$DB_SERVER_PACKAGE"
+    elif ask_yes_no no "Instalar $DB_SERVER_PACKAGE con apt?"; then
         if [ "$DRY_RUN" -eq 1 ]; then
             printf '  [dry-run] apt-get install -y %s\n' "$DB_SERVER_PACKAGE"
         else
