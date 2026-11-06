@@ -405,6 +405,90 @@ class ProductionProfileTests(
         self.assertIs(self.module.OBS_LOCAL_ONLY_DEFAULT, False)
 
 
+class EmailTlsTests(SimpleTestCase):
+    """El puerto 465 es TLS implícito: `EMAIL_USE_SSL` tiene que llegar a Django.
+
+    `deploy/install.sh` escribe `EMAIL_USE_SSL=si` y `EMAIL_USE_TLS=no` cuando el
+    operador elige el 465, pero hasta ahora ningún archivo de settings leía la
+    primera. Django veía `use_tls=False` y su `use_ssl` por defecto en `False`, así
+    que abría una conexión en claro contra un puerto que espera el handshake TLS
+    en el primer byte: el error que llega no nombra el puerto ni la variable.
+    """
+
+    DEV_DB = {
+        'DEBUG': 'True',
+        'DB_ENGINE': 'postgresql',
+        'DB_NAME': 'meteo',
+        'DB_USER': 'u',
+        'DB_HOST': 'h',
+        'DB_PASS': 'p',
+    }
+
+    def _production(self, **env):
+        return {
+            'PRODUCTION': '1',
+            'DB_ENGINE': 'postgresql',
+            'DB_NAME': 'meteo',
+            'DB_USER': 'u',
+            'DB_HOST': 'h',
+            'DB_PASS': 'p',
+            'SITE_URL': 'https://cmw.insmet.cu/',
+            **secret_env(),
+            **env,
+        }
+
+    def test_ssl_is_read_from_the_environment(self):
+        module = load_profile(
+            'config.settings.dev',
+            {**self.DEV_DB, 'EMAIL_USE_TLS': 'False', 'EMAIL_USE_SSL': 'True'},
+        )
+        self.assertIs(module.EMAIL_USE_TLS, False)
+        self.assertIs(module.EMAIL_USE_SSL, True)
+
+    def test_ssl_defaults_to_false(self):
+        """Sin la variable, STARTTLS sigue siendo el default: no se cambia el 587."""
+        module = load_profile('config.settings.dev', self.DEV_DB)
+        self.assertIs(module.EMAIL_USE_SSL, False)
+        self.assertIs(module.EMAIL_USE_TLS, True)
+
+    def test_tls_and_ssl_are_mutually_exclusive(self):
+        """Django lanzaría `ValueError` al enviar; el arranque lo dice antes."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_profile(
+                'config.settings.dev',
+                {**self.DEV_DB, 'EMAIL_USE_TLS': 'True', 'EMAIL_USE_SSL': 'True'},
+            )
+        message = str(ctx.exception)
+        self.assertIn('EMAIL_USE_TLS', message)
+        self.assertIn('EMAIL_USE_SSL', message)
+
+    def test_port_465_without_ssl_is_rejected_in_production(self):
+        """465 es SMTPS por definición: con STARTTLS no se llega ni al banner."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_profile(
+                'config.settings.production',
+                self._production(EMAIL_PORT='465', EMAIL_USE_TLS='True'),
+            )
+        message = str(ctx.exception)
+        self.assertIn('465', message)
+        self.assertIn('EMAIL_USE_SSL', message)
+
+    def test_port_465_with_ssl_loads(self):
+        """El 465 con TLS implícito es la configuración correcta, y no se rechaza."""
+        module = load_profile(
+            'config.settings.production',
+            self._production(EMAIL_PORT='465', EMAIL_USE_TLS='False', EMAIL_USE_SSL='True'),
+        )
+        self.assertIs(module.EMAIL_USE_SSL, True)
+        self.assertIs(module.EMAIL_USE_TLS, False)
+
+    def test_port_587_with_starttls_loads(self):
+        """El 587 no se toca: STARTTLS es su modo, y sigue siendo el default."""
+        module = load_profile('config.settings.production', self._production(EMAIL_PORT='587'))
+        self.assertIs(module.EMAIL_USE_TLS, True)
+        self.assertIs(module.EMAIL_USE_SSL, False)
+
+
 class SiteUrlNormalizationTests(SimpleTestCase):
     """`SITE_URL` se expone con barra final: el host y la ruta se unen con una
     sola barra, nunca con dos.

@@ -446,6 +446,20 @@ silent_email_backends = (
 insecure_email_backends = ('config.mail_backends.InsecureDevEmailBackend',)
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+# 465 es TLS implícito (SMTPS) y 587 es STARTTLS: son dos modos distintos, no dos
+# variantes del mismo. `deploy/install.sh` escribe esta variable desde siempre,
+# pero ningún settings la leía, así que elegir 465 dejaba a Django abriendo una
+# conexión en claro contra un puerto que espera el handshake en el primer byte.
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False') == 'True'
+
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured(
+        'EMAIL_USE_TLS y EMAIL_USE_SSL están activos a la vez, y Django los rechaza '
+        'porque son modos excluyentes de cifrar la misma conexión. El puerto 465 usa '
+        'TLS implícito (EMAIL_USE_SSL=True y EMAIL_USE_TLS=False); el 587 usa STARTTLS '
+        '(EMAIL_USE_TLS=True y EMAIL_USE_SSL=False). Corrija el archivo .env.'
+    )
+
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = os.getenv('EMAIL_PORT')
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
