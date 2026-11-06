@@ -66,6 +66,27 @@ jobs:
     name: Tests (Django)
     needs: detect
     runs-on: ubuntu-26.04
+    env:
+      DB_ENGINE: postgresql
+      DB_NAME: webcmp
+      DB_USER: webcmp
+      DB_PASS: ci_placeholder_not_a_real_password  # pragma: allowlist secret
+      DB_HOST: localhost
+      DB_PORT: "5432"
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: webcmp
+          POSTGRES_USER: webcmp
+          POSTGRES_PASSWORD: ci_placeholder_not_a_real_password  # pragma: allowlist secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -167,6 +188,27 @@ jobs:
   security:
     name: Security (pip-audit + migrations)
     runs-on: ubuntu-26.04
+    env:
+      DB_ENGINE: postgresql
+      DB_NAME: webcmp
+      DB_USER: webcmp
+      DB_PASS: ci_placeholder_not_a_real_password  # pragma: allowlist secret
+      DB_HOST: localhost
+      DB_PORT: "5432"
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: webcmp
+          POSTGRES_USER: webcmp
+          POSTGRES_PASSWORD: ci_placeholder_not_a_real_password  # pragma: allowlist secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 

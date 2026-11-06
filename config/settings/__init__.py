@@ -76,12 +76,11 @@ from .base import _CONTENT_SECURITY_POLICY_DIRECTIVES  # noqa: E402,F401  (no lo
 def get_database_config():
     """Envoltura de `base.get_database_config()`.
 
-    Los tests parchean `DEBUG` e `IS_PRODUCTION` con
-    `mock.patch.object(config.settings, 'DEBUG', ...)`, así que la envoltura lee
-    esos dos nombres en ESTE módulo y delega la construcción en `base`: leerlos
-    de `base` haría que el parche dejara de mandar.
+    Ya no decide nada: el motor sale del entorno y es obligatorio en los tres
+    perfiles. Se conserva como punto de importación estable para los tests y
+    para cualquier código que lo consulte.
     """
-    return _base.get_database_config(is_production=IS_PRODUCTION, prefer_sqlite=DEBUG)
+    return _base.get_database_config()
 
 
 def load_tests(loader, tests, pattern):
