@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 
@@ -153,6 +154,13 @@ def _fetch_compare(deployed, latest):
     ``ls-remote``, con el mismo limite anonimo.
     """
     url = f'{settings.UPDATE_REPO_API.rstrip("/")}/compare/{deployed}...{latest}'
+    # `UPDATE_REPO_API` sale de la configuracion, no de la peticion, pero una
+    # variable de entorno mal puesta podria apuntar a `file:///etc/shadow` y el
+    # panel leeria del disco del servidor. Se exige https antes de abrir nada.
+    if urllib.parse.urlsplit(url).scheme != 'https':
+        logger.error('UPDATE_REPO_API no apunta a https: %s', settings.UPDATE_REPO_API)
+        return None
+
     request = urllib.request.Request(
         url,
         headers={
@@ -163,8 +171,11 @@ def _fetch_compare(deployed, latest):
         },
     )
 
+    timeout = settings.UPDATE_CHECK_TIMEOUT
     try:
-        with urllib.request.urlopen(request, timeout=settings.UPDATE_CHECK_TIMEOUT) as response:
+        # El esquema se valido arriba y la URL la compone la configuracion, no
+        # el usuario; de ahi la excepcion de B310.
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
             raw = response.read(COMPARE_MAX_BYTES)
     except urllib.error.HTTPError as exc:
         # 403 es el limite anonimo agotado; 404, un commit que ya no esta en la

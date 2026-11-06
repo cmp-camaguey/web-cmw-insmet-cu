@@ -471,6 +471,22 @@ class CompareFetchTest(TestCase):
         ) as urlopen:
             return update_module._fetch_compare(SHA_DEPLOYED, SHA_LATEST), urlopen
 
+    def test_rechaza_un_esquema_que_no_sea_https(self):
+        # `UPDATE_REPO_API` sale de la configuracion, pero una variable de
+        # entorno mal puesta podria apuntar a `file:///etc/shadow` y el panel
+        # leeria del disco del servidor. Se exige https antes de abrir nada, y
+        # asi la excepcion de Bandit (B310) tiene una razon real detras.
+        with (
+            mock.patch.object(
+                update_module.urllib.request, 'urlopen', return_value=FakeResponse(b'{}')
+            ) as urlopen,
+            mock.patch.object(update_module.settings, 'UPDATE_REPO_API', 'file:///etc/shadow'),
+        ):
+            parsed = update_module._fetch_compare(SHA_DEPLOYED, SHA_LATEST)
+
+        self.assertIsNone(parsed)
+        urlopen.assert_not_called()
+
     def test_parsea_mensaje_sha_y_autor(self):
         parsed, _ = self.fetch(self.payload())
 
