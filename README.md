@@ -995,18 +995,81 @@ sudo -u webcmp .venv/bin/python manage.py cleanup_orphan_media --dry-run
 ## Contribuir
 
 El proyecto usa un ciclo de trabajo con registro: los cambios con impacto se
-describen en `openspec/changes/<nombre>/` (proposal, spec, tasks) antes de
-implementarse, y `AGENTS.md` describe las convenciones que hay que respetar. Es el
-mismo flujo que usa la documentación interna; no es burocracia de comité, es lo que
-permite retomar un trabajo a medias.
+describen en `openspec/changes/<NNN-nombre>/` antes de implementarse, y
+`AGENTS.md` describe las convenciones que hay que respetar. Es el mismo flujo que
+usa la documentación interna; no es burocracia de comité, es lo que permite
+retomar un trabajo a medias.
 
-Flujo práctico:
+Un cambio en OpenSpec son cuatro archivos, y el `tasks.md` es el que se va
+marcando:
 
-1. `git checkout -b feat/lo-que-sea`
-2. Commits conventional: `feat(meteo): agregar pronóstico de 5 días`. Un commit es
-   una unidad de trabajo revisable, con sus tests y su documentación adentro.
-3. `python manage.py test` en verde antes de pushear.
-4. PR contra `main`. El CI corre los tests de las apps que tocaste.
+```text
+openspec/changes/030-lo-que-sea/
+├── proposal.md              # por qué y qué resuelve
+├── design.md                # cómo, con las decisiones técnicas
+├── tasks.md                 # checkboxes; se implementa una tarea a la vez
+└── specs/030-lo-que-sea/spec.md
+```
+
+Cuando el cambio llega a producción, `gentle-ai sdd-archive` promueve los specs
+y mueve el directorio a `openspec/changes/archive/<fecha>-<nombre>/`.
+
+### Ramas y PRs
+
+Dos ramas de larga vida: `dev` integra, `main` es producción. **Las features
+entran siempre por `dev`**; `main` sólo recibe promociones por lote y hotfixes.
+
+1. `git checkout dev && git pull`, y desde ahí `git checkout -b feat/030-lo-que-sea`
+   (o `fix/…`, `chore/…`).
+2. Commits conventional, en español: `feat(meteo): agregar pronóstico de 5 días`.
+   Un commit es una unidad de trabajo revisable, con sus tests y su documentación
+   adentro.
+3. `python manage.py test` en verde antes de pushear. Los hooks de pre-commit
+   (ruff, djlint, detect-secrets) corren solos si hiciste `make setup`.
+4. PR **contra `dev`**, que se fusiona en squash: un PR es un commit en el
+   historial y la rama corta no necesita merge commit.
+5. Al fusionarse, un workflow borra la rama.
+
+`dev` no exige aprobación: el gate son los required status checks. `main` sí
+exige una aprobación humana —`@orl92` o `@yoelvismr`, vía `.github/CODEOWNERS`—,
+porque el CI que da el verde lo define el propio PR y un bot no puede ser code
+owner.
+
+### Promoción a producción
+
+1. Con `dev` verde, PR `dev` → `main`. Es una promoción por lote, no feature por
+   feature: `dev` acumula y `main` recibe un bloque cerrado.
+2. Una persona aprueba y se fusiona con **merge commit** (las features entran por
+   squash; la promoción no).
+3. Se etiqueta el merge: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`.
+4. **Inmediatamente**, PR `main` → `dev`. El merge de release crea en `main` un
+   commit que `dev` no tiene, y con `strict_required_status_checks_policy` la
+   próxima promoción saldría `BEHIND` aunque el contenido sea idéntico: la
+   comprobación es de ascendencia de commits, no de árboles.
+
+Un hotfix sale de `main`, pero vuelve a `dev` igual que un release. Si se omite,
+`dev` deja de representar lo que corre en producción.
+
+### Qué corre el CI
+
+El job de tests es selectivo por app, no la suite completa:
+
+- En un PR, `dorny/paths-filter` detecta qué apps cambiaron (`apps/<app>/**`) y
+  corre `python manage.py test apps.<app>` sólo para ésas.
+- Los cambios globales —`config/**`, `manage.py`, `requirements/**`,
+  `pyproject.toml`, `.github/**`, `templates/**`, `static/**`— fuerzan la suite
+  completa.
+- El push a `main` y cada merge de release siempre corren la suite completa, como
+  red de seguridad.
+
+Los labels de app van con la ruta completa (`apps.meteo`, no `meteo`): en Django
+5.2 el label corto ya no resuelve el paquete de tests.
+
+Ocho jobs son required status checks en las dos ramas: *Detect affected apps*,
+*Tests (Django)*, *Lint (Ruff)*, *Templates (djlint)*, *Pre-commit hooks*,
+*Bandit SAST*, *Security (pip-audit + migrations)* y *Deploy check (check
+--deploy)*. Si un PR renombra o borra uno de esos jobs, el check requerido nunca
+reporta y el merge queda bloqueado: **fail-closed** a propósito.
 
 Autores: el Instituto de Meteorología de Cuba.
 
