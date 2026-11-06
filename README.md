@@ -104,6 +104,38 @@ git config core.hooksPath .githooks
 
 </details>
 
+### PostgreSQL en desarrollo (opcional)
+
+Por defecto el perfil `dev` usa SQLite, y `DB_ENGINE` en el `.env` **no lo
+cambia**: un `.env` copiado de producción no puede hacer que tu máquina escriba
+en la base real. Para probar contra PostgreSQL de verdad hay que pedirlo:
+
+```bash
+# 1. Rol y base locales (una vez). El rol necesita CREATEDB para la base de tests.
+sudo -u postgres psql <<'SQL'
+CREATE USER webcmp_dev WITH PASSWORD 'CAMBIAR_ESTA_CLAVE' CREATEDB;  -- pragma: allowlist secret
+CREATE DATABASE webcmp_dev OWNER webcmp_dev;
+SQL
+
+# 2. Opt-in explícito en el .env de desarrollo
+DEV_USE_DB_ENGINE=True
+DB_ENGINE=postgresql
+DB_NAME=webcmp_dev
+DB_USER=webcmp_dev
+DB_PASS=CAMBIAR_ESTA_CLAVE
+DB_HOST=127.0.0.1
+DB_PORT=5432
+
+# 3. Migrar y correr
+python manage.py migrate
+python manage.py runserver
+```
+
+Sin `DEV_USE_DB_ENGINE=True` esas cinco variables se ignoran y sigue usando
+`db.sqlite3`. Lo que se valida en SQLite no prueba lo que corre en PostgreSQL:
+`LIKE` con mayúsculas, orden de `NULL`, constraints y transacciones no se
+comportan igual.
+
 ### Dependencias: un archivo por entorno
 
 Cada archivo es autocontenido (incluye `base.txt` con `-r base.txt`).
@@ -401,7 +433,9 @@ sudo mkdir -p /srv/webcmp && sudo chown webcmp:webcmp /srv/webcmp
 ### 2. Base de datos
 
 El rol de PostgreSQL y el del servicio son el mismo (`webcmp`), y la base es
-propiedad de ese rol. `psycopg[binary]` ya viene en `requirements/prod.txt`.
+propiedad de ese rol. `psycopg[binary]` va en `requirements/base.txt`, así que lo
+traen los tres entornos: es el driver del motor, no una herramienta de
+desarrollo.
 
 ```bash
 sudo -u postgres psql <<'SQL'

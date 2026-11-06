@@ -30,6 +30,7 @@ DEBUG_TOOLBAR_MIDDLEWARE = 'debug_toolbar.middleware.DebugToolbarMiddleware'
 STATIC_FILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 MANIFEST_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 SQLITE_ENGINE = 'django.db.backends.sqlite3'
+POSTGRES_ENGINE = 'django.db.backends.postgresql'
 # Literal, no el `base.console_email_backend`: el test tiene que fijar la cadena
 # exacta que el perfil de producción rechaza, no seguir a la constante.
 CONSOLE_EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
@@ -163,6 +164,38 @@ class DevProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMixin, 
     def test_sqlite_wins_over_db_engine_env(self):
         """Riesgo del doc de diseño: con DB_ENGINE en `.env`, dev no conecta a la DB real."""
         self.assertEqual(self.module.DATABASES['default']['ENGINE'], SQLITE_ENGINE)
+
+    def test_postgres_en_dev_requiere_opt_in_explicito(self):
+        """`DEV_USE_DB_ENGINE=True` es la unica forma de salir de sqlite en dev.
+
+        El test de arriba protege a la laptop de un `.env` copiado de produccion;
+        este habilita probar Postgres de verdad sin tocar esa garantia.
+        """
+        module = load_profile(
+            'config.settings.dev',
+            {
+                'DEBUG': 'True',
+                'DEV_USE_DB_ENGINE': 'True',
+                'DB_ENGINE': 'postgresql',
+                'DB_NAME': 'meteo',
+                'DB_USER': 'u',
+                'DB_HOST': 'h',
+                'DB_PASS': 'p',
+            },
+        )
+
+        config = module.DATABASES['default']
+        self.assertEqual(config['ENGINE'], POSTGRES_ENGINE)
+        self.assertEqual(config['NAME'], 'meteo')
+        self.assertEqual(config['PORT'], '5432')
+
+    def test_opt_in_sin_credenciales_falla_claro(self):
+        """El opt-in no adivina: sin las cuatro variables, no arranca."""
+        with self.assertRaises(ImproperlyConfigured):
+            load_profile(
+                'config.settings.dev',
+                {'DEBUG': 'True', 'DEV_USE_DB_ENGINE': 'True', 'DB_ENGINE': 'postgresql'},
+            )
 
     def test_local_synop_simulations(self):
         self.assertIs(self.module.OBS_LOCAL_ONLY_DEFAULT, True)
