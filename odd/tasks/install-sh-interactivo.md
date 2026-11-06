@@ -587,4 +587,3 @@ False y el 465 seguía abriendo la conexión en claro. Corregido: `install.sh` e
 para `EMAIL_USE_TLS`, `EMAIL_USE_SSL` y `USE_REDIS_CACHE` (el mismo criterio que ya usaba
 `scripts/generate_env.py`), y `apps/core/tests/test_install_script_booleans.py` fija el contrato
 entre las dos mitades para que no vuelva a separarse.
-
