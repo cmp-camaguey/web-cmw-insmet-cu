@@ -307,6 +307,31 @@ El health check del deploy atraviesa ese Nginx por HTTP (`HEALTHCHECK_URL` +
 `HEALTHCHECK_RESOLVE` a `127.0.0.1:$HTTP_PORT`), asi que un vhost roto o un
 `/media/` sin servir no quedan en verde.
 
+### Probar el sitio antes de que exista el NPM
+
+Con `external`, este Nginx escucha HTTP y nada mas, y `production.py` deja
+`SESSION_COOKIE_SECURE` y `CSRF_COOKIE_SECURE` en `True`. El navegador **no
+guarda** una cookie `Secure` que llega por `http://`: el sitio abre, pero el
+login devuelve el formulario vacio, sin un solo error en pantalla ni en el log.
+Parece que el deploy esta roto y no lo esta.
+
+Dos formas de validar el login sin el NPM:
+
+1. Instalar con `nginx-local` + TLS autofirmado, probar el login completo, y
+   despues reinstalar **de cero** con `external`. No re-correr `install.sh`
+   sobre la misma instalacion: borra `.env` y `encryption.env`, rota
+   `SECRET_KEY` y la clave de cifrado.
+2. Dejar el login sin verificar hasta que el NPM apunte al contenedor. Todo lo
+   demas se valida igual, y no necesita el NPM:
+
+```bash
+systemctl status webcmp webcmp-huey --no-pager
+curl -sI http://127.0.0.1/ | head -1
+curl -s -o /dev/null -w '%{http_code}\n' \
+    http://127.0.0.1/static/dist/css/tabler.min.css
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/api/doc/
+```
+
 ### Checklist antes de instalar
 
 - [ ] Contenedor LXC creado (sin privilegios, sin `nesting`), x86_64
