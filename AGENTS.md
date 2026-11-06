@@ -263,14 +263,6 @@ Estos items NO los cubren los skills genéricos. Verificarlos siempre:
 - `tempus-init.js` define sus globals (`window.pickerDateToIso`, `window.formatPickerDate`, `window.formatPickerDateTime`) y `window.tempusDominus._instances` DENTRO de `DOMContentLoaded`; los scripts de plantilla corren antes → usan fallback local y difieren la suscripción al picker.
 - **Restricción conocida:** no hay observer para nodos agregados tras la carga. Si en el futuro se inyecta un `[data-tempus]` por JS (AJAX/htmx/fetch), inicializarlo con `initPicker(input)` (función en `tempus-init.js`) o añadir un `MutationObserver` que llame `initPicker` para cada nodo nuevo, **con guarda anti-doble-init** (`if (window.tempusDominus && window.tempusDominus._instances && window.tempusDominus._instances[input.id]) return;`). Ver comentario en `tempus-init.js`.
 
-## Roadmap / Backlog (snapshot histórico)
-
-> Tracking vivo en `openspec/changes/`. Esta lista es un snapshot de la constitución eliminada (commit `a66238d`); verificar vigencia antes de usarlo.
-
-**Activas (históricas):** 071 Performance queries (N+1, índices, cache) · 073 UI polish (toasts/spinners/tablas) · 074 Redis cache · 075 Monitoreo tareas Huey · 076 Auditoría de actividad · 077 Operaciones masivas · 078 Tema personalizado · 079 Exportar gráficos · 080 Debug Toolbar (dev).
-
-**Backlog / ideas:** CSP (django-csp) · 2FA/MFA para staff · validación de archivos subidos (magic bytes/tamaño) · health check `/health/` · búsqueda global en navbar · Auth API (JWT) · WebSockets/notificaciones en tiempo real · i18n EN del portal público.
-
 ## Verificación antes de commit
 
 **Gentle AI ya cubre los hooks (`pre-commit`) y la revisión del diff (RDD/4R). No los repitas acá**: no lances un subagente de revisión si la revisión nativa está activa, y no agregues pasos de hook — se configuran en `.githooks/pre-commit` y `Makefile`.
