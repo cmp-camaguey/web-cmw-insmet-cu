@@ -726,6 +726,51 @@ recover_env_password() {
         "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME"
 }
 
+# --- Superusuario: consulta y reseteo ------------------------------------
+# Usan el mismo systemd-run que `manage()` pero con su propio
+# `-p Environment=`, cosa que `manage()` no puede agregar: por eso no se reusa.
+# Se ejecutan despues de `migrate`, asi que la tabla ya existe.
+superuser_exists() {
+    systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py shell -c \
+        "import sys
+from django.contrib.auth import get_user_model
+sys.exit(0 if get_user_model().objects.filter(username='$SUPERUSER_USERNAME').exists() else 1)"
+}
+
+reset_superuser_password() {
+    # La contrasena viaja por entorno y no por argv: en `ps` la veria cualquiera
+    # de la maquina. Es el mismo camino que usa `createsuperuser` mas abajo.
+    systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py shell -c \
+        "import os
+from django.contrib.auth import get_user_model
+u = get_user_model().objects.get(username='$SUPERUSER_USERNAME')
+u.set_password(os.environ['DJANGO_SUPERUSER_PASSWORD'])
+u.is_staff = True
+u.is_superuser = True
+u.is_active = True
+u.save()"
+}
+
+print_changepassword_hint() {
+    printf '  sudo systemd-run --quiet --pipe --wait --uid=%s \\\n' "$SERVICE_USER" >&2
+    printf '    -p EnvironmentFile=%s -p Environment=PRODUCTION=1 \\\n' "$ENCRYPTION_ENV" >&2
+    printf '    --working-directory=%s %s manage.py changepassword %s\n' \
+        "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME" >&2
+}
+
 # ¿Esta corrida tiene que preguntar? En dry-run no: preguntar por valores que
 # despues no se usan solo le roba tiempo al operador. En --non-interactive
 # tampoco: responder por stdin sin tener terminal es un deadlock.
@@ -2371,30 +2416,42 @@ else
     # -p Environment=NOMBRE=valor. Es el bug documentado en deploy.sh:200-207 y
     # el que hace que este paso se escriba asi y no como un `export` de la
     # config de install.sh.
+    #
+    # Segunda corrida: `createsuperuser --noinput` con el usuario ya creado
+    # aborta con "That username is already taken", la contrasena que se acaba de
+    # imprimir no se aplica, y el warning mandaba a repetir justo el comando que
+    # falla. Se consulta primero y, si la cuenta existe, se le pone la
+    # contrasena respondida (la impresa) y se aseguran los flags. Sin eso, una
+    # re-instalacion deja un panel inaccesible con una clave recien generada en
+    # la mano.
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [dry-run] systemd-run ... createsuperuser --noinput --username %s\n' "$SUPERUSER_USERNAME"
-    else
-        if systemd-run --quiet --pipe --wait \
-            --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
-            -p "EnvironmentFile=$ENCRYPTION_ENV" \
-            -p Environment=PRODUCTION=1 \
-            -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
-            -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
-            --working-directory="$APP_DIR" \
-            "$VENV_DIR/bin/python" manage.py createsuperuser --noinput \
-            --username "$SUPERUSER_USERNAME" --email "$SUPERUSER_EMAIL"
-        then
+        printf '  [dry-run] si la cuenta existe: se le resetea la contrasena y se asegura is_superuser\n'
+    elif superuser_exists; then
+        if reset_superuser_password; then
             SUPERUSER_CREATED=1
-            echo "  superusuario listo."
+            echo "  superusuario $SUPERUSER_USERNAME ya existia: contrasena actualizada."
         else
-            warn "No se pudo crear el superusuario. Se deja el resto instalado."
-            warn "Crear a mano (mismo contexto que el sitio):"
-            printf '  sudo systemd-run --quiet --pipe --wait --uid=%s -p EnvironmentFile=%s \\\n' \
-                "$SERVICE_USER" "$ENCRYPTION_ENV" >&2
-            printf '    -p Environment=PRODUCTION=1 -p Environment=DJANGO_SUPERUSER_PASSWORD=<clave> \\\n' >&2
-            printf '    --working-directory=%s %s manage.py createsuperuser --noinput --username %s\n' \
-                "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME" >&2
+            warn "El superusuario $SUPERUSER_USERNAME existe y no se pudo actualizar la"
+            warn "contrasena. Cambiala a mano en el mismo contexto que corre el sitio:"
+            print_changepassword_hint
         fi
+    elif systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py createsuperuser --noinput \
+        --username "$SUPERUSER_USERNAME" --email "$SUPERUSER_EMAIL"
+    then
+        SUPERUSER_CREATED=1
+        echo "  superusuario listo."
+    else
+        warn "No se pudo crear el superusuario. Se deja el resto instalado."
+        warn "Crear a mano (mismo contexto que el sitio):"
+        print_changepassword_hint
     fi
 fi
 
