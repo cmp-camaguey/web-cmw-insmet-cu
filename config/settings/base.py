@@ -498,10 +498,16 @@ UPDATE_STATUS_FILE = os.getenv('UPDATE_STATUS_FILE', '/var/lib/webcmp/deploy-sta
 UPDATE_REQUEST_FILE = os.getenv('UPDATE_REQUEST_FILE', '/var/lib/webcmp/deploy-request')
 # Cuanto dura el resultado de `git ls-remote` en cache, y cuanto se espera al
 # remoto. El panel es de administracion: 5 minutos de cache evitan que cada
-# visita al dashboard abra una conexion, y 8 segundos acotan lo que puede
+# visita al dashboard abra una conexion, y 15 segundos acotan lo que puede
 # bloquear una peticion cuando GitHub no responde.
+#
+# 15 y no 8: un servidor que sale por un proxy corporativo puede tardar en
+# resolver o en que el proxy conteste, y con 8 s el panel reportaba "no
+# respondio a tiempo" mientras la conexion directa tardaba medio segundo. El
+# coste de subirlo es que una red caida bloquea la peticion 15 s en vez de 8;
+# el coste de dejarlo bajo es un aviso falso que no se distingue de una caida.
 UPDATE_CHECK_TTL = int(os.getenv('UPDATE_CHECK_TTL', '300'))
-UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '8'))
+UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '15'))
 # Que cambio, no solo cuanto: la API publica de GitHub resuelve el rango
 # `deployed...latest` sin token, igual que `ls-remote`. Se consulta solo cuando
 # hay actualizacion pendiente, y el resultado se cachea distinto que el fallo
