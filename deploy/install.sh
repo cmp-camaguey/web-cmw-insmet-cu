@@ -713,8 +713,17 @@ recover_django_keys() {
 }
 
 recover_env_password() {
-    printf 'Queda escrita en %s. Para cambiarla se edita esa clave y se reinicia %s.\n' \
-        "$ENV_FILE" "$GUNICORN_UNIT"
+    # Este mensaje decia "queda escrita en el .env" y era falso: el instalador
+    # nunca escribe SUPERUSER_PASSWORD ahi. Un operador que pierde la contrasena
+    # con esa frase en la mano busca una clave que no existe, y la busca en el
+    # unico archivo donde no puede estar. Lo unico que queda es el hash en la
+    # base, asi que la unica salida es cambiarla.
+    printf 'No queda guardada en ningun archivo: solo el hash en la base.\n'
+    printf '  Para cambiarla:\n'
+    printf '    sudo systemd-run --quiet --pipe --wait --uid=%s \\\n' "$SERVICE_USER"
+    printf '      -p EnvironmentFile=%s -p Environment=PRODUCTION=1 \\\n' "$ENCRYPTION_ENV"
+    printf '      --working-directory=%s %s manage.py changepassword %s\n' \
+        "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME"
 }
 
 # ¿Esta corrida tiene que preguntar? En dry-run no: preguntar por valores que
@@ -1525,7 +1534,13 @@ SUPERUSER_EMAIL=$(ask SUPERUSER_EMAIL "$SUPERUSER_EMAIL_DEFAULT" 'Correo del sup
 # pidieran.
 SUPERUSER_PASSWORD=$(ask_secret SUPERUSER_PASSWORD "${SUPERUSER_PASSWORD:-}" 'Contrasena del superusuario') || die 'Contrasena invalida.'
 # Mismo criterio que DB_PASS: en CI no hay nadie a quien avisarle.
-if secret_was_generated SUPERUSER_PASSWORD && [ "$INTERACTIVE" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
+# Pero aca hay una diferencia que costo una contrasena: DB_PASS queda en el .env
+# y se puede recuperar; esta NO se escribe en ningun archivo. Con la guarda
+# `INTERACTIVE -eq 1`, un `--non-interactive` sin SUPERUSER_PASSWORD generaba la
+# contrasena, la usaba para crear la cuenta y la tiraba: el resumen decia
+# "Superusuario admin creado" y no habia forma de entrar. Generada es generada,
+# haya TTY o no.
+if secret_was_generated SUPERUSER_PASSWORD && [ "$DRY_RUN" -eq 0 ]; then
     print_once_secret 'SUPERUSER_PASSWORD' "$SUPERUSER_PASSWORD" recover_env_password
 fi
 
