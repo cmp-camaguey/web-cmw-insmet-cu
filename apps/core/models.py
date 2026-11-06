@@ -420,3 +420,77 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f'{self.get_action_flag_display()} - {self.object_repr}'
+
+
+class Notification(models.Model):
+    """Aviso operativo para un superusuario, generado por el propio sistema.
+
+    Vive en `core` porque es transversal: la fuente puede ser una tarea de Huey,
+    una factura o un aviso por vencer, y ninguna de esas apps es dueña del
+    concepto.
+
+    `read_at` es `NULL` para no leída, y el índice único parcial lo usa como
+    condición: un mismo hecho no puede generar dos avisos sin leer, pero sí
+    puede volver a generarlo después de que el admin lo leyó. Un fallo repetido
+    tras haberlo visto es información nueva, no ruido.
+    """
+
+    class Severity(models.TextChoices):
+        INFO = 'info', 'Información'
+        WARNING = 'warning', 'Advertencia'
+        ERROR = 'error', 'Error'
+
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+        verbose_name='Destinatario',
+    )
+    severity = models.CharField(max_length=10, choices=Severity.choices, verbose_name='Severidad')
+    source = models.CharField(max_length=20, verbose_name='Origen')
+    title = models.CharField(max_length=200, verbose_name='Título')
+    body = models.TextField(blank=True, verbose_name='Detalle')
+    # Ruta relativa ('/facturas/<uuid>/'), nunca una URL absoluta: el dominio
+    # público cambia entre entornos y guardarlo dejaría enlaces muertos.
+    url = models.CharField(max_length=500, blank=True, verbose_name='Enlace')
+    # sha256 hex de lo que identifica el HECHO, no el momento. Ver
+    # `apps.core.notifications.make_dedupe_key`.
+    dedupe_key = models.CharField(max_length=64, verbose_name='Clave de deduplicación')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Creada')
+    read_at = models.DateTimeField(null=True, blank=True, verbose_name='Leída')
+    expires_at = models.DateTimeField(null=True, blank=True, verbose_name='Expira')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Notificación'
+        verbose_name_plural = 'Notificaciones'
+        default_permissions = ()
+        permissions = [
+            ('view_notification', 'Ver'),
+            ('add_notification', 'Añadir'),
+            ('change_notification', 'Editar'),
+            ('delete_notification', 'Eliminar'),
+        ]
+        constraints = [
+            # Parcial: solo aplica a las NO leídas. Es lo que convierte el
+            # dedup en una garantía de la base y no en una condición de carrera
+            # entre dos workers de Gunicorn que ven el mismo fallo.
+            models.UniqueConstraint(
+                fields=['recipient', 'dedupe_key'],
+                condition=models.Q(read_at__isnull=True),
+                name='uniq_notification_unread_dedupe',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['recipient', 'read_at']),
+            models.Index(fields=['recipient', '-created_at']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        return f'[{self.severity}] {self.title}'[:80]
+
+    @property
+    def is_read(self):
+        return self.read_at is not None

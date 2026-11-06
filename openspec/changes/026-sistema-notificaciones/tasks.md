@@ -17,21 +17,21 @@
 
 ## Fase 1 — Nucleo
 
-- [ ] Modelo `Notification` en `apps/core` con `uuid`, `default_permissions = ()` y los cuatro permisos custom.
-- [ ] Indice unico parcial `(recipient, dedupe_key)` sobre no leidas; indices de contador, lista y poda.
-- [ ] Helper `make_dedupe_key(*parts)` y `notify(recipient, source, severity, title, body, url, dedupe_key)` con `get_or_create` protegido.
-- [ ] Migracion (no versionada, `.gitignore`).
-- [ ] Pruebas 1, 2 y 6 de `design.md` §9.
+- [x] Modelo `Notification` en `apps/core` con `uuid`, `default_permissions = ()` y los cuatro permisos custom.
+- [x] Indice unico parcial `(recipient, dedupe_key)` sobre no leidas; indices de contador, lista y poda.
+- [x] Helper `make_dedupe_key(*parts)` y `notify(recipient, source, severity, title, body, url, dedupe_key)` con `get_or_create` protegido.
+- [x] Migracion (no versionada, `.gitignore`).
+- [x] Pruebas 1, 2 y 6 de `design.md` §9.
 
 ## Fase 2 — Fuentes
 
-- [ ] Aviso desde `TaskExecutionLog` en `ERROR`, con allowlist de tareas.
-- [ ] Aviso de `Invoice.pdf_status == 'failed'`.
-- [ ] Aviso de `Invoice.email_status == 'failed'`.
+- [x] Aviso desde `TaskExecutionLog` en `ERROR`, con allowlist de tareas.
+- [x] Aviso de `Invoice.pdf_status == 'failed'`.
+- [x] Aviso de `Invoice.email_status == 'failed'`.
 - [x] Aviso de despliegue — **descartado** (opcion C): el widget de 025 ya muestra
       el estado y no se abre una ruta de escritura `deploy` → `webcmp`.
-- [ ] Aviso de `Warning.valid_until` proximo, con tarea Huey diaria.
-- [ ] Prueba 7 de `design.md` §9: una tarea de factura no duplica su aviso.
+- [x] Aviso de `Warning.valid_until` proximo, con tarea Huey diaria.
+- [x] Prueba 7 de `design.md` §9: una tarea de factura no duplica su aviso.
 
 ## Fase 3 — UI
 

@@ -248,11 +248,47 @@ def generate_invoice_pdf_standalone(invoice, customer, items):
     return pdf_bytes
 
 
+def _notificar_fallo_factura(invoice, kind):
+    """Avisa a los superusuarios que un paso de entrega de la factura falló.
+
+    `kind` es `'pdf'` o `'email'`, y entra en la clave de deduplicación: un
+    reintento que vuelve a fallar no deja una fila nueva, pero un PDF roto y un
+    correo roto de la misma factura sí son dos hechos distintos.
+
+    Se llama desde las ramas `FAILED`, que son las que conocen el hecho. No hay
+    señal sobre `Invoice` a propósito: el PDF fallido también deja una tarea en
+    `ERROR` y dos avisos del mismo hecho es ruido (ver `design.md` §3).
+
+    No propaga excepciones: la factura ya tiene su estado y su error guardados,
+    y esa es la información que importa.
+    """
+    from apps.core.models import Notification
+    from apps.core.notifications import make_dedupe_key, notify_superusers
+
+    etiqueta = {'pdf': 'el PDF', 'email': 'el correo'}.get(kind, kind)
+    detalle = invoice.pdf_error if kind == 'pdf' else invoice.email_error
+    try:
+        notify_superusers(
+            source='invoice',
+            severity=Notification.Severity.ERROR,
+            title=f'Factura {invoice.number or invoice.uuid}: falló {etiqueta}',
+            body=(detalle or '')[:500],
+            # No hay vista de detalle de factura: la lista es donde se
+            # reintenta el PDF y el reenvío del correo, que es la acción útil.
+            url=reverse('commercial:factura_list'),
+            dedupe_key=make_dedupe_key('invoice', invoice.uuid, kind),
+        )
+    except Exception:
+        logger.exception('No se pudo crear el aviso de factura %s (%s)', invoice.uuid, kind)
+
+
 def marcar_pdf(invoice, error=None):
 
     invoice.pdf_status = Invoice.PdfStatus.FAILED if error else Invoice.PdfStatus.READY
     invoice.pdf_error = str(error) if error else None
     invoice.save(update_fields=['pdf_status', 'pdf_error'])
+    if error:
+        _notificar_fallo_factura(invoice, 'pdf')
     return invoice
 
 
@@ -262,6 +298,7 @@ def enviar_correo_factura(invoice, customer, request=None, base_url=None):
         invoice.email_status = Invoice.EmailStatus.FAILED
         invoice.email_error = 'El cliente no tiene correo registrado.'
         invoice.save(update_fields=['email_status', 'email_error'])
+        _notificar_fallo_factura(invoice, 'email')
         return False
 
     first_item = invoice.items.first()
@@ -352,4 +389,5 @@ def enviar_correo_factura(invoice, customer, request=None, base_url=None):
         invoice.email_status = Invoice.EmailStatus.FAILED
         invoice.email_error = str(e)
         invoice.save(update_fields=['email_status', 'email_error'])
+        _notificar_fallo_factura(invoice, 'email')
         return False
