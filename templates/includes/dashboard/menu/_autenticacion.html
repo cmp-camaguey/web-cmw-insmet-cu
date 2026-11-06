@@ -14,21 +14,21 @@
       <div class="dropdown-menu-column">
         {% if request.user.is_superuser %}
           {% url 'user_auth:groups_list' as groups_url %}{% if groups_url %}<a class="dropdown-item
-          {% if 'groups' in segment %}active{% endif %}"
-   href="{{ groups_url }}">Grupos</a>{% endif %}
+                                                                                      {% if 'groups' in segment %}active{% endif %}"
+                                                                               href="{{ groups_url }}">Grupos</a>{% endif %}
           {% url 'user_auth:permission_profiles_list' as profiles_url %}{% if profiles_url %}<a class="dropdown-item
-          {% if 'permission_profiles' in segment %}active{% endif %}"
-   href="{{ profiles_url }}">Permisos</a>{% endif %}
+                                                                                                       {% if 'permission_profiles' in segment %}active{% endif %}"
+                                                                                                href="{{ profiles_url }}">Permisos</a>{% endif %}
           {% url 'user_auth:users_list' as users_url %}{% if users_url %}<a class="dropdown-item
-          {% if 'users' in segment %}active{% endif %}"
-   href="{{ users_url }}">Usuarios</a>{% endif %}
+                                                                                   {% if 'users' in segment %}active{% endif %}"
+                                                                            href="{{ users_url }}">Usuarios</a>{% endif %}
         {% endif %}
         <a class="dropdown-item
                   {% if 'profile' in segment and 'permission_profiles' not in segment %}active{% endif %}"
            href="{% url 'user_auth:profile_detail' %}">Perfil</a>
         {% url 'user_auth:password_change' as password_change_url %}{% if password_change_url %}<a class="dropdown-item
-          {% if 'password_change' in segment %}active{% endif %}"
-   href="{{ password_change_url }}">Cambiar Contraseña</a>{% endif %}
+                                                                                                          {% if 'password_change' in segment %}active{% endif %}"
+                                                                                                   href="{{ password_change_url }}">Cambiar Contraseña</a>{% endif %}
       </div>
     </div>
   </div>

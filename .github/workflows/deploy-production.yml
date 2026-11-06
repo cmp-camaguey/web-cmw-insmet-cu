@@ -58,7 +58,7 @@ permissions:
 jobs:
   deploy:
     name: Deploy to web.cmw.insmet.cu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     # Opt-in, porque todavia no hay servidor de produccion: mientras la variable
     # `DEPLOY_ENABLED` no exista o no valga 'true', el job se SALTA (gris), no
