@@ -1464,19 +1464,25 @@ cat >&2 <<EOF
 EOF
 EMAIL_HOST=$(ask EMAIL_HOST "mx.caonao.cu" 'Servidor SMTP, SIN @ (vacio = todavia no hay correo)' valid_smtp_host) || die 'Host SMTP invalido. Es el servidor sin @ (ej. mx.caonao.cu); la direccion de correo va en "Usuario SMTP".'
 EMAIL_PORT=$(ask EMAIL_PORT 587 'Puerto SMTP' valid_port) || die 'Puerto SMTP invalido.'
-EMAIL_USE_TLS=si
-EMAIL_USE_SSL=no
+# OJO con el vocabulario. Las PREGUNTAS hablan si/no (es lo que se lee en
+# pantalla), pero los VALORES que van al .env son los que Django compara:
+# `os.getenv('EMAIL_USE_TLS', 'True') == 'True'`. Escribir `si` deja la
+# comparacion en False sin ningun error: el correo sale en claro por el 587 y
+# el unico sintoma es un SMTP que rechaza el AUTH o un mensaje que nunca llega.
+# Lo mismo vale para EMAIL_USE_SSL y USE_REDIS_CACHE.
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
 if [ "$EMAIL_PORT" = 465 ]; then
     # 465 es SMTPS implicito: TLS desde el principio de la conexion. Preguntar
     # STARTTLS ahi produce una combinacion que no existe (SSL y TLS los dos) y
     # Django falla al abrir el socket con un error que no menciona el puerto.
-    EMAIL_USE_TLS=no
-    EMAIL_USE_SSL=si
-    echo "  puerto 465: EMAIL_USE_SSL=si y EMAIL_USE_TLS=no (TLS implicito)."
+    EMAIL_USE_TLS=False
+    EMAIL_USE_SSL=True
+    echo "  puerto 465: EMAIL_USE_SSL=True y EMAIL_USE_TLS=False (TLS implicito)."
 elif ask_yes_no si 'STARTTLS en el SMTP? (EMAIL_USE_TLS)'; then
-    EMAIL_USE_TLS=si
+    EMAIL_USE_TLS=True
 else
-    EMAIL_USE_TLS=no
+    EMAIL_USE_TLS=False
 fi
 EMAIL_HOST_USER=$(ask EMAIL_HOST_USER "meteocamaguey" 'Usuario SMTP: login o correo completo (vacio = SMTP sin usuario)' valid_smtp_user) || die 'Usuario SMTP invalido.'
 EMAIL_HOST_PASSWORD=$(ask_optional_secret EMAIL_HOST_PASSWORD "" 'Contrasena SMTP (vacio = SMTP sin contrasena)') || die 'Contrasena SMTP invalida.'
@@ -1492,8 +1498,8 @@ else
     EMAIL_CONFIGURED=0
     # Si no se configura SMTP, dejar las claves vacias para que no quede CHANGE_ME
     EMAIL_PORT=587
-    EMAIL_USE_TLS=si
-    EMAIL_USE_SSL=no
+    EMAIL_USE_TLS=True
+    EMAIL_USE_SSL=False
     EMAIL_HOST_USER=
     EMAIL_HOST_PASSWORD=
     DEFAULT_FROM_EMAIL=
@@ -1546,8 +1552,8 @@ fi
 
 # --- Otros campos del .env ----------------------------------------------
 
-USE_REDIS_CACHE=no
-if ask_yes_no si 'Cache con Redis? (USE_REDIS_CACHE)'; then USE_REDIS_CACHE=si; fi
+USE_REDIS_CACHE=False
+if ask_yes_no si 'Cache con Redis? (USE_REDIS_CACHE)'; then USE_REDIS_CACHE=True; fi
 REDIS_URL=$(ask REDIS_URL redis://127.0.0.1:6379/1 'URL de Redis') || die 'URL de Redis invalida.'
 LOG_LEVEL=$(ask LOG_LEVEL INFO 'Nivel de log' valid_log_level) || die 'Nivel de log invalido.'
 FTP_OBS=no
@@ -2182,6 +2188,13 @@ apply_env_value() {
 
 step 1 "Sustituyendo los valores del .env"
 apply_env_value EXTERNAL_HOSTNAME "$EXTERNAL_HOSTNAME"
+# SITE_URL arma los enlaces absolutos de los correos (facturas, avisos, reportes)
+# y production.py aborta si falta. El generador la escribe con su hostname por
+# defecto, asi que si el operador elige otro dominio esa linea queda apuntando a
+# meteocamaguey.cu mientras ALLOWED_HOSTS ya apunta al nuevo: los correos salen
+# con un enlace a un sitio que no es el que atiende. Se escribe con la respuesta,
+# igual que las otras tres listas de abajo.
+apply_env_value SITE_URL "https://$EXTERNAL_HOSTNAME/"
 if [ -n "$WWW_HOSTNAME" ]; then
     ALLOWED_HOSTS="$EXTERNAL_HOSTNAME,$WWW_HOSTNAME"
     ORIGINS="https://$EXTERNAL_HOSTNAME,https://$WWW_HOSTNAME"

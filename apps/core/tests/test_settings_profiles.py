@@ -424,11 +424,13 @@ class ProductionProfileTests(
 class EmailTlsTests(SimpleTestCase):
     """El puerto 465 es TLS implícito: `EMAIL_USE_SSL` tiene que llegar a Django.
 
-    `deploy/install.sh` escribe `EMAIL_USE_SSL=si` y `EMAIL_USE_TLS=no` cuando el
-    operador elige el 465, pero hasta ahora ningún archivo de settings leía la
-    primera. Django veía `use_tls=False` y su `use_ssl` por defecto en `False`, así
-    que abría una conexión en claro contra un puerto que espera el handshake TLS
-    en el primer byte: el error que llega no nombra el puerto ni la variable.
+    La historia tuvo dos mitades. Primero ningún archivo de settings leía la
+    variable, así que `EMAIL_USE_SSL` quedaba en su default `False` y Django
+    abría una conexión en claro contra un puerto que espera el handshake TLS en
+    el primer byte: el error no nombraba el puerto ni la variable. Después se
+    agregó la lectura, pero `deploy/install.sh` seguía escribiendo `si`, que
+    contra `== 'True'` también es False. Las dos mitades están cubiertas:
+    `test_install_script_booleans` fija la del instalador.
     """
 
     DEV_DB = {

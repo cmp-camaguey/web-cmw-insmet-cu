@@ -578,3 +578,13 @@ Pendiente de decisión del usuario, no bloqueante para el código:
    invalidado por el cambio de bytes.
 2. `shellcheck`, si se quiere cerrar ese criterio de aceptación.
 3. Validación en servidor real de los flujos que estos scripts ejecutan en producción.
+
+## Corrección posterior (2026-11-06)
+
+La nota de verificación de más arriba dice `465 → EMAIL_USE_SSL=si`, y eso era lo que el dry-run
+imprimía: el instalador escribía `si`/`no`. Los settings comparan `== 'True'`, así que `si` valía
+False y el 465 seguía abriendo la conexión en claro. Corregido: `install.sh` escribe `True`/`False`
+para `EMAIL_USE_TLS`, `EMAIL_USE_SSL` y `USE_REDIS_CACHE` (el mismo criterio que ya usaba
+`scripts/generate_env.py`), y `apps/core/tests/test_install_script_booleans.py` fija el contrato
+entre las dos mitades para que no vuelva a separarse.
+
