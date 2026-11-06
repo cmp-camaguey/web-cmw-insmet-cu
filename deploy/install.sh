@@ -63,6 +63,10 @@ SERVICE_USER=${SERVICE_USER:-webcmp}
 SERVICE_GROUP=${SERVICE_GROUP:-$SERVICE_USER}
 SERVICE_SHELL=${SERVICE_SHELL:-/usr/sbin/nologin}
 DEPLOY_LOGIN_USER=${DEPLOY_LOGIN_USER:-deploy}
+# Home del usuario de despliegue. `useradd --create-home` lo pone en /home/<user>
+# y el authorized_keys tiene que ir ahi: sshd lo busca en el home real del
+# usuario, no en una ruta que el instalador elija a gusto.
+DEPLOY_HOME=${DEPLOY_HOME:-/home/$DEPLOY_LOGIN_USER}
 SCRIPT_PATH=${SCRIPT_PATH:-/usr/local/sbin/webcmp-deploy}
 # Ejecutor del boton "Actualizar" del panel (change 025-update-web-deploy).
 AUTODEPLOY_SCRIPT=${AUTODEPLOY_SCRIPT:-/usr/local/sbin/webcmp-autodeploy}
@@ -3061,6 +3065,31 @@ setup_deploy_scaffold() {
     run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY.pub" 2>/dev/null || true
     run chmod 0644 "$DEPLOY_SSH_KEY.pub" 2>/dev/null || true
 
+    # La clave publica tiene que quedar en el authorized_keys del usuario de
+    # despliegue. El par se genera ACA y no en la maquina de quien despliega, asi
+    # que si nadie instala el `.pub`, sshd no tiene contra que comparar y el
+    # workflow falla con "Permission denied (publickey)" aunque el secret tenga
+    # la clave correcta. El mensaje del final pedia pegar la PUBLICA en el
+    # secret, que es al reves: GitHub se autentica con la privada y el servidor
+    # compara con la publica.
+    if [ -f "$DEPLOY_SSH_KEY.pub" ]; then
+        local auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
+        ensure_dir "$DEPLOY_HOME/.ssh" 0700 "$DEPLOY_LOGIN_USER" "$DEPLOY_LOGIN_USER"
+        if [ ! -f "$auth_keys" ]; then
+            run install -o "$DEPLOY_LOGIN_USER" -g "$DEPLOY_LOGIN_USER" \
+                -m 0600 /dev/null "$auth_keys"
+        fi
+        # `grep -qxF` compara la linea entera: re-correr el instalador no puede
+        # dejar la misma clave repetida, y una clave que sea prefijo de otra no
+        # cuenta como presente.
+        if grep -qxF "$(cat "$DEPLOY_SSH_KEY.pub")" "$auth_keys" 2>/dev/null; then
+            echo "  la clave publica ya esta en $auth_keys."
+        else
+            run_sh "cat '$DEPLOY_SSH_KEY.pub' >> '$auth_keys'"
+            echo "  clave publica agregada a $auth_keys."
+        fi
+    fi
+
     # El script de deploy va a /usr/local/sbin, propiedad de root, y NO a
     # $APP_DIR/deploy/deploy.sh: el checkout lo escribe $SERVICE_USER, y un
     # sudoers que apunte ahi es una escalada trivial (basta editar el archivo).
@@ -3086,14 +3115,25 @@ setup_deploy_scaffold() {
         echo "  sudoers en $DEPLOY_SUDOERS, validado con visudo -c."
     fi
 
-    pubkey='(en un dry-run todavia no hay clave: se imprime cuando se genere de verdad)'
-    [ -f "$DEPLOY_SSH_KEY.pub" ] && pubkey=$(cat "$DEPLOY_SSH_KEY.pub")
+    if [ -f "$DEPLOY_SSH_KEY" ]; then
+        echo "  la clave PRIVADA esta en $DEPLOY_SSH_KEY (no se imprime: es el secret)."
+    fi
     cat <<EOF
 
-  Clave publica del usuario de despliegue. Copiarla al secret
-  DEPLOY_SSH_KEY de GitHub (Settings > Environments > production):
+  Clave PRIVADA del usuario de despliegue. Es lo que va al secret
+  DEPLOY_SSH_KEY de GitHub (Settings > Environments > production); la publica
+  ya quedo instalada en $DEPLOY_HOME/.ssh/authorized_keys de este servidor.
 
-$pubkey
+    sudo cat $DEPLOY_SSH_KEY
+
+  OJO: esa es la privada, no la publica. Pegar $DEPLOY_SSH_KEY.pub en el secret
+  es el error natural y falla con "Permission denied (publickey)", que no dice
+  cual de las dos claves esta mal. La privada no se imprime aca a proposito: el
+  scrollback de una sesion SSH es un lugar donde no conviene dejarla.
+
+  Para una instalacion real conviene generar el par en la maquina desde la que
+  se despliega y dejar aca solo la publica: una privada que nacio en el servidor
+  es una llave mas que hay que rotar si el servidor se ve comprometido.
 
   Si se pega con DEPLOY_HOST, DEPLOY_USER y DEPLOY_SSH_KNOWN_HOSTS, el workflow
   puede conectarse. Ver deploy/README-deploy.md.
@@ -3277,7 +3317,8 @@ cat <<EOF
 
        DEPLOY_HOST              IP o hostname de este servidor
        DEPLOY_USER              $DEPLOY_LOGIN_USER
-       DEPLOY_SSH_KEY           contenido de $DEPLOY_SSH_KEY.pub
+       DEPLOY_SSH_KEY           contenido de $DEPLOY_SSH_KEY (la privada; la
+                                publica ya esta en $DEPLOY_HOME/.ssh/authorized_keys)
        DEPLOY_SSH_KNOWN_HOSTS   una linea, con el puerto si no es 22:
 
            ssh-keyscan -p 22 -H <host> 2>/dev/null | sed 's/^/|1 h=|/' > known_hosts

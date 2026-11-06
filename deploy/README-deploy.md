@@ -407,9 +407,12 @@ si la genero el. Las claves Django se pueden rotar despues con
 `manage.py rotatekeys`; la contrasena de la base esta en el `.env` y se edita
 alla.
 
-Al final imprime el keypair de despliegue. La publica va al secret
-`DEPLOY_SSH_KEY` de GitHub (ver **Secrets de GitHub**); la privada ya quedo en
-`/etc/webcmp/deploy_key` con modo `0600`.
+Al final queda el keypair de despliegue. Lo que va al secret `DEPLOY_SSH_KEY`
+de GitHub es la **privada** (`/etc/webcmp/deploy_key`, modo `0600`); la publica
+queda instalada en `/home/deploy/.ssh/authorized_keys`, que es contra lo que sshd
+la compara (ver **Secrets de GitHub**). Pegar la publica en el secret es el error
+natural y falla con `Permission denied (publickey)`, un mensaje que no dice cual
+de las dos claves esta mal.
 
 Re-correr el script es seguro: cada pregunta muestra el valor actual como
 default, no regenera claves, no borra la base y no pisa ni `/etc/webcmp/deploy.env`
@@ -549,13 +552,23 @@ con `accept-new`, porque `accept-new` acepta cualquier clave la primera vez: un
 deploy que no verifica a quien se conecta le entrega la clave de despliegue a
 cualquiera que responda ese puerto.
 
-Generar el par:
+Con el par que genera el instalador, la publica ya esta del lado del servidor y
+lo unico que hay que sacar de alla es la privada:
+
+```bash
+sudo cat /etc/webcmp/deploy_key    # -> DEPLOY_SSH_KEY (la PRIVADA)
+```
+
+Para un servidor real conviene el camino inverso: generar el par en la maquina
+desde la que se despliega y subir solo la publica. Una privada que nacio en el
+servidor es una llave mas que hay que rotar si el servidor se ve comprometido.
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-deploy@webcmp" -f ~/.ssh/webcmp_deploy
+ssh-copy-id -i ~/.ssh/webcmp_deploy.pub deploy@<host-del-servidor>
 ssh-keyscan -p 22 <host-del-servidor> > ~/.ssh/known_hosts_webcmp
-cat ~/.ssh/webcmp_deploy.pub      # -> DEPLOY_SSH_KEY (la PRIVADA es la .pub de la otra)
-cat ~/.ssh/known_hosts_webcmp     # -> DEPLOY_SSH_KNOWN_HOSTS
+cat ~/.ssh/webcmp_deploy           # -> DEPLOY_SSH_KEY (la PRIVADA)
+cat ~/.ssh/known_hosts_webcmp      # -> DEPLOY_SSH_KNOWN_HOSTS
 ```
 
 ## Correr un deploy a mano
