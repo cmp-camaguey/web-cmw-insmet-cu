@@ -2171,11 +2171,16 @@ except Exception:
     fi
     if [ "$ENV_REGENERATED" -eq 1 ]; then
         : # ya decidido
-    elif ask_yes_no no "Regenerar $ENV_FILE con el generador (conserva SECRET_KEY y ENCRYPTION_KEY)?"; then
-        echo "  se conserva el .env existente."
-        ENV_REGENERATED=0
-    else
+    elif ask_yes_no no "Regenerar $ENV_FILE? (borra .env y encryption.env: SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
+        # Misma inversion que en el bloque de deploy.env: responder "si" a
+        # "Regenerar" conservaba el archivo y avisaba "se conserva", asi que la
+        # unica forma de regenerar era responder que NO. El texto prometia ademas
+        # que se conservaban SECRET_KEY y ENCRYPTION_KEY, y no es cierto: mas
+        # abajo se borran los dos archivos antes de correr el generador.
         ENV_REGENERATED=1
+    else
+        ENV_REGENERATED=0
+        echo "  se conserva el .env existente."
     fi
 else
     ENV_REGENERATED=1
