@@ -1405,8 +1405,9 @@ DB_ENGINE=postgresql
 cat >&2 <<EOF
 
   Base de datos: PostgreSQL.
-  El motor no se pregunta. Es el unico que trae driver en requirements/prod.txt
-  (psycopg[binary]), y el unico que el proyecto asume para produccion. MySQL
+  El motor no se pregunta. Es el unico que trae driver en requirements/base.txt
+  (psycopg[binary], que prod.txt incluye), y el unico que el proyecto asume para
+  produccion. MySQL
   exigiria instalar mysqlclient fuera de los pins, y SQLite no tiene
   concurrencia ni lee DB_*; ninguno de los dos corresponde a un sitio con
   usuarios entrando.
@@ -2143,8 +2144,24 @@ fi
 # agrega, asi que funciona igual con un .env recien generado (todo commented-out
 # o con CHANGE_ME) y con uno afinado a mano (donde hay valores que hay que
 # RESPETAR y no pisar a ciegas).
+# Las claves secretas no pueden pasar por `run`: su rama de dry-run imprime el
+# comando completo, y ese dry-run se pega en tickets, issues y chats. El `mask`
+# de la linea siguiente llega tarde, porque el valor ya salio impreso arriba.
+# Con este runner, el dry-run muestra `<oculto>` y el valor real no toca la
+# salida. Aplica a DB_PASS, EMAIL_HOST_PASSWORD y FTP_OBS_PASS.
+run_env_set() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '  [dry-run] env_set %s %s %s\n' "$ENV_FILE" "$1" "$(mask "$1" "$2")"
+    else
+        local st=0
+        env_set "$ENV_FILE" "$1" "$2" || st=$?
+        [ "$st" -eq 0 ] && CHANGED=1
+        return "$st"
+    fi
+}
+
 apply_env_value() {
-    run env_set "$ENV_FILE" "$1" "$2"
+    run_env_set "$1" "$2"
     printf '  %s=%s\n' "$1" "$(mask "$1" "$2")"
 }
 
@@ -2948,7 +2965,11 @@ setup_deploy_scaffold() {
     # La privada la lee ssh como el usuario de despliegue, asi que su dueno es ese
     # usuario y el modo 600. No se usa install_if_changed porque el origen y el
     # destino son el mismo archivo y `install` se niega ("are the same file").
-    if [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
+    # El `-f` no es defensivo: en dry-run `ssh-keygen` no corre y el archivo no
+    # existe, asi que `stat` fallaba con "cannot statx" en medio del plan. Un
+    # error real en el dry-run es ruido que tapa los de verdad.
+    if [ -f "$DEPLOY_SSH_KEY" ] \
+        && [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
         run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY"
         run chmod 0600 "$DEPLOY_SSH_KEY"
     fi
