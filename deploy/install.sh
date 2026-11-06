@@ -2171,11 +2171,16 @@ except Exception:
     fi
     if [ "$ENV_REGENERATED" -eq 1 ]; then
         : # ya decidido
-    elif ask_yes_no no "Regenerar $ENV_FILE con el generador (conserva SECRET_KEY y ENCRYPTION_KEY)?"; then
-        echo "  se conserva el .env existente."
-        ENV_REGENERATED=0
-    else
+    elif ask_yes_no no "Regenerar $ENV_FILE? (borra .env y encryption.env: SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
+        # Misma inversion que en el bloque de deploy.env: responder "si" a
+        # "Regenerar" conservaba el archivo y avisaba "se conserva", asi que la
+        # unica forma de regenerar era responder que NO. El texto prometia ademas
+        # que se conservaban SECRET_KEY y ENCRYPTION_KEY, y no es cierto: mas
+        # abajo se borran los dos archivos antes de correr el generador.
         ENV_REGENERATED=1
+    else
+        ENV_REGENERATED=0
+        echo "  se conserva el .env existente."
     fi
 else
     ENV_REGENERATED=1
@@ -2946,11 +2951,16 @@ step 1 "Configuracion del deploy en $CONFIG_FILE"
 # default se aplique) hace que la config de un servidor nuevo sea invisible:
 # nadie puede ver de donde sale el host del health check.
 if [ "$CONFIG_FILE_EXISTS" -eq 1 ]; then
+    # Las ramas estaban INVERTIDAS: responder "si" a "Actualizar ..." dejaba
+    # CONFIG_WRITTEN=0 y avisaba "se conserva", asi que la unica forma de que el
+    # archivo se reescribiera era responder que NO. En una re-corrida donde se
+    # cambio PUBLIC_HOSTNAME, el health check seguia apuntando al host viejo y el
+    # deploy fallaba con el sitio perfecto.
     if ask_yes_no no "Actualizar $CONFIG_FILE con lo respondido?"; then
-        warn "$CONFIG_FILE se conserva. Si el health check falla, empeza por ese archivo."
-        CONFIG_WRITTEN=0
-    else
         CONFIG_WRITTEN=1
+    else
+        CONFIG_WRITTEN=0
+        warn "$CONFIG_FILE se conserva. Si el health check falla, empeza por ese archivo."
     fi
 else
     CONFIG_WRITTEN=1
