@@ -14,7 +14,8 @@
 #   6. .env con scripts/generate_env.py y los valores preguntados, sin CHANGE_ME
 #   7. makemigrations, migrate, collectstatic, check --deploy
 #   8. unidades systemd renderizadas a APP_DIR/SERVICE_USER reales
-#   9. proxy: (A) Nginx local con TLS, o (B) reverse proxy externo
+#   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
+#      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
 #  10. /etc/webcmp/deploy.env con el destino del health check que corresponde
 #  11. andamiaje de deploy automatico (usuario, keypair, sudoers, webcmp-deploy)
 #  12. superusuario, por systemd-run con la ENCRYPTION_KEY
@@ -81,8 +82,11 @@ NGINX_ERROR_ROOT=${NGINX_ERROR_ROOT:-/var/www/webcmp-errors}
 ACME_ROOT=${ACME_ROOT:-/var/www/letsencrypt}
 TLS_DIR=${TLS_DIR:-$CONFIG_DIR/tls}
 # El vhost NUNCA se copia tal cual: se renderiza desde el ejemplo del checkout
-# (ver render_vhost). La ruta se declara aca para que quien lea el bloque de
-# activacion vea de donde sale el archivo.
+# (ver render_vhost). Hay DOS ejemplos y cual se usa depende de PROXY_MODE, que
+# se pregunta mas abajo; por eso esta asignacion es solo el default y se vuelve
+# a fijar despues de la pregunta:
+#   nginx-local -> webcmp.conf.example       (Nginx hace TLS)
+#   external    -> webcmp-http.conf.example  (el TLS lo termina el proxy)
 vhost_src=$APP_DIR/deploy/nginx/webcmp.conf.example
 # El socket de Gunicorn sale de RuntimeDirectory=webcmp en el unit, o sea
 # /run/<GUNICORN_UNIT>/gunicorn.sock. Los tres tienen que decir lo mismo: el
@@ -1324,7 +1328,7 @@ HTTPS_PORT=$(ask HTTPS_PORT 443 'Puerto HTTPS' valid_port) || die 'Puerto invali
 
 PROXY_MODE=$(ask_one_of PROXY_MODE nginx-local 'Reverse proxy' \
     'nginx-local: Nginx instalado y configurado en esta maquina, con TLS' \
-    'external: hay un proxy externo (Nginx Proxy Manager). NO se instala Nginx' \
+    'external: el TLS lo termina un proxy externo (Nginx Proxy Manager) en otra maquina. Nginx SI se instala aca para servir /media/ y /static/' \
     ) || die 'Opcion invalida.'
 
 # TLS_MODE NO se pre-asigna a `none` antes de la pregunta. ask_one_of en modo no
@@ -1366,6 +1370,17 @@ else
     # fijo del modo, no una respuesta del operador, y por eso NO pasa por
     # ask_one_of: con PROXY_MODE=external no hay eleccion que hacer.
     TLS_MODE=none
+fi
+
+# El vhost que se renderiza depende del modo, y se decide ACA y no en la
+# definicion de `vhost_src`: PROXY_MODE todavia no existia cuando se declaro esa
+# variable. Ambos vhosts hacen proxy al mismo socket y sirven los mismos
+# directorios; la diferencia es que `external` no hace TLS (lo termina el proxy)
+# y propaga el X-Forwarded-Proto que ese proxy manda en vez de reescribirlo.
+if [ "$PROXY_MODE" = external ]; then
+    vhost_src=$APP_DIR/deploy/nginx/webcmp-http.conf.example
+else
+    vhost_src=$APP_DIR/deploy/nginx/webcmp.conf.example
 fi
 
 # --- Base de datos -------------------------------------------------------
@@ -1542,8 +1557,8 @@ cat <<EOF
   deploy.sh       $SCRIPT_PATH
   deploy.env      $CONFIG_FILE
   health check    $([ "$PROXY_MODE" = nginx-local ] \
-      && echo "https://$EXTERNAL_HOSTNAME/ en 127.0.0.1:$HTTPS_PORT con SNI" \
-      || echo "socket $GUNICORN_SOCKET con Host: $EXTERNAL_HOSTNAME")
+      && echo "https://$EXTERNAL_HOSTNAME/ en 127.0.0.1:$HTTPS_PORT con SNI (Nginx con TLS)" \
+      || echo "http://$EXTERNAL_HOSTNAME/ en 127.0.0.1:$HTTP_PORT (Nginx local, TLS en el proxy)")
 EOF
 if [ "$DRY_RUN" -eq 1 ]; then
     echo
@@ -1573,12 +1588,17 @@ APT_PACKAGES=(
     libpango1.0-dev
     redis-server
 )
-# Nginx SOLO con la opcion A. Con proxy externo, instalar Nginx seria dejar un
-# servicio escuchando en 80/443 que nadie pidio y que ademas choca con el proxy
-# de verdad si alguien abre el puerto por error.
-if [ "$PROXY_MODE" = nginx-local ]; then
-    APT_PACKAGES+=(nginx)
-fi
+# Nginx se instala en LOS DOS modos. La diferencia no es "con Nginx o sin
+# Nginx", es quien termina TLS:
+#   nginx-local -> Nginx hace TLS y hace de proxy.
+#   external    -> el TLS lo termina el proxy de afuera (Nginx Proxy Manager en
+#                  otra maquina), pero Nginx local SIGUE siendo necesario: es el
+#                  unico que puede servir /media/ y /static/ desde este
+#                  filesystem. Django no sirve media con DEBUG=False y WhiteNoise
+#                  solo sirve staticfiles, asi que sin este Nginx el logo y el
+#                  favicon de todas las paginas dan 404 junto con cada PDF
+#                  subido, y ningun health check lo detecta.
+APT_PACKAGES+=(nginx)
 # psycopg[binary] viene con su binario, asi que no hacen falta build-essential
 # ni headers de PostgreSQL para compilar el driver.
 
@@ -2354,20 +2374,18 @@ fi
 
 run systemctl daemon-reload
 
-# En nginx-local, www-data tiene que poder tocar el socket de Gunicorn (0770
-# webcmp:webcmp). Sin esto Nginx devuelve 502 en cada respuesta y el log dice
-# "connect() failed (13: Permission denied)", que parece un problema de permisos
-# que no lo es. Con proxy externo NO se toca: el Nginx que hace de proxy no es
-# este, asi que el grupo no le sirve de nada.
-if [ "$PROXY_MODE" = nginx-local ]; then
-    if id -nG www-data 2>/dev/null | tr ' ' '\n' | grep -qx "$SERVICE_GROUP"; then
-        echo "  www-data ya esta en el grupo $SERVICE_GROUP"
-    else
-        run usermod -aG "$SERVICE_GROUP" www-data
-        log "Reiniciando Nginx para que tome el grupo nuevo"
-        run systemctl restart nginx
-        echo "  www-data ahora puede tocar el socket"
-    fi
+# www-data tiene que poder tocar el socket de Gunicorn (0770 webcmp:webcmp). Sin
+# esto Nginx devuelve 502 en cada respuesta y el log dice "connect() failed (13:
+# Permission denied)", que parece un problema de permisos que no lo es.
+# Aplica a los DOS modos: en `external` el Nginx local sigue haciendo el proxy al
+# socket, aunque el TLS lo termine el proxy de afuera.
+if id -nG www-data 2>/dev/null | tr ' ' '\n' | grep -qx "$SERVICE_GROUP"; then
+    echo "  www-data ya esta en el grupo $SERVICE_GROUP"
+else
+    run usermod -aG "$SERVICE_GROUP" www-data
+    log "Reiniciando Nginx para que tome el grupo nuevo"
+    run systemctl restart nginx
+    echo "  www-data ahora puede tocar el socket"
 fi
 
 # --- C.9 Reverse proxy ---------------------------------------------------
@@ -2479,16 +2497,20 @@ gen_self_signed() {
     fi
 }
 
-# install_vhost <certificado> <clave>
+# install_vhost [certificado] [clave]
 #
 # Renderiza el ejemplo, lo instala, lo habilita, verifica con `nginx -t` y
 # recarga. Se llama MAS DE UNA VEZ en la primera corrida con Let's Encrypt: el
 # challenge de ACME lo sirve el puerto 80 de este mismo vhost, asi que el vhost
 # tiene que estar de pie antes de certbot; y un vhost con `ssl` no pasa `nginx -t`
 # sin un certificado que cargar.
+#
+# Sin argumentos se usa el vhost SIN TLS (modo `external`): no hay certificado
+# que cargar ni rutas que sustituir, porque webcmp-http.conf.example no declara
+# `ssl_certificate`.
 install_vhost() {
-    TLS_CERT=$1
-    TLS_KEY=$2
+    TLS_CERT=${1:-}
+    TLS_KEY=${2:-}
     local tmp
 
     # --- Archivo y activacion ---
@@ -2631,7 +2653,13 @@ setup_nginx_local() {
     fi
 
     # --- Certificado ---
-    if [ "$TLS_MODE" = self-signed ]; then
+    if [ "$TLS_MODE" = none ]; then
+        # TLS externo: este vhost escucha HTTP y nada mas. No hay certificado
+        # que emitir ni que cargar, y certbot NO debe correr: el proxy de afuera
+        # es el que habla TLS con el navegador y el que renueva su certificado.
+        log "Sin TLS en esta maquina: lo termina el proxy externo"
+        install_vhost
+    elif [ "$TLS_MODE" = self-signed ]; then
         TLS_CERT=$TLS_DIR/$EXTERNAL_HOSTNAME.crt
         TLS_KEY=$TLS_DIR/$EXTERNAL_HOSTNAME.key
         if [ -f "$TLS_CERT" ] && [ -f "$TLS_KEY" ]; then
@@ -2703,6 +2731,11 @@ setup_nginx_local() {
             # durante la emision, en vez de estar caido.
             local boot_cert=$TLS_DIR/bootstrap-$EXTERNAL_HOSTNAME.crt
             local boot_key=$TLS_DIR/bootstrap-$EXTERNAL_HOSTNAME.key
+            # install_vhost escribe las globales TLS_CERT/TLS_KEY (render_vhost
+            # las lee). Sin estas copias, la llamada de abajo pisaba el par real
+            # de Let's Encrypt con el temporal, y el vhost definitivo quedaba
+            # apuntando al autofirmado: emision exitosa y certificado invalido.
+            local real_cert=$TLS_CERT real_key=$TLS_KEY
             if [ ! -f "$boot_cert" ] || [ ! -f "$boot_key" ]; then
                 ensure_dir "$TLS_DIR" 0755 root root
                 gen_self_signed "$boot_cert" "$boot_key"
@@ -2717,74 +2750,68 @@ setup_nginx_local() {
             # Con el certificado real en disco, el mismo render cambia de rutas y
             # `install_if_changed` reinstala. El autofirmado temporal queda en
             # $TLS_DIR, ya sin uso: se puede borrar a mano.
-            install_vhost "$TLS_CERT" "$TLS_KEY"
+            install_vhost "$real_cert" "$real_key"
         fi
     fi
 }
 
+# El Nginx local se instala y configura en LOS DOS modos. En `external` no hace
+# TLS, pero sigue siendo el unico que puede servir /media/ y /static/ desde este
+# filesystem, y el que evita exponer Gunicorn en la red.
+setup_nginx_local
+
 if [ "$PROXY_MODE" = external ]; then
-    log "Proxy externo (Nginx Proxy Manager): NO se instala ni se toca Nginx"
-    # El bloque de arriba es lo que el operador tiene que escribir en NPM. Se
-    # imprime entero y no resumido: el error clasico de esta topologia es poner
-    # el upstream bien y olvidar un header, y el sintoma (bucle de logout por
-    # cookies seguras que no viajan) no dice "te falta X-Forwarded-Proto".
+    log "Proxy externo (Nginx Proxy Manager): TLS afuera, Nginx local sirve los archivos"
+    # La IP con la que el LXC se hace visible para el NPM. `hostname -I` lista
+    # todas las direcciones y la primera es la de la interfaz principal. Si sale
+    # vacia no es fatal: se imprime el placeholder y el operador la completa.
+    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     cat <<EOF
 
   Datos del upstream para Nginx Proxy Manager:
 
-    Domain Names        $EXTERNAL_HOSTNAME${WWW_HOSTNAME:+, $WWW_HOSTNAME}
-    Scheme              https
-    Forward Hostname    \$host
-    Forward Proto       \$scheme
-    Block Exploits      on
-    Websockets Support  on      (el vhost de Nginx local lo deja puesto tambien)
-    HTTP/2 Support      on
-    SSL                 el que termine el proxy. Esta maquina NO emite
-                        certificado en la opcion B: por eso el health check de
-                        deploy.sh va al socket y no a https://\$EXTERNAL_HOSTNAME.
+    Domain Names           $EXTERNAL_HOSTNAME${WWW_HOSTNAME:+, $WWW_HOSTNAME}
+    Scheme                 http     (NPM -> Nginx local; el TLS lo pone NPM)
+    Forward Hostname / IP  ${LAN_IP:-IP_DEL_LXC}
+    Forward Port           $HTTP_PORT
+    Block Common Exploits  on
+    Websockets Support     on       (el grafico de sounding las usa)
+    HTTP/2 Support         on
+    SSL                    el certificado lo emite NPM (Let's Encrypt). Para el
+                           challenge HTTP-01, el dominio tiene que resolver a la
+                           IP de NPM y el puerto 80 tiene que llegar ahi.
 
-    Advanced > Custom Locations:
-      /static/   ->  $APP_DIR/staticfiles/
-      /media/    ->  $APP_DIR/media/
+  Que hace el Nginx de esta maquina (NO es opcional):
+    - Sirve /static/ y /media/ desde $APP_DIR. Django no sirve media con
+      DEBUG=False y WhiteNoise solo sirve staticfiles: sin este Nginx, el logo,
+      el favicon y cada PDF subido dan 404.
+    - Hace proxy a Gunicorn por $GUNICORN_SOCKET, que NO se expone en la red.
+    - Propaga el X-Forwarded-Proto que manda NPM. Si lo reescribiera con
+      \$scheme, Django no veria la peticion como segura y el login entraria en
+      un bucle de logout.
 
-    Detalle del upstream:
-      Si NPM corre en el mismo host y con acceso al sistema de archivos:
-        Forward Hostname / IP  = 127.0.0.1
-        Forward Port            = <puerto TCP en el que Gunicorn escuche>
-        (el unit de systemd solo abre el socket unix $GUNICORN_SOCKET;
-         para un upstream TCP hay que agregar un --bind tcp:127.0.0.1:<puerto>
-         al ExecStart del unit y un daemon-reload)
+    No hace falta configurar Custom Locations. NPM manda X-Forwarded-Proto por
+    defecto; si personalizaste su configuracion avanzada, comprueba que ese
+    header siga ahi: es el que hace que Django vea la peticion como segura.
 
-      Si NPM corre en un contenedor: no puede ver $GUNICORN_SOCKET. Montar
-      /run/$GUNICORN_UNIT del host dentro del contenedor, o usar un bind TCP en
-      una IP de la LAN, no 127.0.0.1 (dentro del contenedor, 127.0.0.1 es el
-      propio contenedor).
+    Verificacion despues del deploy, desde el LXC:
+      curl -sSI http://127.0.0.1:$HTTP_PORT/ | head -1
+      curl -sSI http://127.0.0.1:$HTTP_PORT/static/dist/css/tabler.min.css | head -1
+      curl -sSI http://127.0.0.1:$HTTP_PORT/media/<archivo-subido> | head -1
 
-    Headers que tiene que mandar NPM (mismo criterio que el vhost de Nginx,
-    que los repite en \`location /\` porque no se heredan):
-      Host               = \$host
-      X-Forwarded-Proto  = \$scheme
-      X-Forwarded-For    = \$proxy_add_x_forwarded_for
-      X-Forwarded-Host   = \$host
+  Firewall (el instalador NO lo toca):
+    El puerto $HTTP_PORT queda alcanzable en la red. Limitarlo a la maquina del
+    NPM; nunca abrirlo a la LAN entera:
+      sudo ufw allow from <IP_DEL_NPM> to any port $HTTP_PORT proto tcp
+      sudo ufw deny $HTTP_PORT/tcp
 
-    Timeout / limites (copiados de deploy/nginx/webcmp.conf.example):
-      proxy_read_timeout    300s     (exportacion de graficos y PDFs)
-      proxy_connect_timeout 75s
-      client_max_body_size  20M      (adjuntos PDF de avisos y reportes)
-
-  Aviso importante sobre SSL y HSTS:
-    production.py tiene SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','https').
-    Sin X-Forwarded-Proto=https, request.is_secure() da False, las cookies de
-    sesion y CSRF SECURE no se envian y el usuario entra en un bucle de logout.
-    SECURE_HSTS_SECONDS=31536000 con IncludeSubDomains y Preload: si NPM emite
-    HSTS y despues se cae el TLS, el navegador se niega a volver en http://
-    durante un ano. Habilitarlo recien cuando https este estable.
+  Aviso sobre HSTS:
+    production.py tiene SECURE_HSTS_SECONDS=31536000 con IncludeSubDomains y
+    Preload. Si NPM emite HSTS y despues se cae el TLS, el navegador se niega a
+    volver por http:// durante un ano. Habilitarlo recien cuando https este
+    estable.
 
 EOF
-    log "Health check apuntando al upstream local"
-    echo "  socket: $GUNICORN_SOCKET con Host: $EXTERNAL_HOSTNAME (sin TLS: ese lo hace el proxy)"
-else
-    setup_nginx_local
 fi
 
 # --- C.10 /etc/webcmp/deploy.env -----------------------------------------
@@ -2841,14 +2868,16 @@ PUBLIC_HOSTNAME=$EXTERNAL_HOSTNAME
 PROXY_MODE=$PROXY_MODE
 EOF
         if [ "$PROXY_MODE" = external ]; then
-            # El health check va al socket: es el mismo camino que usa el proxy
-            # externo, sin el TLS de por medio y sin depender de que el proxy
-            # este arriba. Con el default (443 en 127.0.0.1) este deploy falla
-            # por construccion en esta topologia.
+            # El health check atraviesa el Nginx local por HTTP: es el camino
+            # real de esta topologia, y detecta un vhost roto o un /media/ sin
+            # servir. Antes iba directo al socket de Gunicorn, que dejaba en
+            # verde un Nginx mal configurado.
+            #
+            # NO se define HEALTHCHECK_UNIX_SOCKET: deploy.sh le da prioridad
+            # sobre la URL y el --resolve, y volveriamos al camino de antes.
             cat <<EOF
-HEALTHCHECK_URL=http://localhost/
-HEALTHCHECK_UNIX_SOCKET=$GUNICORN_SOCKET
-HEALTHCHECK_HOST_HEADER=$EXTERNAL_HOSTNAME
+HEALTHCHECK_URL=http://$EXTERNAL_HOSTNAME/
+HEALTHCHECK_RESOLVE=$EXTERNAL_HOSTNAME:$HTTP_PORT:127.0.0.1
 EOF
         else
             cat <<EOF
@@ -3062,10 +3091,10 @@ else
         warn "$GUNICORN_UNIT quedo inactivo (journalctl -u $GUNICORN_UNIT)."
     fi
     run systemctl is-active --quiet "$HUEY_UNIT" || warn "$HUEY_UNIT quedo inactivo (journalctl -u $HUEY_UNIT)."
-    if [ "$PROXY_MODE" = nginx-local ]; then
-        run systemctl restart nginx
-        run systemctl is-active --quiet nginx || warn "nginx quedo inactivo (journalctl -u nginx)."
-    fi
+    # Nginx corre en los dos modos: tambien en `external`, donde sirve /media/,
+    # /static/ y hace proxy al socket.
+    run systemctl restart nginx
+    run systemctl is-active --quiet nginx || warn "nginx quedo inactivo (journalctl -u nginx)."
 fi
 
 # --- C.13 Resumen --------------------------------------------------------

@@ -310,9 +310,10 @@ fi
 # "$PUBLIC_HOSTNAME:443:127.0.0.1", que es el default de siempre; con URL puesta
 # y esta vacia, el health check sale por DNS de verdad.
 : "${HEALTHCHECK_RESOLVE:=}"
-# `curl --unix-socket`. Con proxy externo (Nginx Proxy Manager) el upstream no
-# es un puerto TCP de la maquina: es el socket de Gunicorn. Es el unico modo de
-# probar el mismo camino que el proxy sin abrir un puerto que no hace falta.
+# `curl --unix-socket`. Ya no lo usa el instalador: con proxy externo el health
+# check atraviesa el Nginx local por HTTP y con nginx-local atraviesa TLS. La
+# clave se conserva porque deploy.env es un archivo que el operador puede editar
+# a mano, y una instalacion vieja que la tenga escrita sigue funcionando.
 : "${HEALTHCHECK_UNIX_SOCKET:=}"
 # Cabecera `Host:` explicita. Necesaria con socket unix: curl pone `localhost` y
 # Django responde DisallowedHost, que el health check leeria como un sitio caido.
@@ -393,13 +394,25 @@ configure_deploy_env() {
   Proxy local (Nginx en esta maquina, TLS aqui):
       HEALTHCHECK_URL=https://<host>/  y  HEALTHCHECK_RESOLVE=<host>:443:127.0.0.1
       Asi entra a 127.0.0.1:443 con el SNI correcto, sin salir del servidor.
-  Proxy externo (Nginx Proxy Manager, u otro):
-      HEALTHCHECK_URL=http://localhost/  HEALTHCHECK_UNIX_SOCKET=/run/webcmp/gunicorn.sock
-      HEALTHCHECK_HOST_HEADER=<host>
-      Asi prueba el socket de Gunicorn, que es lo que el proxy externo usa de verdad.
+  Proxy externo (Nginx Proxy Manager en otra maquina, TLS alla):
+      HEALTHCHECK_URL=http://<host>/  y  HEALTHCHECK_RESOLVE=<host>:80:127.0.0.1
+      Asi atraviesa el Nginx local por HTTP (que sirve /media/ y /static/ y hace
+      proxy al socket) y detecta un vhost roto, cosa que ir directo al socket
+      no detecta. El 443 de esta maquina no lo escucha nadie en esa topologia.
 EOF
-    cfg_hc_url=$(ask HEALTHCHECK_URL "${HEALTHCHECK_URL:-https://$PUBLIC_HOSTNAME/}" 'URL del health check (vacio = default: https://<PUBLIC_HOSTNAME>/ en 127.0.0.1:443)' valid_url) || die 'Valor invalido.'
-    cfg_hc_resolve=$(ask HEALTHCHECK_RESOLVE "${HEALTHCHECK_RESOLVE:-$PUBLIC_HOSTNAME:443:127.0.0.1}" 'curl --resolve host:port:ip (none = sin --resolve; vacio = el default)' valid_resolve) || die 'Valor invalido.'
+    # El default depende del modo. En `external` el 443 de esta maquina no lo
+    # escucha nadie: proponer https://...:443 obligaria al operador a corregir a
+    # mano cada vez, y en no-interactivo instalaria un health check que no puede
+    # pasar nunca.
+    if [ "$PROXY_MODE" = external ]; then
+        hc_default_url="http://${cfg_public_hostname:-$PUBLIC_HOSTNAME}/"
+        hc_default_resolve="${cfg_public_hostname:-$PUBLIC_HOSTNAME}:80:127.0.0.1"
+    else
+        hc_default_url="https://${cfg_public_hostname:-$PUBLIC_HOSTNAME}/"
+        hc_default_resolve="${cfg_public_hostname:-$PUBLIC_HOSTNAME}:443:127.0.0.1"
+    fi
+    cfg_hc_url=$(ask HEALTHCHECK_URL "${HEALTHCHECK_URL:-$hc_default_url}" "URL del health check (vacio = default: $hc_default_url)" valid_url) || die 'Valor invalido.'
+    cfg_hc_resolve=$(ask HEALTHCHECK_RESOLVE "${HEALTHCHECK_RESOLVE:-$hc_default_resolve}" "curl --resolve host:port:ip (none = sin --resolve; vacio = $hc_default_resolve)" valid_resolve) || die 'Valor invalido.'
     cfg_hc_socket=$(ask HEALTHCHECK_UNIX_SOCKET "$HEALTHCHECK_UNIX_SOCKET" 'Socket unix de Gunicorn (vacio = ninguno)' valid_socket_path) || die 'Valor invalido.'
     cfg_hc_host=$(ask HEALTHCHECK_HOST_HEADER "$HEALTHCHECK_HOST_HEADER" 'Cabecera Host: del health check (vacio = la de la URL)' valid_hostname) || die 'Valor invalido.'
 
@@ -503,7 +516,7 @@ check_units() {
     if [ -n "$PROXY_MODE" ]; then
         case "$PROXY_MODE" in
             nginx-local) check_ok "PROXY_MODE=$PROXY_MODE (Nginx local: el health check necesita 443 en 127.0.0.1)." ;;
-            external)    check_ok "PROXY_MODE=$PROXY_MODE (proxy externo: el health check deberia apuntar al socket o al upstream local)." ;;
+            external)    check_ok "PROXY_MODE=$PROXY_MODE (proxy externo: el health check deberia apuntar a http://<host>/ en 127.0.0.1:80, via el Nginx local)." ;;
             *)           check_fail "PROXY_MODE='$PROXY_MODE' no es un modo conocido (nginx-local | external)." ;;
         esac
     else
@@ -894,8 +907,8 @@ case "$code" in
         fi
         if [ -n "$HEALTHCHECK_UNIX_SOCKET" ]; then
             die "Sin respuesta de $hc_url por el socket $HEALTHCHECK_UNIX_SOCKET.
-Con PROXY_MODE=external el health check va al socket de Gunicorn: si contesta 000,
-el problema NO es el proxy externo. Mirá journalctl -u $GUNICORN_UNIT y que exista
+El health check configurado va directo a Gunicorn, no al sitio: si contesta 000,
+el problema esta en el servicio. Mira journalctl -u $GUNICORN_UNIT y que exista
 $HEALTHCHECK_UNIX_SOCKET con el servicio arriba."
         fi
         die "Sin respuesta de $hc_url.
@@ -903,8 +916,9 @@ Si el servidor tiene un certificado autofirmado, poné
 HEALTHCHECK_INSECURE=1 en $CONFIG para este servidor de prueba.
 NUNCA en produccion: --insecure deja de detectar un certificado vencido o de otro
 dominio, que es exactamente lo que el health check deberia estar mirando.
-Si el proxy es externo, corré $0 --configure: el destino por defecto (443 en
-127.0.0.1) no existe en esa topologia y el health check no puede pasar."
+Si el proxy es externo, revisá que el Nginx local de esta maquina este arriba
+(systemctl status nginx) y que HEALTHCHECK_RESOLVE apunte a 127.0.0.1 en el
+puerto HTTP del instalador, no al 443: el 443 de esta maquina no lo escucha nadie."
         ;;
     *) die "El sitio responde $code, se esperaba 2xx o 3xx." ;;
 esac
