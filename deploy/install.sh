@@ -713,8 +713,62 @@ recover_django_keys() {
 }
 
 recover_env_password() {
-    printf 'Queda escrita en %s. Para cambiarla se edita esa clave y se reinicia %s.\n' \
-        "$ENV_FILE" "$GUNICORN_UNIT"
+    # Este mensaje decia "queda escrita en el .env" y era falso: el instalador
+    # nunca escribe SUPERUSER_PASSWORD ahi. Un operador que pierde la contrasena
+    # con esa frase en la mano busca una clave que no existe, y la busca en el
+    # unico archivo donde no puede estar. Lo unico que queda es el hash en la
+    # base, asi que la unica salida es cambiarla.
+    printf 'No queda guardada en ningun archivo: solo el hash en la base.\n'
+    printf '  Para cambiarla:\n'
+    printf '    sudo systemd-run --quiet --pipe --wait --uid=%s \\\n' "$SERVICE_USER"
+    printf '      -p EnvironmentFile=%s -p Environment=PRODUCTION=1 \\\n' "$ENCRYPTION_ENV"
+    printf '      --working-directory=%s %s manage.py changepassword %s\n' \
+        "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME"
+}
+
+# --- Superusuario: consulta y reseteo ------------------------------------
+# Usan el mismo systemd-run que `manage()` pero con su propio
+# `-p Environment=`, cosa que `manage()` no puede agregar: por eso no se reusa.
+# Se ejecutan despues de `migrate`, asi que la tabla ya existe.
+superuser_exists() {
+    systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py shell -c \
+        "import sys
+from django.contrib.auth import get_user_model
+sys.exit(0 if get_user_model().objects.filter(username='$SUPERUSER_USERNAME').exists() else 1)"
+}
+
+reset_superuser_password() {
+    # La contrasena viaja por entorno y no por argv: en `ps` la veria cualquiera
+    # de la maquina. Es el mismo camino que usa `createsuperuser` mas abajo.
+    systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py shell -c \
+        "import os
+from django.contrib.auth import get_user_model
+u = get_user_model().objects.get(username='$SUPERUSER_USERNAME')
+u.set_password(os.environ['DJANGO_SUPERUSER_PASSWORD'])
+u.is_staff = True
+u.is_superuser = True
+u.is_active = True
+u.save()"
+}
+
+print_changepassword_hint() {
+    printf '  sudo systemd-run --quiet --pipe --wait --uid=%s \\\n' "$SERVICE_USER" >&2
+    printf '    -p EnvironmentFile=%s -p Environment=PRODUCTION=1 \\\n' "$ENCRYPTION_ENV" >&2
+    printf '    --working-directory=%s %s manage.py changepassword %s\n' \
+        "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME" >&2
 }
 
 # ¿Esta corrida tiene que preguntar? En dry-run no: preguntar por valores que
@@ -1405,8 +1459,9 @@ DB_ENGINE=postgresql
 cat >&2 <<EOF
 
   Base de datos: PostgreSQL.
-  El motor no se pregunta. Es el unico que trae driver en requirements/prod.txt
-  (psycopg[binary]), y el unico que el proyecto asume para produccion. MySQL
+  El motor no se pregunta. Es el unico que trae driver en requirements/base.txt
+  (psycopg[binary], que prod.txt incluye), y el unico que el proyecto asume para
+  produccion. MySQL
   exigiria instalar mysqlclient fuera de los pins, y SQLite no tiene
   concurrencia ni lee DB_*; ninguno de los dos corresponde a un sitio con
   usuarios entrando.
@@ -1454,19 +1509,25 @@ cat >&2 <<EOF
 EOF
 EMAIL_HOST=$(ask EMAIL_HOST "mx.caonao.cu" 'Servidor SMTP, SIN @ (vacio = todavia no hay correo)' valid_smtp_host) || die 'Host SMTP invalido. Es el servidor sin @ (ej. mx.caonao.cu); la direccion de correo va en "Usuario SMTP".'
 EMAIL_PORT=$(ask EMAIL_PORT 587 'Puerto SMTP' valid_port) || die 'Puerto SMTP invalido.'
-EMAIL_USE_TLS=si
-EMAIL_USE_SSL=no
+# OJO con el vocabulario. Las PREGUNTAS hablan si/no (es lo que se lee en
+# pantalla), pero los VALORES que van al .env son los que Django compara:
+# `os.getenv('EMAIL_USE_TLS', 'True') == 'True'`. Escribir `si` deja la
+# comparacion en False sin ningun error: el correo sale en claro por el 587 y
+# el unico sintoma es un SMTP que rechaza el AUTH o un mensaje que nunca llega.
+# Lo mismo vale para EMAIL_USE_SSL y USE_REDIS_CACHE.
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
 if [ "$EMAIL_PORT" = 465 ]; then
     # 465 es SMTPS implicito: TLS desde el principio de la conexion. Preguntar
     # STARTTLS ahi produce una combinacion que no existe (SSL y TLS los dos) y
     # Django falla al abrir el socket con un error que no menciona el puerto.
-    EMAIL_USE_TLS=no
-    EMAIL_USE_SSL=si
-    echo "  puerto 465: EMAIL_USE_SSL=si y EMAIL_USE_TLS=no (TLS implicito)."
+    EMAIL_USE_TLS=False
+    EMAIL_USE_SSL=True
+    echo "  puerto 465: EMAIL_USE_SSL=True y EMAIL_USE_TLS=False (TLS implicito)."
 elif ask_yes_no si 'STARTTLS en el SMTP? (EMAIL_USE_TLS)'; then
-    EMAIL_USE_TLS=si
+    EMAIL_USE_TLS=True
 else
-    EMAIL_USE_TLS=no
+    EMAIL_USE_TLS=False
 fi
 EMAIL_HOST_USER=$(ask EMAIL_HOST_USER "meteocamaguey" 'Usuario SMTP: login o correo completo (vacio = SMTP sin usuario)' valid_smtp_user) || die 'Usuario SMTP invalido.'
 EMAIL_HOST_PASSWORD=$(ask_optional_secret EMAIL_HOST_PASSWORD "" 'Contrasena SMTP (vacio = SMTP sin contrasena)') || die 'Contrasena SMTP invalida.'
@@ -1482,8 +1543,8 @@ else
     EMAIL_CONFIGURED=0
     # Si no se configura SMTP, dejar las claves vacias para que no quede CHANGE_ME
     EMAIL_PORT=587
-    EMAIL_USE_TLS=si
-    EMAIL_USE_SSL=no
+    EMAIL_USE_TLS=True
+    EMAIL_USE_SSL=False
     EMAIL_HOST_USER=
     EMAIL_HOST_PASSWORD=
     DEFAULT_FROM_EMAIL=
@@ -1524,14 +1585,20 @@ SUPERUSER_EMAIL=$(ask SUPERUSER_EMAIL "$SUPERUSER_EMAIL_DEFAULT" 'Correo del sup
 # pidieran.
 SUPERUSER_PASSWORD=$(ask_secret SUPERUSER_PASSWORD "${SUPERUSER_PASSWORD:-}" 'Contrasena del superusuario') || die 'Contrasena invalida.'
 # Mismo criterio que DB_PASS: en CI no hay nadie a quien avisarle.
-if secret_was_generated SUPERUSER_PASSWORD && [ "$INTERACTIVE" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
+# Pero aca hay una diferencia que costo una contrasena: DB_PASS queda en el .env
+# y se puede recuperar; esta NO se escribe en ningun archivo. Con la guarda
+# `INTERACTIVE -eq 1`, un `--non-interactive` sin SUPERUSER_PASSWORD generaba la
+# contrasena, la usaba para crear la cuenta y la tiraba: el resumen decia
+# "Superusuario admin creado" y no habia forma de entrar. Generada es generada,
+# haya TTY o no.
+if secret_was_generated SUPERUSER_PASSWORD && [ "$DRY_RUN" -eq 0 ]; then
     print_once_secret 'SUPERUSER_PASSWORD' "$SUPERUSER_PASSWORD" recover_env_password
 fi
 
 # --- Otros campos del .env ----------------------------------------------
 
-USE_REDIS_CACHE=no
-if ask_yes_no si 'Cache con Redis? (USE_REDIS_CACHE)'; then USE_REDIS_CACHE=si; fi
+USE_REDIS_CACHE=False
+if ask_yes_no si 'Cache con Redis? (USE_REDIS_CACHE)'; then USE_REDIS_CACHE=True; fi
 REDIS_URL=$(ask REDIS_URL redis://127.0.0.1:6379/1 'URL de Redis') || die 'URL de Redis invalida.'
 LOG_LEVEL=$(ask LOG_LEVEL INFO 'Nivel de log' valid_log_level) || die 'Nivel de log invalido.'
 FTP_OBS=no
@@ -2143,13 +2210,36 @@ fi
 # agrega, asi que funciona igual con un .env recien generado (todo commented-out
 # o con CHANGE_ME) y con uno afinado a mano (donde hay valores que hay que
 # RESPETAR y no pisar a ciegas).
+# Las claves secretas no pueden pasar por `run`: su rama de dry-run imprime el
+# comando completo, y ese dry-run se pega en tickets, issues y chats. El `mask`
+# de la linea siguiente llega tarde, porque el valor ya salio impreso arriba.
+# Con este runner, el dry-run muestra `<oculto>` y el valor real no toca la
+# salida. Aplica a DB_PASS, EMAIL_HOST_PASSWORD y FTP_OBS_PASS.
+run_env_set() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '  [dry-run] env_set %s %s %s\n' "$ENV_FILE" "$1" "$(mask "$1" "$2")"
+    else
+        local st=0
+        env_set "$ENV_FILE" "$1" "$2" || st=$?
+        [ "$st" -eq 0 ] && CHANGED=1
+        return "$st"
+    fi
+}
+
 apply_env_value() {
-    run env_set "$ENV_FILE" "$1" "$2"
+    run_env_set "$1" "$2"
     printf '  %s=%s\n' "$1" "$(mask "$1" "$2")"
 }
 
 step 1 "Sustituyendo los valores del .env"
 apply_env_value EXTERNAL_HOSTNAME "$EXTERNAL_HOSTNAME"
+# SITE_URL arma los enlaces absolutos de los correos (facturas, avisos, reportes)
+# y production.py aborta si falta. El generador la escribe con su hostname por
+# defecto, asi que si el operador elige otro dominio esa linea queda apuntando a
+# meteocamaguey.cu mientras ALLOWED_HOSTS ya apunta al nuevo: los correos salen
+# con un enlace a un sitio que no es el que atiende. Se escribe con la respuesta,
+# igual que las otras tres listas de abajo.
+apply_env_value SITE_URL "https://$EXTERNAL_HOSTNAME/"
 if [ -n "$WWW_HOSTNAME" ]; then
     ALLOWED_HOSTS="$EXTERNAL_HOSTNAME,$WWW_HOSTNAME"
     ORIGINS="https://$EXTERNAL_HOSTNAME,https://$WWW_HOSTNAME"
@@ -2326,30 +2416,42 @@ else
     # -p Environment=NOMBRE=valor. Es el bug documentado en deploy.sh:200-207 y
     # el que hace que este paso se escriba asi y no como un `export` de la
     # config de install.sh.
+    #
+    # Segunda corrida: `createsuperuser --noinput` con el usuario ya creado
+    # aborta con "That username is already taken", la contrasena que se acaba de
+    # imprimir no se aplica, y el warning mandaba a repetir justo el comando que
+    # falla. Se consulta primero y, si la cuenta existe, se le pone la
+    # contrasena respondida (la impresa) y se aseguran los flags. Sin eso, una
+    # re-instalacion deja un panel inaccesible con una clave recien generada en
+    # la mano.
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [dry-run] systemd-run ... createsuperuser --noinput --username %s\n' "$SUPERUSER_USERNAME"
-    else
-        if systemd-run --quiet --pipe --wait \
-            --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
-            -p "EnvironmentFile=$ENCRYPTION_ENV" \
-            -p Environment=PRODUCTION=1 \
-            -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
-            -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
-            --working-directory="$APP_DIR" \
-            "$VENV_DIR/bin/python" manage.py createsuperuser --noinput \
-            --username "$SUPERUSER_USERNAME" --email "$SUPERUSER_EMAIL"
-        then
+        printf '  [dry-run] si la cuenta existe: se le resetea la contrasena y se asegura is_superuser\n'
+    elif superuser_exists; then
+        if reset_superuser_password; then
             SUPERUSER_CREATED=1
-            echo "  superusuario listo."
+            echo "  superusuario $SUPERUSER_USERNAME ya existia: contrasena actualizada."
         else
-            warn "No se pudo crear el superusuario. Se deja el resto instalado."
-            warn "Crear a mano (mismo contexto que el sitio):"
-            printf '  sudo systemd-run --quiet --pipe --wait --uid=%s -p EnvironmentFile=%s \\\n' \
-                "$SERVICE_USER" "$ENCRYPTION_ENV" >&2
-            printf '    -p Environment=PRODUCTION=1 -p Environment=DJANGO_SUPERUSER_PASSWORD=<clave> \\\n' >&2
-            printf '    --working-directory=%s %s manage.py createsuperuser --noinput --username %s\n' \
-                "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME" >&2
+            warn "El superusuario $SUPERUSER_USERNAME existe y no se pudo actualizar la"
+            warn "contrasena. Cambiala a mano en el mismo contexto que corre el sitio:"
+            print_changepassword_hint
         fi
+    elif systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py createsuperuser --noinput \
+        --username "$SUPERUSER_USERNAME" --email "$SUPERUSER_EMAIL"
+    then
+        SUPERUSER_CREATED=1
+        echo "  superusuario listo."
+    else
+        warn "No se pudo crear el superusuario. Se deja el resto instalado."
+        warn "Crear a mano (mismo contexto que el sitio):"
+        print_changepassword_hint
     fi
 fi
 
@@ -2948,7 +3050,11 @@ setup_deploy_scaffold() {
     # La privada la lee ssh como el usuario de despliegue, asi que su dueno es ese
     # usuario y el modo 600. No se usa install_if_changed porque el origen y el
     # destino son el mismo archivo y `install` se niega ("are the same file").
-    if [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
+    # El `-f` no es defensivo: en dry-run `ssh-keygen` no corre y el archivo no
+    # existe, asi que `stat` fallaba con "cannot statx" en medio del plan. Un
+    # error real en el dry-run es ruido que tapa los de verdad.
+    if [ -f "$DEPLOY_SSH_KEY" ] \
+        && [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
         run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY"
         run chmod 0600 "$DEPLOY_SSH_KEY"
     fi
