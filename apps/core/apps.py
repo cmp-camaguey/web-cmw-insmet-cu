@@ -286,6 +286,28 @@ class CoreConfig(AppConfig):
             except Exception:
                 logger.exception('on_error: fallo al registrar el error de %s', task.id)
 
+            # Aviso al admin, pero SOLO en el fallo final. Huey emite
+            # SIGNAL_ERROR en cada intento y deja en `task.retries` los que
+            # todavía le quedan; si quedan, la cola puede resolverlo sola en el
+            # reintento siguiente y avisar acá mandaría un error por algo que se
+            # arregló solo. Es el mismo cálculo que usa Huey para decidir si
+            # reencola (`final = not task.retries`).
+            if getattr(task, 'retries', 0):
+                return
+            try:
+                from apps.core.notifications import notify_task_failure
+
+                notify_task_failure(
+                    task.name,
+                    task_id=task.id,
+                    logical_key=_logical_key(task),
+                    error=str(exc) if exc is not None else '',
+                )
+            except Exception:
+                # El aviso es información derivada: si falla, el log de la tarea
+                # sigue siendo la fuente de verdad y no puede perderse por esto.
+                logger.exception('on_error: fallo al crear el aviso de %s', task.id)
+
         _TASK_SIGNALS_REGISTERED = True
 
     def ready(self):

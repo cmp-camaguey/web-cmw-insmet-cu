@@ -12,8 +12,8 @@ Dos mitades, y el test tiene que cubrir las dos:
 1. `huey_consumer` no llama a `django.setup()`; sin eso los decoradores
    `@huey.task()` nunca corren. Se resuelve con `config/huey_consumer_entry.py`.
 2. `django.setup()` tampoco basta: `CoreConfig.ready()` tiene que importar
-   `apps/core/tasks.py`, porque el proceso del consumer no importa vistas y nada
-   más lo haría.
+   `apps/core/tasks.py` —y `MeteoConfig.ready()` el suyo—, porque el proceso del
+   consumer no importa vistas y nada más lo haría.
 
 Por eso la aserción va en un SUBPROCESO. Dentro del proceso de test el registro
 siempre queda poblado —el runner importa módulos que a su vez importan
@@ -34,6 +34,9 @@ from config.huey import huey
 EXPECTED_TASKS = {
     'apps.core.tasks.generate_invoice_pdf_and_email_task',
     'apps.core.tasks.send_email_task',
+    # 026: recordatorio diario de avisos por vencer. Se registra por
+    # `MeteoConfig.ready()`, así que también tiene que estar en el consumer.
+    'apps.meteo.tasks.notificar_avisos_por_vencer',
 }
 
 # Lo que hace `huey_consumer config.huey_consumer_entry.huey`, reducido a lo que

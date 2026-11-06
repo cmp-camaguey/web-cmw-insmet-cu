@@ -82,6 +82,26 @@ def build_caches(use_redis, redis_url):
 CACHES = build_caches(USE_REDIS_CACHE, REDIS_URL)
 
 
+# ---------------------------------------------------------------------------
+# Avisos operativos (cambio 026)
+# ---------------------------------------------------------------------------
+# Apagado: no se crean filas y el icono no se renderiza. La poda SIGUE
+# corriendo a propósito: limpiar datos viejos no es una función visible que
+# haya que apagar, y dejarla detenida solo hace crecer la tabla.
+NOTIFICATIONS_ENABLED = os.getenv('NOTIFICATIONS_ENABLED', 'True') == 'True'
+# Días que se conserva una notificación ya leída.
+NOTIFICATIONS_RETENTION_READ = int(os.getenv('NOTIFICATIONS_RETENTION_READ', '30'))
+# Días que se conserva una no leída. Un aviso de hace 90 días que nadie abrió
+# ya no es accionable y solo infla el badge.
+NOTIFICATIONS_RETENTION_UNREAD = int(os.getenv('NOTIFICATIONS_RETENTION_UNREAD', '90'))
+# Entradas del desplegable del navbar. La página de historial no depende de esto.
+NOTIFICATIONS_MAX_VISIBLE = int(os.getenv('NOTIFICATIONS_MAX_VISIBLE', '10'))
+# Horas de antelación con que se avisa que un `Warning` está por vencer. Un día
+# y medio alcanza para editar el aviso o preparar el siguiente sin sonar antes
+# de tiempo: el aviso sigue vigente, solo está por terminar.
+NOTIFICATIONS_WARNING_HORIZON_HOURS = int(os.getenv('NOTIFICATIONS_WARNING_HORIZON_HOURS', '48'))
+
+
 def decrypt_secret_key(encrypted_secret_key, encryption_key):
     if not encrypted_secret_key or not encryption_key:
         return None
