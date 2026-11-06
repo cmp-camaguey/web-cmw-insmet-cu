@@ -526,20 +526,56 @@ check_units() {
 
 check_sudoers() {
     log "Sudoers"
-    local sudoers=/etc/sudoers.d/webcmp-deploy
-    if [ -r "$sudoers" ]; then
-        if visudo -c -f "$sudoers" >/dev/null 2>&1; then
-            check_ok "$sudoers es valido."
-        else
-            check_fail "$sudoers no es valido (visudo -c -f)."
-        fi
-        if grep -qE "^[[:space:]]*${DEPLOY_USER}[[:space:]]+ALL=" "$sudoers"; then
-            check_ok "El sudoers concede sudo a '$DEPLOY_USER'."
-        else
-            check_fail "El sudoers no concede sudo a '$DEPLOY_USER'."
-        fi
-    else
+    local sudoers=/etc/sudoers.d/webcmp-deploy grantees grantee covered=0
+    if [ ! -r "$sudoers" ]; then
         check_fail "No existe $sudoers."
+        return
+    fi
+    if visudo -c -f "$sudoers" >/dev/null 2>&1; then
+        check_ok "$sudoers es valido."
+    else
+        check_fail "$sudoers no es valido (visudo -c -f)."
+        return
+    fi
+
+    # El usuario que concede el sudoers NO es $DEPLOY_USER, y compararlo contra
+    # el era el defecto. $DEPLOY_USER es el dueno del checkout (webcmp), que
+    # corre git y gunicorn con shell nologin; el sudoers concede a quien INVOCA
+    # webcmp-deploy (deploy), que es un usuario distinto y con shell. Comparado
+    # contra $DEPLOY_USER, este chequeo daba FALLA en una instalacion correcta y
+    # mandaba a buscar un problema que no existia.
+    #
+    # Se leen los concedidos del propio archivo en vez de fijar `deploy` a mano:
+    # asi el chequeo sigue valiendo si alguien cambia el usuario de despliegue, y
+    # un sudoers que no concede el comando a NADIE se reporta como lo que es.
+    grantees=$(awk '/^[[:space:]]*#/ { next } /\/usr\/local\/sbin\/webcmp-deploy/ { print $1 }' "$sudoers" | sort -u)
+    if [ -z "$grantees" ]; then
+        check_fail "$sudoers no concede /usr/local/sbin/webcmp-deploy a ningun usuario."
+        return
+    fi
+    check_ok "Concede /usr/local/sbin/webcmp-deploy a: $(printf '%s' "$grantees" | tr '\n' ' ' | sed 's/ $//')"
+
+    # Si el chequeo lo corre alguien por sudo, ese es justamente el usuario que
+    # despues invoca el deploy por SSH. Comprobarlo es la prueba que importa, y
+    # evita el falso verde de "el archivo nombra a alguien".
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+        while IFS= read -r grantee; do
+            [ -n "$grantee" ] || continue
+            case "$grantee" in
+            %*)
+                id -nG "$SUDO_USER" 2>/dev/null | tr ' ' '\n' |
+                    grep -qxF "${grantee#%}" && covered=1
+                ;;
+            *)
+                [ "$grantee" = "$SUDO_USER" ] && covered=1
+                ;;
+            esac
+        done <<<"$grantees"
+        if [ "$covered" -eq 1 ]; then
+            check_ok "'$SUDO_USER' esta cubierto: puede invocar webcmp-deploy."
+        else
+            check_fail "'$SUDO_USER' NO figura en $sudoers: el deploy por SSH desde ese usuario va a fallar con 'command not allowed'."
+        fi
     fi
 }
 
@@ -553,7 +589,13 @@ check_healthcheck() {
             check_fail "HEALTHCHECK_UNIX_SOCKET=$HEALTHCHECK_UNIX_SOCKET no es un socket. El servicio corre?"
         fi
     else
-        check_skip "Sin HEALTHCHECK_UNIX_SOCKET: el health check usa la red."
+        # `SIN DATOS` era enganoso. Con PROXY_MODE=external el instalador escribe
+        # HEALTHCHECK_URL + HEALTHCHECK_RESOLVE y NO un socket, a proposito: el
+        # transporte es HTTP contra el Nginx local, que es el unico que sirve
+        # /media/ y /staticfiles/ desde este filesystem. No falta nada, asi que
+        # reportarlo como dato faltante manda a buscar una clave que no debe
+        # existir, y en la unica topologia que hay hoy.
+        check_ok "Sin socket (correcto en esta topologia): el health check va por red."
     fi
     if [ -n "$HEALTHCHECK_URL" ]; then
         check_ok "Destino: $resolved"
