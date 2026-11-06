@@ -501,6 +501,14 @@ commit desplegado sale de `/etc/webcmp/deployed` (lo escribe `deploy.sh`), y el
 ultimo de `main` de un `git ls-remote` contra el repositorio publico: sin
 credenciales, sin clave y sin tocar el checkout.
 
+Cuando hay actualizacion pendiente, el desplegable muestra ademas **que cambio**:
+la API publica de GitHub resuelve el rango `deployed...latest` y se listan hasta
+10 mensajes, solo la primera linea de cada uno. Se consulta unicamente en ese
+estado y se cachea 5 minutos, porque sin token el limite es de 60 peticiones por
+hora. Si GitHub limita o no responde, el aviso sigue mostrando los SHA: los
+mensajes son un extra, nunca un requisito. La URL de la API se puede cambiar con
+`UPDATE_REPO_API` si el repositorio se mueve.
+
 Lo que hace el boton **no** es desplegar. Escribe un archivo y se va:
 
 ```

@@ -24,6 +24,8 @@ import logging
 import os
 import re
 import subprocess
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime
 
 from django.conf import settings
@@ -55,6 +57,19 @@ RUN_MESSAGES = {
 # esta corriendo. Sin este limite, un `systemctl stop` a mitad de un despliegue
 # deja el panel en "Desplegando…" para siempre y el boton no vuelve nunca.
 RUN_STALE_SECONDS = 3600
+
+# --- Mensajes de los commits pendientes -------------------------------------
+# La clave lleva los dos SHA: un rango cacheado no sirve despues de desplegar,
+# porque el commit desplegado ya es otro.
+COMPARE_CACHE_KEY = 'dashboard:update:compare:{deployed}:{latest}'
+COMPARE_TTL = 300
+COMPARE_FAILURE_TTL = 60
+# Un desplegable con ochenta lineas no se lee. El resto se resume en el contador
+# que ya devuelve la API (`total_commits`).
+COMPARE_MAX_COMMITS = 10
+# La respuesta de `compare` trae el diff de cada commit. Sin tope, un release
+# grande devuelve megas que solo se van a descartar.
+COMPARE_MAX_BYTES = 512 * 1024
 
 
 def _read_text(path):
@@ -129,6 +144,100 @@ def deployed_sha():
     return raw if raw and SHA_RE.match(raw) else None
 
 
+def _fetch_compare(deployed, latest):
+    """Commits entre dos SHA segun la API publica, o ``None`` si no se pudo.
+
+    Se lee de GitHub y no del checkout local a proposito: el servidor no tiene
+    un clon con historia, y un ``git fetch`` desde la vista escribiria en disco
+    y competiria por ``.git/lock``. La API es la misma fuente que ya usa
+    ``ls-remote``, con el mismo limite anonimo.
+    """
+    url = f'{settings.UPDATE_REPO_API.rstrip("/")}/compare/{deployed}...{latest}'
+    request = urllib.request.Request(
+        url,
+        headers={
+            'Accept': 'application/vnd.github+json',
+            # La API de GitHub exige un User-Agent; sin el responde 403 y el
+            # panel perderia los mensajes sin motivo real.
+            'User-Agent': 'webcmp-dashboard',
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=settings.UPDATE_CHECK_TIMEOUT) as response:
+            raw = response.read(COMPARE_MAX_BYTES)
+    except urllib.error.HTTPError as exc:
+        # 403 es el limite anonimo agotado; 404, un commit que ya no esta en la
+        # rama. Los dos se degradan igual: sin mensajes, con los SHA que ya se
+        # muestran.
+        logger.info('compare devolvio HTTP %s', exc.code)
+        return None
+    except urllib.error.URLError, TimeoutError, OSError:
+        logger.warning('No se pudo consultar compare', exc_info=True)
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError, UnicodeDecodeError:
+        logger.warning('compare no devolvio JSON valido')
+        return None
+
+    commits = data.get('commits') if isinstance(data, dict) else None
+    if not isinstance(commits, list):
+        return None
+
+    total = data.get('total_commits')
+    if not isinstance(total, int) or total < 0:
+        total = len(commits)
+
+    items = []
+    for entry in commits[:COMPARE_MAX_COMMITS]:
+        if not isinstance(entry, dict):
+            continue
+        commit = entry.get('commit') if isinstance(entry.get('commit'), dict) else {}
+        message = commit.get('message')
+        # Solo la primera linea: el cuerpo de un commit no cabe en el
+        # desplegable y no es lo que decide si actualizar.
+        subject = message.splitlines()[0].strip() if isinstance(message, str) and message else ''
+        sha = entry.get('sha')
+        author = commit.get('author') if isinstance(commit.get('author'), dict) else {}
+        name = author.get('name') if isinstance(author, dict) else ''
+        items.append(
+            {
+                'sha': sha[:7] if isinstance(sha, str) and SHA_RE.match(sha) else None,
+                'subject': subject[:120],
+                'author': name[:60] if isinstance(name, str) else '',
+            }
+        )
+
+    return {'commits': items, 'total': total, 'truncated': total > len(items)}
+
+
+def pending_commits(deployed, latest, refresh=False):
+    """Mensajes de los commits entre ``deployed`` y ``latest``.
+
+    Devuelve ``None`` cuando no se pudo preguntar, y no una lista vacia: el
+    panel distingue "no hay mensajes que mostrar" de "no se pudo consultar", y
+    solo lo segundo amerita texto de respaldo. El estado del panel no depende de
+    esto: si la API falla, sigue diciendo que hay actualizacion.
+    """
+    if not deployed or not latest or deployed == latest:
+        return None
+
+    key = COMPARE_CACHE_KEY.format(deployed=deployed, latest=latest)
+    if not refresh:
+        cached = safe_cache_get(key)
+        # Se envuelve el resultado para poder cachear el fallo: `None` en el
+        # cache es indistinguible de un miss.
+        if cached is not None:
+            return cached.get('data')
+
+    payload = _fetch_compare(deployed, latest)
+    ttl = COMPARE_TTL if payload is not None else COMPARE_FAILURE_TTL
+    safe_cache_set(key, {'data': payload}, ttl)
+    return payload
+
+
 def _iso_text(value):
     """``value`` si es una fecha ISO 8601 interpretable, o ``None``.
 
@@ -201,8 +310,13 @@ def last_run():
     }
 
 
-def build_state(refresh=False):
-    """Estado que consume el panel. Una sola forma, la use quien la use."""
+def build_state(refresh=False, include_commits=True):
+    """Estado que consume el panel. Una sola forma, la use quien la use.
+
+    ``include_commits`` existe para la peticion de despliegue: decide con los
+    SHA, no con los mensajes, y no tiene por que esperar una segunda salida de
+    red que ademas puede tardar el timeout entero.
+    """
     deployed = deployed_sha()
     remote = remote_sha(refresh=refresh)
     run = last_run()
@@ -231,6 +345,13 @@ def build_state(refresh=False):
     else:
         reason = 'Este servidor no registra qué versión está sirviendo.'
 
+    # Solo se pregunta cuando hay algo pendiente: en `up_to_date` no hay rango
+    # que comparar, y en `unknown` no hay con que comparar. Un fallo de la API
+    # devuelve `None` y no cambia el estado: los SHA siguen siendo ciertos.
+    commits = None
+    if include_commits and state == 'available':
+        commits = pending_commits(deployed, remote['sha'], refresh=refresh)
+
     return {
         'state': state,
         'reason': reason,
@@ -240,6 +361,7 @@ def build_state(refresh=False):
         'latest_short': remote['sha'][:7] if remote['sha'] else None,
         'check_error': remote['error'],
         'last_run': run,
+        'commits': commits,
     }
 
 
@@ -271,7 +393,7 @@ class UpdateRequestView(LoginRequiredMixin, UserPassesTestMixin, View):
         return self.request.user.is_superuser
 
     def post(self, request, *args, **kwargs):
-        state = build_state()
+        state = build_state(include_commits=False)
 
         if state['state'] == 'running':
             return JsonResponse(

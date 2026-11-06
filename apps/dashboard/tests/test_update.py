@@ -13,9 +13,12 @@ el proceso web (`webcmp`) comparten a traves de archivos:
 import json
 import os
 import tempfile
+import urllib.error
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest import mock
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import TestCase, override_settings
@@ -391,6 +394,29 @@ class DashboardNavbarTest(UpdateTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'update-navbar')
 
+    def test_el_aviso_no_imprime_comentarios_literales(self):
+        # Django solo entiende `{# ... #}` cuando cabe en una linea; uno de
+        # varias se imprime tal cual en el HTML. Ya paso una vez en este repo,
+        # y este widget es justo donde volvio a colarse.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        html = self.client.get(reverse('dashboard:index')).content.decode()
+
+        self.assertNotIn('{#', html)
+
+    def test_el_desplegable_tiene_el_contenedor_de_mensajes(self):
+        # El JS busca `#update-navbar-commits`; si el contenedor desaparece del
+        # template, la lista se queda sin donde pintarse y falla en silencio.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse('dashboard:index'))
+
+        self.assertContains(response, 'update-navbar-commits')
+
     def test_el_aviso_no_se_renderiza_para_no_superusuario(self):
         self.client.force_login(self.plain)
 
@@ -398,3 +424,230 @@ class DashboardNavbarTest(UpdateTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'update-navbar')
+
+
+class FakeResponse:
+    """Respuesta minima de `urlopen`: solo lo que `_fetch_compare` usa."""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def read(self, size=None):
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class CompareFetchTest(TestCase):
+    """El parseo de `compare`: segunda y ultima salida de red del panel."""
+
+    def payload(self, **overrides):
+        body = {
+            'total_commits': 2,
+            'commits': [
+                {
+                    'sha': 'c' * 40,
+                    'commit': {
+                        'message': 'feat(commercial): arreglar facturacion\n\nCuerpo que no cabe.',
+                        'author': {'name': 'Yoelvis'},
+                    },
+                },
+                {
+                    'sha': 'd' * 40,
+                    'commit': {'message': 'chore: pin', 'author': {'name': 'Yoelvis'}},
+                },
+            ],
+        }
+        body.update(overrides)
+        return json.dumps(body).encode('utf-8')
+
+    def fetch(self, payload):
+        with mock.patch.object(
+            update_module.urllib.request, 'urlopen', return_value=FakeResponse(payload)
+        ) as urlopen:
+            return update_module._fetch_compare(SHA_DEPLOYED, SHA_LATEST), urlopen
+
+    def test_parsea_mensaje_sha_y_autor(self):
+        parsed, _ = self.fetch(self.payload())
+
+        first = parsed['commits'][0]
+        self.assertEqual(first['sha'], 'c' * 7)
+        # Solo la primera linea: el cuerpo de un commit no va al desplegable.
+        self.assertEqual(first['subject'], 'feat(commercial): arreglar facturacion')
+        self.assertEqual(first['author'], 'Yoelvis')
+        self.assertFalse(parsed['truncated'])
+        self.assertEqual(parsed['total'], 2)
+
+    def test_recorta_y_marca_los_que_sobran(self):
+        many = [{'sha': 'e' * 40, 'commit': {'message': f'commit {i}'}} for i in range(15)]
+        parsed, _ = self.fetch(self.payload(total_commits=15, commits=many))
+
+        self.assertEqual(len(parsed['commits']), update_module.COMPARE_MAX_COMMITS)
+        self.assertTrue(parsed['truncated'])
+        self.assertEqual(parsed['total'], 15)
+
+    def test_sha_invalido_no_se_reenvia(self):
+        body = {
+            'commits': [
+                {'sha': '../../etc/passwd', 'commit': {'message': 'x', 'author': {'name': 'y'}}}
+            ]
+        }
+        parsed, _ = self.fetch(json.dumps(body).encode('utf-8'))
+
+        self.assertIsNone(parsed['commits'][0]['sha'])
+
+    def test_json_invalido(self):
+        parsed, _ = self.fetch(b'<html>no es json</html>')
+
+        self.assertIsNone(parsed)
+
+    def test_respuesta_sin_commits(self):
+        # La API responde `{"message": "Not Found"}` cuando el rango no existe
+        # (force push, commit expirado). Eso no es una lista vacia.
+        parsed, _ = self.fetch(b'{"message": "Not Found"}')
+
+        self.assertIsNone(parsed)
+
+    def test_limite_anonimo_agotado(self):
+        error = urllib.error.HTTPError('https://api.github.com', 403, 'rate limit', {}, None)
+        with mock.patch.object(update_module.urllib.request, 'urlopen', side_effect=error):
+            self.assertIsNone(update_module._fetch_compare(SHA_DEPLOYED, SHA_LATEST))
+
+    def test_red_caida(self):
+        error = urllib.error.URLError('sin ruta al host')
+        with mock.patch.object(update_module.urllib.request, 'urlopen', side_effect=error):
+            self.assertIsNone(update_module._fetch_compare(SHA_DEPLOYED, SHA_LATEST))
+
+    def test_manda_user_agent(self):
+        # Sin User-Agent la API responde 403 y el panel perderia los mensajes
+        # por un motivo que no tiene nada que ver con el repositorio.
+        _, urlopen = self.fetch(self.payload())
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header('User-agent'), 'webcmp-dashboard')
+
+
+class PendingCommitsTest(UpdateTestCase):
+    """Contrato del panel: los mensajes son un extra, nunca un requisito."""
+
+    COMMITS = {
+        'commits': [{'sha': 'b' * 7, 'subject': 'fix: algo', 'author': 'Yoelvis'}],
+        'total': 1,
+        'truncated': False,
+    }
+
+    def test_hay_actualizacion_incluye_los_mensajes(self):
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare', return_value=self.COMMITS):
+            payload = self.client.get(self.status_url).json()
+
+        self.assertEqual(payload['commits']['commits'][0]['subject'], 'fix: algo')
+
+    def test_al_dia_no_consulta_la_api(self):
+        # Con la misma version desplegada no hay rango que comparar: una
+        # peticion por carga del panel solo gastaria el limite anonimo.
+        self.set_deployed()
+        self.set_remote(sha=SHA_DEPLOYED)
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare') as fetch:
+            payload = self.client.get(self.status_url).json()
+
+        fetch.assert_not_called()
+        self.assertIsNone(payload['commits'])
+
+    def test_sin_commit_desplegado_no_consulta_la_api(self):
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare') as fetch:
+            self.client.get(self.status_url)
+
+        fetch.assert_not_called()
+
+    def test_fallo_de_la_api_no_rompe_el_estado(self):
+        # Lo que decide si actualizar son los SHA, no los mensajes. Si GitHub
+        # limita o esta caido, el aviso sigue siendo cierto.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare', return_value=None):
+            payload = self.client.get(self.status_url).json()
+
+        self.assertEqual(payload['state'], 'available')
+        self.assertIsNone(payload['commits'])
+        self.assertIsNone(payload['check_error'])
+
+    def test_pedir_el_despliegue_no_consulta_los_mensajes(self):
+        # El POST decide con los SHA. La llamada a compare sobra, y con GitHub
+        # lento el clic esperaria hasta el timeout antes de encolar nada.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare') as fetch:
+            response = self.client.post(self.request_url)
+
+        self.assertEqual(response.status_code, 202)
+        fetch.assert_not_called()
+
+    def test_cachea_el_rango(self):
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare', return_value=self.COMMITS) as fetch:
+            self.client.get(self.status_url)
+            self.client.get(self.status_url)
+
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_el_cache_no_sobrevive_a_un_despliegue(self):
+        # La clave lleva los dos SHA: despues de desplegar, el rango viejo ya no
+        # describe nada y no puede servirse de cache.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare', return_value=self.COMMITS) as fetch:
+            self.client.get(self.status_url)
+            self.set_deployed('f' * 40)
+            self.client.get(self.status_url)
+
+        self.assertEqual(fetch.call_count, 2)
+
+
+class DashboardUpdateScriptTest(TestCase):
+    def test_el_script_no_asigna_html_crudo(self):
+        # Un mensaje de commit lo escribe cualquiera que pueda pushear a main.
+        # Asignar `innerHTML` ahi seria XSS almacenado en el panel del
+        # administrador; la lista se construye con `createElement` y
+        # `textContent`. Se busca la asignacion, no la palabra: el comentario
+        # que explica la decision la nombra a proposito.
+        source = (Path(settings.BASE_DIR) / 'static/dist/js/dashboard-update.js').read_text(
+            encoding='utf-8'
+        )
+
+        self.assertNotRegex(source, r'\.innerHTML\s*=')
+        self.assertNotIn('insertAdjacentHTML', source)
+        self.assertIn('createElement', source)
+
+    def test_el_script_no_revienta_si_falta_la_lista(self):
+        # El proyecto no tiene runner de JS (sin Node, sin bundler), asi que la
+        # unica comprobacion posible es sobre el fuente. `commitsBox` se resuelve
+        # fuera del render: si el template viejo sigue en cache y el JS ya es el
+        # nuevo, la lista no existe. Sin guarda, `clearCommits` lanzaria
+        # `TypeError` y el aviso de actualizacion dejaria de pintarse entero.
+        source = (Path(settings.BASE_DIR) / 'static/dist/js/dashboard-update.js').read_text(
+            encoding='utf-8'
+        )
+
+        self.assertIn('if (!commitsBox)', source)

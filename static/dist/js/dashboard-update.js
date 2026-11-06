@@ -29,6 +29,7 @@
   var text = document.getElementById('update-navbar-text');
   var detail = document.getElementById('update-navbar-detail');
   var button = document.getElementById('update-navbar-button');
+  var commitsBox = document.getElementById('update-navbar-commits');
 
   var statusUrl = root.getAttribute('data-status-url');
   var requestUrl = root.getAttribute('data-request-url');
@@ -39,6 +40,71 @@
   function schedule(delay) {
     window.clearTimeout(timer);
     timer = window.setTimeout(load, delay);
+  }
+
+  function clearCommits() {
+    while (commitsBox.firstChild) {
+      commitsBox.removeChild(commitsBox.firstChild);
+    }
+    commitsBox.classList.add('d-none');
+  }
+
+  function paintCommits(state) {
+    // Un template viejo en cache (o una pagina que no incluye la lista) deja
+    // `commitsBox` en null. Sin esta guarda, `clearCommits` lanzaria
+    // `TypeError` y se llevaria por delante TODO el render del aviso, no solo
+    // la lista: el admin perderia el aviso de actualizacion entero.
+    if (!commitsBox) {
+      return;
+    }
+
+    clearCommits();
+
+    var payload = state.commits;
+    if (!payload || !payload.commits || !payload.commits.length) {
+      // Sin mensajes se cae a los SHA que ya pinta `render`, y si tampoco hay
+      // eso, a nada. Un fallo de la API no se anuncia: el aviso de
+      // actualizacion sigue siendo cierto.
+      return;
+    }
+
+    payload.commits.forEach(function (entry) {
+      var item = document.createElement('li');
+      item.className = 'px-3 py-1';
+
+      var row = document.createElement('div');
+      row.className = 'd-flex align-items-start gap-2';
+
+      var sha = document.createElement('span');
+      sha.className = 'text-secondary small font-monospace flex-shrink-0';
+      sha.textContent = entry.sha || '·······';
+
+      // `textContent` y no `innerHTML`: el mensaje viene de un commit, o sea de
+      // cualquiera que pueda pushear a main. Un `<img onerror>` ahi dentro se
+      // ejecutaria en el panel del administrador.
+      var subject = document.createElement('span');
+      subject.className = 'text-truncate small flex-grow-1';
+      // Sin `min-width: 0` un flex item no baja de su ancho de contenido y
+      // `text-truncate` no recorta nada: el mensaje largo desborda el menu.
+      subject.style.minWidth = '0';
+      subject.textContent = entry.subject || '(sin mensaje)';
+      subject.title = entry.subject || '';
+
+      row.appendChild(sha);
+      row.appendChild(subject);
+      item.appendChild(row);
+      commitsBox.appendChild(item);
+    });
+
+    if (payload.truncated) {
+      var rest = payload.total - payload.commits.length;
+      var more = document.createElement('li');
+      more.className = 'px-3 py-1 text-secondary small';
+      more.textContent = 'y ' + rest + ' commit' + (rest === 1 ? '' : 's') + ' más';
+      commitsBox.appendChild(more);
+    }
+
+    commitsBox.classList.remove('d-none');
   }
 
   function paint(options) {
@@ -59,6 +125,10 @@
   }
 
   function render(state) {
+    // Antes de cualquier pintado: si el estado dejo de ser `available`, la
+    // lista vieja tiene que desaparecer, no quedarse pegada al desplegable.
+    paintCommits(state);
+
     var run = state.last_run || {};
 
     if (state.state === 'running') {

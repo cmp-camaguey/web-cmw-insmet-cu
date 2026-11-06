@@ -502,3 +502,11 @@ UPDATE_REQUEST_FILE = os.getenv('UPDATE_REQUEST_FILE', '/var/lib/webcmp/deploy-r
 # bloquear una peticion cuando GitHub no responde.
 UPDATE_CHECK_TTL = int(os.getenv('UPDATE_CHECK_TTL', '300'))
 UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '8'))
+# Que cambio, no solo cuanto: la API publica de GitHub resuelve el rango
+# `deployed...latest` sin token, igual que `ls-remote`. Se consulta solo cuando
+# hay actualizacion pendiente, y el resultado se cachea distinto que el fallo
+# (ver `pending_commits`). 60 peticiones por hora sin autenticar: con 5 minutos
+# de cache, un panel abierto todo el dia gasta 12.
+UPDATE_REPO_API = os.getenv(
+    'UPDATE_REPO_API', 'https://api.github.com/repos/cmp-camaguey/web-cmw-insmet-cu'
+)
