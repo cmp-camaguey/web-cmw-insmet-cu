@@ -2,7 +2,7 @@
 
 ## Stack
 
-Django 5.2 + DRF + drf-spectacular (OpenAPI), Python 3.14 (CI y ruff apuntan a `py314`). Virtual env `.venv/`. UI: Tabler vía Django Templates; raíz `templates/` con `layouts/` e `includes/`, y páginas en `apps/<app>/templates/pages/`. DB: SQLite dev, PostgreSQL/MySQL prod. Apps dentro de `apps/`.
+Django 5.2 + DRF + drf-spectacular (OpenAPI), Python 3.14 (CI y ruff apuntan a `py314`). Virtual env `.venv/`. UI: Tabler vía Django Templates; raíz `templates/` con `layouts/` e `includes/`, y páginas en `apps/<app>/templates/pages/`. DB: **PostgreSQL en los tres perfiles** (dev, test y prod); SQLite está retirado y un `.env` con `DB_ENGINE=sqlite3` falla cerrado. Apps dentro de `apps/`.
 
 **Restricción de frontend:** JS 100% vanilla, **SIN Node.js, SIN bundlers ni paso de build**. Las librerías de terceros se vendorean como `*.min.js` y se sirven directo. Por legado, Tabler (CSS y JS) vive en `static/dist/css/` y `static/dist/js/` (ver `templates/includes/base/head.html` y `scripts.html`); el resto (Tempus Dominus, Popper, jQuery, DataTables, amcharts, highcharts, etc.) va en `static/dist/libs/`. No introducir npm, transpilación ni tooling JS en el proyecto.
 
@@ -22,6 +22,7 @@ Django 5.2 + DRF + drf-spectacular (OpenAPI), Python 3.14 (CI y ruff apuntan a `
 ## Comandos
 
 ```bash
+# Requiere PostgreSQL local: ver "PostgreSQL en desarrollo (obligatorio)" en README.md
 source .venv/bin/activate
 pip install -r requirements/base.txt && python manage.py makemigrations migrate
 python manage.py collectstatic --link --no-input

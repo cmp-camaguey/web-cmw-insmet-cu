@@ -704,8 +704,8 @@ rollback() {
 # systemd-run --pipe --wait crea una unidad transitoria con el EnvironmentFile de
 # la clave de descifrado y PRODUCTION=1, exactamente igual que webcmp.service. Sin
 # esto, un `manage.py` corrido a mano sin PRODUCTION cae en el perfil de DESARROLLO
-# (ver config/settings/__init__.py): migra contra sqlite3 y dice que todo bien,
-# mientras el sitio sigue en PostgreSQL.
+# (ver config/settings/__init__.py): migra con las credenciales del entorno en vez
+# de con las de produccion, y el deploy "pasa" contra la base equivocada.
 #
 # --uid webcmp: los archivos los escribe el usuario de servicio, que es el dueno
 # del venv, de media/ y de staticfiles/. Como root quedarian con dueno root y el

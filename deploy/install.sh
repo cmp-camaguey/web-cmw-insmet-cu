@@ -640,9 +640,9 @@ valid_choice() {
 
 # No hay validador de motor de base de datos, y es a proposito: el motor ya no
 # se pregunta, es constante (postgresql). `get_database_config()` de
-# config/settings/base.py sigue aceptando mysql y sqlite3, y el .env de
-# desarrollo (sqlite3) no cambia por esto; lo que cambia es que el instalador de
-# PRODUCCION solo maneja PostgreSQL.
+# config/settings/base.py exige DB_ENGINE en los tres perfiles y rechaza sqlite
+# de forma explicita, asi que el instalador de PRODUCCION solo maneja PostgreSQL
+# y un `.env` de desarrollo ya no puede colarse como respaldo silencioso.
 
 # El generador escribe DEBUG|INFO|WARNING|ERROR|CRITICAL y Django no valida este
 # valor: uno mal escrito no da error, solo desactiva el logging en un nivel y deja
@@ -1123,9 +1123,9 @@ render_template() {
 #
 # Por que NO un `sudo -u webcmp manage.py`: sin PRODUCTION cae al perfil de
 # desarrollo (config/settings/__init__.py elige perfil por variable de entorno),
-# migra contra sqlite3 y dice que todo bien mientras el sitio va a PostgreSQL. Es
-# el modo de fallo mas caro de este proyecto: el instalador "pasa" y deja la base
-# equivocada.
+# y migra con las credenciales que encuentre en el entorno en vez de con las de
+# produccion. El instalador "pasa" y deja la base equivocada sin un solo error:
+# es el modo de fallo mas caro de este proyecto.
 #
 # OJO: systemd-run NO hereda el entorno de quien llama. Por eso las variables
 # extra van con -p Environment=NOMBRE=valor y nunca con un `VAR=x systemd-run`.

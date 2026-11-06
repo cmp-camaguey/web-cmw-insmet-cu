@@ -246,30 +246,37 @@ TEMPLATES = [
 
 
 # Database
-def get_database_config(*, is_production=IS_PRODUCTION, prefer_sqlite=DEBUG):
-    """Construye el dict DATABASES a partir de las variables de entorno."""
+def get_database_config():
+    """Construye el dict DATABASES a partir de las variables de entorno.
+
+    El motor es obligatorio en los tres perfiles. No hay respaldo silencioso: un
+    perfil que no encuentre `DB_ENGINE` falla al arrancar, en vez de medir SQLite
+    mientras producción corre PostgreSQL.
+    """
     db_engine = os.getenv('DB_ENGINE', '').strip().lower()
 
-    if is_production and not db_engine:
+    if not db_engine:
         raise ImproperlyConfigured(
-            'Falta la configuración de la base de datos. Defina DB_ENGINE (y DB_NAME, '
-            'DB_USER, DB_HOST, DB_PASS) en el archivo .env. '
-            'Ejecute `python scripts/generate_env.py --production` para generarlo.'
+            'Falta DB_ENGINE. Este proyecto solo corre sobre PostgreSQL: defina '
+            'DB_ENGINE=postgresql y DB_NAME, DB_USER, DB_PASS y DB_HOST en el archivo '
+            '.env. Ejecute `python scripts/generate_env.py --development` (o '
+            '`--production`) para generarlo.'
         )
 
-    if prefer_sqlite or db_engine in {'', 'sqlite', 'sqlite3'}:
-        return {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
-        }
+    if db_engine in {'sqlite', 'sqlite3'}:
+        raise ImproperlyConfigured(
+            'SQLite ya no se soporta: este proyecto solo corre sobre PostgreSQL. Borre '
+            'DB_ENGINE=sqlite3 del archivo .env y defina DB_ENGINE=postgresql con '
+            'DB_NAME, DB_USER, DB_PASS y DB_HOST. Ejecute '
+            '`python scripts/generate_env.py --development` para regenerarlo. Los datos '
+            'de una base SQLite existente no se convierten solos: hay que volcarlos '
+            'aparte antes de borrar `db.sqlite3`.'
+        )
 
     if not all(os.getenv(k) for k in ('DB_NAME', 'DB_USER', 'DB_HOST', 'DB_PASS')):
         raise ImproperlyConfigured(
             f'El motor "{db_engine}" necesita DB_NAME, DB_USER, DB_HOST y DB_PASS, y al menos '
-            'uno falta o está vacío en el entorno. (sqlite3 no los necesita: para él, alcanzaba '
-            'con DB_ENGINE=sqlite3.) Defina las cuatro en el archivo .env.'
+            'uno falta o está vacío en el entorno. Defina las cuatro en el archivo .env.'
         )
 
     db_config = {

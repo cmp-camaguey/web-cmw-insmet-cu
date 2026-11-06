@@ -6,7 +6,6 @@ from unittest import mock
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, TestCase, override_settings
 
-from config import settings
 from config.settings import get_database_config
 
 
@@ -27,21 +26,14 @@ class ProxyHeaderTests(TestCase):
 
 
 class DatabaseConfigTests(TestCase):
-    """Fail-closed en producción y fallback a SQLite en desarrollo."""
+    """El motor sale del entorno en TODOS los perfiles, sin respaldo silencioso."""
 
     @mock.patch.dict(os.environ, {}, clear=True)
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', True)
-    def test_fail_closed_production_without_db_engine(self):
-        with self.assertRaises(ImproperlyConfigured):
+    def test_fail_closed_without_db_engine(self):
+        """Sin `DB_ENGINE` no hay base de datos: ni producción ni desarrollo adivinan."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
             get_database_config()
-
-    @mock.patch.dict(os.environ, {}, clear=True)
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', False)
-    def test_dev_fallback_sqlite(self):
-        config = get_database_config()
-        self.assertEqual(config['default']['ENGINE'], 'django.db.backends.sqlite3')
+        self.assertIn('DB_ENGINE', str(ctx.exception))
 
     @mock.patch.dict(
         os.environ,
@@ -54,47 +46,38 @@ class DatabaseConfigTests(TestCase):
         },
         clear=True,
     )
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', True)
     def test_prod_with_complete_vars(self):
-        config = get_database_config()
-        self.assertEqual(config['default']['ENGINE'], 'django.db.backends.postgresql')
-
-    # sqlite3 no lee usuario, password ni host: exigirlos obligaría a inventar
-    # cuatro valores que el motor nunca usa. Un `.env` con `DB_ENGINE=sqlite3`
-    # debe poder arrancar el perfil `testing` (DEBUG=False, sin PRODUCTION).
-    @mock.patch.dict(os.environ, {'DB_ENGINE': 'sqlite3'}, clear=True)
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', False)
-    def test_sqlite_engine_needs_no_credentials(self):
-        config = get_database_config()
-        self.assertEqual(config['default']['ENGINE'], 'django.db.backends.sqlite3')
+        config = get_database_config()['default']
+        self.assertEqual(config['ENGINE'], 'django.db.backends.postgresql')
+        self.assertEqual(config['PORT'], '5432')
+        self.assertEqual(config['CONN_MAX_AGE'], 600)
+        self.assertEqual(config['OPTIONS']['sslmode'], 'prefer')
 
     @mock.patch.dict(os.environ, {'DB_ENGINE': 'sqlite3'}, clear=True)
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', True)
-    def test_sqlite_engine_in_production_needs_no_credentials(self):
-        config = get_database_config()
-        self.assertEqual(config['default']['ENGINE'], 'django.db.backends.sqlite3')
+    def test_sqlite3_is_rejected(self):
+        """Un `.env` viejo no puede seguir midiendo un motor que producción no tiene.
+
+        El mensaje tiene que decir qué hacer: el arreglo real es apuntar el `.env`
+        a PostgreSQL, no descubrirlo leyendo el código de `get_database_config`.
+        """
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            get_database_config()
+        message = str(ctx.exception)
+        self.assertIn('SQLite', message)
+        self.assertIn('postgresql', message)
+        self.assertIn('generate_env.py', message)
+
+    @mock.patch.dict(os.environ, {'DB_ENGINE': 'sqlite'}, clear=True)
+    def test_sqlite_alias_is_rejected(self):
+        """`sqlite` y `sqlite3` son el mismo error, no dos caminos distintos."""
+        with self.assertRaises(ImproperlyConfigured):
+            get_database_config()
 
     @mock.patch.dict(os.environ, {'DB_ENGINE': 'postgresql', 'DB_NAME': 'x'}, clear=True)
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', True)
     def test_server_engine_still_requires_every_credential(self):
-        """El corte es solo para sqlite: un motor de red sigue exigiendo las cuatro."""
+        """Quitar SQLite no relaja la exigencia de credenciales de un motor de red."""
         with self.assertRaises(ImproperlyConfigured) as ctx:
             get_database_config()
         message = str(ctx.exception)
         self.assertIn('DB_USER', message)
         self.assertIn('postgresql', message)
-
-    @mock.patch.dict(os.environ, {'DB_ENGINE': 'sqlite3'}, clear=True)
-    @mock.patch.object(settings, 'DEBUG', False)
-    @mock.patch.object(settings, 'IS_PRODUCTION', True)
-    def test_sqlite_engine_is_not_a_way_around_the_missing_engine_guard(self):
-        """`DB_ENGINE` vacío en producción sigue siendo fail-closed."""
-        with (
-            mock.patch.dict(os.environ, {'DB_ENGINE': ''}, clear=True),
-            self.assertRaises(ImproperlyConfigured),
-        ):
-            get_database_config()

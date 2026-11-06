@@ -71,7 +71,8 @@ Los comandos de Django corren en una unidad transitoria con el mismo
 `EnvironmentFile` y `PRODUCTION=1` que `webcmp.service`. Un `manage.py` corrido a
 mano en una shell sin `PRODUCTION` cae en el perfil de **desarrollo**
 (`config/settings/__init__.py` elige perfil por la variable de entorno): migra
-contra sqlite3 y dice que todo bien mientras el sitio sigue en PostgreSQL.
+con las credenciales del entorno en vez de con las de produccion, y el deploy
+"pasa" contra la base equivocada.
 
 ## Rollback
 

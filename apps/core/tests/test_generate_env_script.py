@@ -135,7 +135,11 @@ class GenerateEnvScriptTests(unittest.TestCase):
 
         data = read_env(self.env_file)
         self.assertEqual(data['DEBUG'], 'True')
-        self.assertEqual(data['DB_ENGINE'], 'sqlite3')
+        # Desarrollo apunta a PostgreSQL local, no a un archivo SQLite.
+        self.assertEqual(data['DB_ENGINE'], 'postgresql')
+        self.assertEqual(data['DB_NAME'], 'webcmp_dev')
+        self.assertEqual(data['DB_USER'], 'webcmp_dev')
+        self.assertEqual(data['DB_HOST'], '127.0.0.1')
         self.assertFalse(self.key_file.exists(), 'en desarrollo la clave va en el .env, no aparte')
 
         # El par que wrote el script es el que el proyecto sabe descifrar.

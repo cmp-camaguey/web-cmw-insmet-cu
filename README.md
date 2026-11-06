@@ -104,21 +104,21 @@ git config core.hooksPath .githooks
 
 </details>
 
-### PostgreSQL en desarrollo (opcional)
+### PostgreSQL en desarrollo (obligatorio)
 
-Por defecto el perfil `dev` usa SQLite, y `DB_ENGINE` en el `.env` **no lo
-cambia**: un `.env` copiado de producción no puede hacer que tu máquina escriba
-en la base real. Para probar contra PostgreSQL de verdad hay que pedirlo:
+El proyecto corre sobre **PostgreSQL en los tres perfiles**. No hay respaldo a
+SQLite: si falta `DB_ENGINE`, `manage.py` falla al arrancar en vez de crear un
+`db.sqlite3` que mida un motor que no existe en producción.
 
 ```bash
-# 1. Rol y base locales (una vez). El rol necesita CREATEDB para la base de tests.
+# 1. Rol y base locales (una vez). El rol necesita CREATEDB: la suite crea y
+#    destruye su propia base de tests.
 sudo -u postgres psql <<'SQL'
 CREATE USER webcmp_dev WITH PASSWORD 'CAMBIAR_ESTA_CLAVE' CREATEDB;  -- pragma: allowlist secret
 CREATE DATABASE webcmp_dev OWNER webcmp_dev;
 SQL
 
-# 2. Opt-in explícito en el .env de desarrollo
-DEV_USE_DB_ENGINE=True
+# 2. Credenciales en el .env de desarrollo
 DB_ENGINE=postgresql
 DB_NAME=webcmp_dev
 DB_USER=webcmp_dev
@@ -131,9 +131,13 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Sin `DEV_USE_DB_ENGINE=True` esas cinco variables se ignoran y sigue usando
-`db.sqlite3`. Lo que se valida en SQLite no prueba lo que corre en PostgreSQL:
-`LIKE` con mayúsculas, orden de `NULL`, constraints y transacciones no se
+`python scripts/generate_env.py --development` escribe ese bloque por vos. Si un
+`.env` viejo dice `DB_ENGINE=sqlite3`, el arranque falla con un mensaje que lo
+explica: los datos de `db.sqlite3` **no se convierten solos**, hay que volcarlos
+aparte antes de borrar el archivo.
+
+Lo que se valida en SQLite no prueba lo que corre en PostgreSQL: `LIKE` con
+mayúsculas, orden de `NULL`, constraints, secuencias y transacciones no se
 comportan igual.
 
 ### Dependencias: un archivo por entorno
@@ -145,7 +149,7 @@ Cada archivo es autocontenido (incluye `base.txt` con `-r base.txt`).
 | `requirements/base.txt` | Runtime de la app. Sin gunicorn ni herramientas de desarrollo. |
 | `requirements/dev.txt` | `base.txt` + ruff, bandit, pip-audit, djlint, pre-commit, django-debug-toolbar |
 | `requirements/test.txt` | `base.txt` + django-debug-toolbar |
-| `requirements/prod.txt` | `base.txt` + gunicorn y el driver de PostgreSQL |
+| `requirements/prod.txt` | `base.txt` + gunicorn, whitenoise y redis |
 
 ```bash
 pip install -r requirements/dev.txt   # desarrollo

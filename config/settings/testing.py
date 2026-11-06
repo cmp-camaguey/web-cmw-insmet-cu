@@ -36,7 +36,7 @@ STORAGES = {
 
 MIDDLEWARE = [mw for mw in MIDDLEWARE if mw != whitenoise_middleware]
 
-DATABASES = get_database_config(is_production=IS_PRODUCTION, prefer_sqlite=False)
+DATABASES = get_database_config()
 
 if external_hostname := os.getenv('EXTERNAL_HOSTNAME', ''):
     apply_external_hostname(external_hostname, ['http://', 'https://'])

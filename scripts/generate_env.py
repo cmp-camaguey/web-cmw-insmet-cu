@@ -188,7 +188,7 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
     if production:
         parts.append(
             '# CHANGE_ME: credenciales reales de PostgreSQL. El driver (psycopg[binary]) está\n'
-            '# en requirements/prod.txt.\n'
+            '# en requirements/base.txt.\n'
         )
         parts.append('DB_ENGINE=postgresql\n')
         parts.append('DB_NAME=webcmp\n')
@@ -198,7 +198,18 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
         parts.append('DB_PORT=5432\n')
         parts.append('DB_SSL_MODE=prefer\n\n')
     else:
-        parts.append('DB_ENGINE=sqlite3\n\n')
+        parts.append(
+            '# PostgreSQL local. El rol necesita CREATEDB porque la suite crea su propia base\n'
+            '# de tests. Los pasos para crearlo están en el README, sección\n'
+            '# "PostgreSQL en desarrollo".\n'
+        )
+        parts.append('DB_ENGINE=postgresql\n')
+        parts.append('DB_NAME=webcmp_dev\n')
+        parts.append('DB_USER=webcmp_dev\n')
+        parts.append('DB_PASS=CAMBIAR_ESTA_CLAVE\n')
+        parts.append('DB_HOST=127.0.0.1\n')
+        parts.append('DB_PORT=5432\n')
+        parts.append('DB_SSL_MODE=prefer\n\n')
 
     parts.append(section('CACHÉ (REDIS)'))
     parts.append('REDIS_URL=redis://127.0.0.1:6379/1\n')

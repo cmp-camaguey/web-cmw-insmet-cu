@@ -61,7 +61,7 @@ if whitenoise_middleware not in MIDDLEWARE:
     MIDDLEWARE = [*MIDDLEWARE[:1], whitenoise_middleware, *MIDDLEWARE[1:]]
 
 
-DATABASES = get_database_config(is_production=True, prefer_sqlite=False)
+DATABASES = get_database_config()
 
 if not os.getenv('SITE_URL', '').strip():
     raise ImproperlyConfigured(
