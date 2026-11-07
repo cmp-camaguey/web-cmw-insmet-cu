@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup hooks env check test lint djlint audit
+.PHONY: help setup hooks env check test test-deploy lint djlint audit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -36,8 +36,12 @@ hooks: ## Point git at the versioned hooks in .githooks/
 check: ## Run the Django system check
 	$(PY) manage.py check
 
-test: ## Run the full Django test suite
+test: ## Run the full Django test suite and the deploy script tests
 	$(PY) manage.py test
+	bash deploy/tests/run.sh
+
+test-deploy: ## Run the shell script tests (deploy/*.sh, run_huey.sh, hooks)
+	bash deploy/tests/run.sh
 
 lint: ## Run ruff check and ruff format --check
 	$(VENV)/bin/ruff check .

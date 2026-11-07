@@ -74,6 +74,18 @@ AUTODEPLOY_STATE_DIR=${AUTODEPLOY_STATE_DIR:-/var/lib/webcmp}
 CONFIG_DIR=${CONFIG_DIR:-/etc/webcmp}
 CONFIG_FILE=${CONFIG_FILE:-$CONFIG_DIR/deploy.env}
 ENCRYPTION_ENV=${ENCRYPTION_ENV:-$CONFIG_DIR/encryption.env}
+# Commit que quedo sirviendo, para el boton "Actualizar" del panel
+# (change 025-update-web-deploy). deploy.sh lo escribe al final de cada deploy y
+# el instalador lo escribe al terminar: si no, una instalacion nueva deja el
+# panel sin referencia y el primer deploy manual queda invisible.
+# Mismo archivo, mismo formato (un SHA de 40 hex) y mismos permisos que deploy.sh.
+DEPLOYED_STATE=${DEPLOYED_STATE:-$CONFIG_DIR/deployed}
+# Lock compartido con deploy.sh. Es el MISMO archivo (no una copia del
+# mecanismo): el instalador escribe el checkout, las migraciones y el .env, y un
+# deploy.sh que corra a la vez haria lo mismo sobre el mismo arbol. El lock no
+# coordina dos instaladores por si solo, coordina instalador y deploy, que es el
+# par que comparte estado.
+DEPLOY_LOCKFILE=${DEPLOY_LOCKFILE:-/var/lock/webcmp-deploy.lock}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-/var/cache/webcmp-pip}
 MPLCONFIGDIR=${MPLCONFIGDIR:-$APP_DIR/.cache/matplotlib}
 VENV_DIR=${VENV_DIR:-$APP_DIR/.venv}
@@ -493,7 +505,8 @@ Opciones:
 
 Variables de entorno que se respetan (las preguntas usan el mismo nombre):
   REPO_URL, REPO_REF, APP_DIR, SERVICE_USER, DEPLOY_LOGIN_USER, SCRIPT_PATH,
-  CONFIG_DIR, CONFIG_FILE, ENCRYPTION_ENV, DB_NAME, DB_USER,
+  CONFIG_DIR, CONFIG_FILE, ENCRYPTION_ENV, DEPLOYED_STATE, DEPLOY_LOCKFILE,
+  DB_NAME, DB_USER,
   DB_PASS, DB_HOST, DB_PORT, DB_SSL_MODE, EMAIL_HOST, EMAIL_PORT,
   EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, DEFAULT_FROM_EMAIL, PUBLIC_HOSTNAME,
   REDIS_URL, USE_REDIS_CACHE, LOG_LEVEL, SUPERUSER_USERNAME, SUPERUSER_EMAIL,
@@ -1322,6 +1335,21 @@ echo "  python: $PYTHON_VERSION (minimo ${MIN_PYTHON[0]}.${MIN_PYTHON[1]})"
 require_systemd
 echo "  systemd-run disponible."
 
+# El lock de deploy.sh necesita flock(1). Se verifica en el Preflight, que es de
+# solo lectura, y no despues de empezar a mutar: si falta, el instalador tendria
+# que abortar con el checkout a medio escribir.
+command -v flock >/dev/null 2>&1 \
+    || die "flock no esta instalado (paquete util-linux). Sin el no se puede tomar el lock compartido con deploy.sh, y dos procesos mutando el mismo checkout a la vez no tienen vuelta atras."
+# Se comprueba en el Preflight y no se crea nada: un `exec 9>ruta` sobre un
+# directorio inexistente mata el shell con un error de bash que no dice cual es
+# el lock ni por que importa. /var/lock existe en cualquier systemd
+# (systemd-tmpfiles lo enlaza a /run/lock); solo falla si DEPLOY_LOCKFILE se
+# overridea a un path sin directorio.
+DEPLOY_LOCKDIR=$(dirname -- "$DEPLOY_LOCKFILE")
+[ -d "$DEPLOY_LOCKDIR" ] \
+    || die "El directorio del lock compartido no existe: $DEPLOY_LOCKDIR. Crearlo, o pasar DEPLOY_LOCKFILE a un path existente."
+echo "  flock disponible ($DEPLOY_LOCKFILE)."
+
 # Estado previo, SOLO de lectura. Se usa para armar los defaults de las
 # preguntas (el default es el valor vigente) y para avisar de re-corridas.
 ENV_FILE=$APP_DIR/.env
@@ -1649,6 +1677,27 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo
     echo "dry-run: se imprime el plan y no se ejecuta nada."
 fi
+
+# --- Lock compartido con deploy.sh ---------------------------------------
+#
+# Se toma DESPUES del resumen y ANTES de C.1: de aca en adelante todo muta el
+# checkout, el venv, la base y el .env. El resumen no toca nada, asi que tomarlo
+# antes solo retrasaria la salida cuando alguien mira el plan.
+#
+# Mismo archivo que deploy.sh (`/var/lock/webcmp-deploy.lock`), no un lock
+# paralelo: si fueran dos, no se excluirian entre si y el problema seguiria
+# igual. Es no bloqueante (`-n`): esperar turno en silencio deja al operador sin
+# saber que hay un deploy corriendo y cuanto va a tardar. Mejor fallar y decirlo.
+#
+# Se salta en --dry-run, que por definicion no muta nada y no deberia quedar
+# bloqueado porque otro proceso este desplegando.
+# >>> TEST-BLOCK: deploy-lock
+if [ "$DRY_RUN" -eq 0 ]; then
+    exec 9>"$DEPLOY_LOCKFILE"
+    flock -n 9 || die "Ya hay un despliegue en curso (lock $DEPLOY_LOCKFILE). No se toca nada: correr el instalador cuando termine, o esperar a que deploy.sh libere el lock."
+    echo "  lock adquirido: $DEPLOY_LOCKFILE"
+fi
+# <<< TEST-BLOCK: deploy-lock
 
 # --- C.1 Prerrequisitos de sistema --------------------------------------
 
@@ -2132,68 +2181,113 @@ step 1 "Archivo .env"
 ENV_GEN_ARGS=(--production --env-file "$ENV_FILE" --encryption-key-file "$ENCRYPTION_ENV")
 ENV_REGENERATED=0
 if [ "$ENV_FILE_EXISTS" -eq 1 ]; then
-    # Validar que el par ENCRYPTION_KEY/SECRET_KEY cifrada descifra correctamente.
-    # Si hay un .env de instalación anterior con otro encryption.env, Django fallará
-    # al cargar settings. En ese caso, regenerar con --force.
-    if [ "$DRY_RUN" -eq 0 ] && [ -x "$PYTHON_BIN" ]; then
-        if "$PYTHON_BIN" -c "
-# validate
+    # ¿El par SECRET_KEY/ENCRYPTION_KEY de esta instalación descifra?
+    #
+    # Si el .env es de una instalación anterior y el encryption.env es de otra,
+    # Django no arranca: load_secret_key() de config/settings/base.py lanza
+    # ImproperlyConfigured al primer import. Regenerar el par es la única salida,
+    # pero SOLO cuando el par está roto de verdad: regenerarlo de más invalida
+    # todas las sesiones y cookies firmadas del sitio.
+    #
+    # El código de salida distingue tres casos, y tratarlos igual es el bug que
+    # tenía este bloque (todo caía en el `except Exception` con código 2, y el
+    # `if` de abajo solo reaccionaba al 1):
+    #   0  el par descifra            -> se conserva
+    #   1  el par NO descifra, o falta una de las dos mitades -> se regenera
+    #   2  no se pudo verificar (sin cryptography, archivo ilegible, error
+    #      inesperado) -> NO se regenera a ciegas: se avisa y se conserva
+    #
+    # Corre con el Python del VENV, no con $PYTHON_BIN: `cryptography` la instala
+    # requirements/prod.txt en el venv y el Python del sistema puede no tenerla.
+    # Con el intérprete equivocado el import falla, el resultado sería 2 y la
+    # validación no verificaría nada en ningún servidor.
+    #
+    # Las rutas van por entorno y el cuerpo por heredoc COMILLADO: el bloque
+    # anterior interpolaba "$ENV_FILE" dentro de un `-c "..."`, así que un path
+    # con comillas o un `$` en el .env se interpretaban como código bash.
+    # >>> TEST-BLOCK: env-pair-validator
+    if [ "$DRY_RUN" -eq 0 ] && [ -x "$VENV_DIR/bin/python" ]; then
+        rc=0
+        ENV_FILE="$ENV_FILE" ENCRYPTION_ENV="$ENCRYPTION_ENV" \
+            "$VENV_DIR/bin/python" - <<'PY' || rc=$?
+import os
+import sys
+
 try:
     from cryptography.fernet import Fernet, InvalidToken
-    env='$ENV_FILE'; enc='$ENCRYPTION_ENV'
-    def rk(p):
-        try:
-            with open(p) as f:
-                for line in f:
-                    if line.startswith('ENCRYPTION_KEY='):
-                        k = line.split('=',1)[1].rstrip('\n\r')
-                        # trim spaces
-                        k = k.strip()
-                        return k
-        except Exception as e:
-            raise e
-        return None
-    ek=rk(enc)
-    if not ek:
-        raise RuntimeError('no encryption key')
-    f = Fernet(ek.encode())
-    # check encrypted secret
-    try:
-        with open(env) as fenv:
-            for line in fenv:
-                s=line.strip()
-                if s.startswith('SECRET_KEY=') and '\$' in s:
-                    v = s.split('=',1)[1].rstrip()
-                    try:
-                        f.decrypt(v.encode())
-                    except InvalidToken:
-                        raise InvalidToken('mismatch')
-    except InvalidToken:
-        raise InvalidToken('mismatch')
-    sys.exit(0)
-except InvalidToken:
+except ImportError:
+    # Sin la librería no hay forma de verificar; NO es un par roto.
+    sys.exit(2)
+
+
+def read_value(path, key):
+    """Valor de `key=` en un archivo KEY=VALUE, o None si la clave no está.
+
+    FileNotFoundError y OSError se dejan subir: el llamador distingue "falta
+    una mitad" (se regenera) de "no se pudo leer" (no se toca nada).
+    """
+    with open(path, encoding='utf-8') as handle:
+        for line in handle:
+            line = line.strip()
+            if line.startswith(f'{key}='):
+                return line.split('=', 1)[1].strip()
+    return None
+
+
+try:
+    encryption_key = read_value(os.environ['ENCRYPTION_ENV'], 'ENCRYPTION_KEY')
+    secret_key = read_value(os.environ['ENV_FILE'], 'SECRET_KEY')
+except FileNotFoundError:
+    sys.exit(1)
+except OSError:
+    sys.exit(2)
+
+if not encryption_key or not secret_key:
+    sys.exit(1)
+
+try:
+    Fernet(encryption_key.encode()).decrypt(secret_key.encode())
+except (InvalidToken, ValueError, TypeError):
     sys.exit(1)
 except Exception:
-    import sys
     sys.exit(2)
-"; then
-            :
-        else
-            rc=$?
-            if [ "$rc" -eq 1 ]; then
-                warn "Par ENCRYPTION_KEY/SECRET_KEY inválido en .env existente. Se regenerará con --force."
-                ENV_REGENERATED=1
-            fi
-        fi
+sys.exit(0)
+PY
+        case "$rc" in
+            0) : ;;
+            1)
+                warn "Par ENCRYPTION_KEY/SECRET_KEY inválido en $ENV_FILE: no descifra."
+                warn "Con ese par Django no arranca: config/settings/base.py lo rechaza al importar."
+                if can_prompt; then
+                    # Regenerar invalida todas las sesiones y cookies firmadas y
+                    # reescribe el .env desde la plantilla. Ya no es
+                    # irreversible (abajo se respalda como .bak.<fecha>), pero
+                    # sigue siendo una decision: la otra salida es recuperar la
+                    # mitad que falta. Por eso se pregunta.
+                    ask_yes_no si "Regenerar el par? (respalda .env y encryption.env como .bak.<fecha>, genera SECRET_KEY y ENCRYPTION_KEY nuevos e invalida las sesiones)" \
+                        || die "No se tocó nada. El par roto impide que Django arranque, así que el instalador no puede seguir con el .env como está: restaurá la mitad que falta (por ejemplo, el encryption.env de la instalación a la que pertenece ese .env) y volvé a correrlo, o aceptá la regeneración (queda un .bak de los dos archivos)."
+                    ENV_REGENERATED=1
+                else
+                    # Sin TTY no hay a quien preguntar. Se regenera avisando, y
+                    # el respaldo de abajo deja la salida manual abierta.
+                    warn "Sin terminal: se regenera el par con --force (las sesiones quedan invalidadas; queda un .bak de los dos archivos)."
+                    ENV_REGENERATED=1
+                fi
+                ;;
+            *)
+                warn "No se pudo verificar el par ENCRYPTION_KEY/SECRET_KEY de $ENV_FILE (código $rc)."
+                warn "Se conserva el archivo: regenerarlo sin estar seguro invalida todas las sesiones."
+                ;;
+        esac
     fi
+    # <<< TEST-BLOCK: env-pair-validator
+    # El validador no decidio nada: el par descifra (rc=0), no se pudo verificar
+    # (rc=2), o el bloque no corrio (sin venv o en --dry-run). En una re-corrida
+    # el .env puede estar afinado a mano, asi que se pregunta antes de
+    # reescribirlo, y el default es conservar.
     if [ "$ENV_REGENERATED" -eq 1 ]; then
-        : # ya decidido
-    elif ask_yes_no no "Regenerar $ENV_FILE? (borra .env y encryption.env: SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
-        # Misma inversion que en el bloque de deploy.env: responder "si" a
-        # "Regenerar" conservaba el archivo y avisaba "se conserva", asi que la
-        # unica forma de regenerar era responder que NO. El texto prometia ademas
-        # que se conservaban SECRET_KEY y ENCRYPTION_KEY, y no es cierto: mas
-        # abajo se borran los dos archivos antes de correr el generador.
+        : # el validador ya decidio: par roto y regeneracion aceptada
+    elif ask_yes_no no "Reescribir $ENV_FILE desde la plantilla? (respalda el actual como .bak.<fecha> y genera SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
         ENV_REGENERATED=1
     else
         ENV_REGENERATED=0
@@ -2205,13 +2299,35 @@ fi
 
 if [ "$ENV_REGENERATED" -eq 1 ]; then
     ENV_GEN_ARGS+=(--force)
-    # Si el par es inválido o forzamos regeneración, partimos de cero para
-    # evitar que un .env+encryption.env incompatibles hagan fallar a Django.
+    # >>> TEST-BLOCK: env-backup
+    # Respaldo ANTES de borrar. `--force` reescribe el .env COMPLETO desde la
+    # plantilla (scripts/generate_env.py:build_env), asi que se lleva cualquier
+    # valor afinado a mano que el instalador no administra (FTP_OBS_*, LDAP_*,
+    # un DB_HOST distinto). El par roto justifica regenerar las claves, no
+    # perder el resto; y si el generador falla despues del `rm`, el .bak es lo
+    # unico que queda de la configuracion anterior.
+    env_backup_stamp=$(date +%Y%m%d-%H%M%S)
+    for env_backup_file in "$ENV_FILE" "$ENCRYPTION_ENV"; do
+        if [ -f "$env_backup_file" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                printf '  [dry-run] cp -p %s %s.bak.%s\n' \
+                    "$env_backup_file" "$env_backup_file" "$env_backup_stamp"
+            else
+                cp -p "$env_backup_file" "$env_backup_file.bak.$env_backup_stamp" \
+                    || die "No se pudo respaldar $env_backup_file: sin respaldo no se borra nada."
+            fi
+        fi
+    done
+    # Si el par es invalido o forzamos regeneracion, partimos de cero para que
+    # `--force` genere claves nuevas de verdad: con los archivos en su lugar,
+    # generate_env.py conserva el par que ya descifra y la promesa del prompt
+    # ("SECRET_KEY y ENCRYPTION_KEY nuevos") seria falsa.
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [dry-run] rm -f %s %s\n' "$ENV_FILE" "$ENCRYPTION_ENV"
     else
         rm -f "$ENV_FILE" "$ENCRYPTION_ENV"
     fi
+    # <<< TEST-BLOCK: env-backup
     # Se corre COMO ROOT y no como webcmp: el generador tiene que escribir
     # $ENCRYPTION_ENV, que es root:root 600. Corrido como webcmp aborta sin
     # escribir nada (falla cerrado, que esta bien) y el servidor queda igual.
@@ -3264,12 +3380,20 @@ if [ -n "$PENDING_CHANGES" ]; then
     warn "Cuando se completen los valores:"
     printf '  sudo systemctl enable --now %s %s\n' "$GUNICORN_UNIT" "$HUEY_UNIT" >&2
 else
-    run systemctl enable --now "$GUNICORN_UNIT"
-    run systemctl enable --now "$HUEY_UNIT"
+    run systemctl enable "$GUNICORN_UNIT"
+    run systemctl enable "$HUEY_UNIT"
+    # restart y no `enable --now`: en una re-corrida el unit ya esta activo y
+    # `enable --now` NO lo reinicia, asi que Gunicorn seguiria sirviendo el
+    # codigo viejo en memoria mientras el checkout ya tiene el nuevo, y C.12b
+    # registraria como desplegado un commit que no esta corriendo. deploy.sh usa
+    # restart por la misma razon: un reload de Gunicorn tampoco alcanza, porque
+    # los workers se re-forkean del master, que tiene el codigo viejo.
+    run systemctl restart "$GUNICORN_UNIT"
+    run systemctl restart "$HUEY_UNIT"
     sleep 2
-    # GUNICORN_ENABLED mide que el servicio quedo ACTIVO, no que se le dio enable:
-    # `enable --now` puede salir 0 y dejar el unit caido, y el resumen no tiene
-    # que afirmar "arrancado" cuando lo que paso fue que quedo inactivo.
+    # GUNICORN_ENABLED mide que el servicio quedo ACTIVO, no que se le dio
+    # enable: un `restart` puede salir 0 y el unit morir un segundo despues, y
+    # el resumen no tiene que afirmar "arrancado" cuando quedo inactivo.
     if run systemctl is-active --quiet "$GUNICORN_UNIT"; then
         GUNICORN_ENABLED=1
     else
@@ -3281,6 +3405,41 @@ else
     run systemctl restart nginx
     run systemctl is-active --quiet nginx || warn "nginx quedo inactivo (journalctl -u nginx)."
 fi
+
+# --- C.12b Commit que quedo sirviendo ------------------------------------
+
+# El panel compara $DEPLOYED_STATE contra el ultimo commit de main para decidir
+# si muestra "Actualizar" (apps/dashboard/views/dashboard/update.py). deploy.sh
+# lo escribe al final de cada deploy; el instalador tiene que escribir el mismo
+# archivo al terminar, o una instalacion nueva deja el panel sin referencia: sin
+# archivo no hay con que comparar y el primer deploy manual queda invisible.
+#
+# Se escribe SOLO cuando el sitio quedo sirviendo (misma condicion que C.12):
+# afirmar "este commit esta desplegado" con el unit caido es peor que no tener
+# el archivo, porque el panel diria que no hay nada que actualizar mientras el
+# sitio no responde.
+# >>> TEST-BLOCK: deployed-state
+if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  [dry-run] runuser -u %s -- git -C %s rev-parse HEAD > %s\n' \
+        "$SERVICE_USER" "$APP_DIR" "$DEPLOYED_STATE"
+elif [ "$GUNICORN_ENABLED" -eq 1 ]; then
+    # git corre como SERVICE_USER por la misma razon que el checkout: root sobre
+    # un repo de otro usuario se niega con "dubious ownership".
+    if deployed_sha=$(runuser -u "$SERVICE_USER" -- git -C "$APP_DIR" rev-parse HEAD 2>/dev/null); then
+        # Escritura atomica, igual que deploy.sh: el panel lee este archivo en
+        # cada visita al dashboard y un archivo a medio escribir haria parpadear
+        # el aviso sin motivo.
+        printf '%s\n' "$deployed_sha" > "$DEPLOYED_STATE.tmp"
+        chmod 0644 "$DEPLOYED_STATE.tmp"
+        mv -f "$DEPLOYED_STATE.tmp" "$DEPLOYED_STATE"
+        echo "  commit desplegado registrado en $DEPLOYED_STATE ($deployed_sha)."
+    else
+        warn "No se pudo leer el HEAD de $APP_DIR: $DEPLOYED_STATE no se actualizo."
+    fi
+else
+    echo "  $DEPLOYED_STATE no se escribe: el sitio no quedo sirviendo."
+fi
+# <<< TEST-BLOCK: deployed-state
 
 # --- C.13 Resumen --------------------------------------------------------
 

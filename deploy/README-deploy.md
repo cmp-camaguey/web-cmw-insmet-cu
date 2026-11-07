@@ -15,7 +15,7 @@ El orden no es estetico, es la garantia:
 
 | # | Paso | Por que en ese lugar |
 | --- | --- | --- |
-| 1 | `flock` | Dos pushes seguidos no pueden migrar a la vez |
+| 1 | `flock` | Dos pushes seguidos, o un deploy y el instalador, no pueden mutar el mismo checkout a la vez |
 | 2 | Aborta si hay cambios sin commitear | `git checkout --force` los perderia |
 | 3 | `git checkout` del SHA exacto | Desplegar un SHA, no una rama: la rama se movio entre el CI y el deploy |
 | 4 | `pip install -r requirements/prod.txt` | Antes de los gates, que importan las deps |
@@ -397,6 +397,35 @@ Opciones que importan:
 
 `sudo bash -s -- --help` imprime el uso y sale 0 sin exigir root ni terminal.
 
+`install.sh` toma **el mismo lock que `deploy.sh`** (`/var/lock/webcmp-deploy.lock`,
+no bloqueante). Si hay un deploy en curso, aborta sin tocar nada en vez de escribir
+el mismo checkout por detras; el `--dry-run` no lo toma, porque no muta nada.
+
+Si encuentra un `.env` de una instalacion anterior cuyo par
+`SECRET_KEY`/`ENCRYPTION_KEY` no descifra, en modo interactivo **pregunta antes de
+regenerarlo**. El par roto impide que Django arranque, y regenerar invalida todas
+las sesiones; antes de borrar nada, los dos archivos quedan respaldados al lado
+como `.env.bak.<fecha>` y `encryption.env.bak.<fecha>`, con el mismo modo 0600.
+Responder que no aborta sin tocar nada: la otra salida es restaurar la mitad que
+falta (por ejemplo, el `encryption.env` de la instalacion a la que pertenece ese
+`.env`). Con `--non-interactive` no hay a quien preguntar y se regenera avisando.
+
+### Pruebas de los scripts
+
+`deploy/tests/` cubre la sintaxis de todos los scripts y la logica que se puede
+aislar del sistema operativo: el validador del par `SECRET_KEY`/`ENCRYPTION_KEY`,
+el lock, el respaldo previo a regenerar el `.env` y la escritura de
+`/etc/webcmp/deployed`. Los bloques se extraen del propio `install.sh` entre
+marcadores `# >>> TEST-BLOCK: <nombre>`, asi que se prueba el codigo que se
+ejecuta y no una copia.
+
+```bash
+make test-deploy          # o: bash deploy/tests/run.sh
+```
+
+No corre el instalador: necesita root, systemd, apt, PostgreSQL y Nginx, y muta
+la maquina. Ese camino se prueba en un servidor.
+
 Lo que decide el operador, y que antes habia que editar a mano en tres
 lugares distintos (`generate_env.py`, `server_name` de Nginx y `PublicHostname`
 del deploy): el dominio y su `www`, los puertos, la base de datos (rol y base
@@ -597,7 +626,8 @@ Un superusuario ve en el **navbar del dashboard** un icono de refresco; cuando e
 servidor no esta en el ultimo commit de `main`, le aparece un punto rojo. Al
 abrirlo, el desplegable muestra el rango `deployed → latest` y el boton. Vive en el
 layout, asi que aparece en todas las paginas del dashboard, no solo en el index. El
-commit desplegado sale de `/etc/webcmp/deployed` (lo escribe `deploy.sh`), y el
+commit desplegado sale de `/etc/webcmp/deployed` (lo escriben `deploy.sh` en cada
+deploy e `install.sh` al terminar la instalacion), y el
 ultimo de `main` de un `git ls-remote` contra el repositorio publico: sin
 credenciales, sin clave y sin tocar el checkout.
 
@@ -648,7 +678,8 @@ El 2775 del directorio lleva setgid a proposito: hace que el archivo de peticion
 el de estado nazcan con grupo `webcmp` los escriba quien los escriba, asi que cada
 lado puede leer lo que escribio el otro.
 
-`install.sh` crea todo esto en `setup_autodeploy()`. Si se corre con
+`install.sh` crea todo esto: el andamiaje en `setup_autodeploy()` y
+`/etc/webcmp/deployed` al terminar. Si se corre con
 `--skip-deploy-scaffold`, el boton no se instala (necesita el usuario `deploy`).
 
 ### Apagarlo
