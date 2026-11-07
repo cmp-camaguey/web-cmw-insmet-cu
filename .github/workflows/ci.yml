@@ -101,6 +101,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements/test.txt
 
+      # Los scripts de deploy (install.sh, deploy.sh, autodeploy.sh) no los
+      # cubre ninguna prueba de Django, y son los que corren como root en el
+      # servidor. Van en este job y no en uno propio porque este es un required
+      # status check: un job nuevo no bloquearia el merge hasta que alguien lo
+      # agregue al ruleset, y un test que no bloquea es un test que se ignora.
+      - name: Deploy script tests (shell)
+        run: bash deploy/tests/run.sh
+
       - name: Django system check
         run: python manage.py check
 
