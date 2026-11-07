@@ -676,6 +676,80 @@ escribir `failed`. Pasada una hora el panel deja de creer ese estado
 sigue en el archivo. La fuente de verdad es `journalctl`, no el panel.
 
 
+## Los avisos del panel
+
+El mismo navbar trae un icono de campana con el numero de avisos sin leer. Los
+avisos los escribe el propio sistema en `Notification` (`apps/core/models.py`),
+nunca una persona, y salen de cuatro hechos:
+
+| Origen | Que lo dispara |
+|---|---|
+| `huey` | una tarea de Huey termino en `ERROR` **y no le quedan reintentos** |
+| `invoice_pdf` | fallo la generacion del PDF de una factura |
+| `invoice_email` | fallo el envio del correo de una factura |
+| `warning` | un `Warning` vence dentro del horizonte configurado |
+
+Los destinatarios son **todos los superusuarios activos**, y el queryset se
+filtra ademas por `recipient`: un administrador no ve el aviso de otro.
+
+### Configuracion
+
+Todo por variables de entorno, con default en `config/settings/base.py`:
+
+| Variable | Default | Que controla |
+|---|---|---|
+| `NOTIFICATIONS_ENABLED` | `True` | Si se crean avisos y se muestra el icono |
+| `NOTIFICATIONS_RETENTION_READ` | `30` | Dias que se conserva un aviso **leido** |
+| `NOTIFICATIONS_RETENTION_UNREAD` | `90` | Dias que se conserva un aviso **sin leer** |
+| `NOTIFICATIONS_MAX_VISIBLE` | `10` | Entradas del desplegable (el historial no depende de esto) |
+| `NOTIFICATIONS_WARNING_HORIZON_HOURS` | `48` | Antelacion con que se recuerda un aviso por vencer |
+
+### Apagarlos
+
+```bash
+# en el .env del servidor
+NOTIFICATIONS_ENABLED=False
+```
+
+Apagado: no se crean filas, el icono no se renderiza y el `update_status` del
+panel devuelve `notifications: null` (el JS no toca el badge). **La poda sigue
+corriendo**: limpiar datos viejos no es una funcion visible que haya que apagar,
+y dejarla detenida solo hace crecer la tabla.
+
+### Poda
+
+Dos entradas a la misma funcion (`apps.core.notifications.prune_notifications`):
+
+- **Huey**, tarea `apps.core.tasks.podar_notificaciones`, `crontab(minute=0,
+  hour=4)`. Huey corre con `utc=True`, asi que son las **00:00 en
+  `America/Havana`**. Se registra porque `CoreConfig.ready()` importa
+  `apps/core/tasks.py`; `apps/core/tests/test_huey_registry.py` afirma el
+  conjunto exacto de tareas del consumer y falla si esa cadena se rompe.
+- **A mano**, cuando haga falta:
+
+```bash
+.venv/bin/python manage.py notificar_podar
+```
+
+Borra, en este orden, los vencidos (`expires_at`), los leidos mas viejos que
+`NOTIFICATIONS_RETENTION_READ` y los no leidos mas viejos que
+`NOTIFICATIONS_RETENTION_UNREAD`. Es idempotente: correrlo dos veces seguido
+borra cero la segunda y lo informa.
+
+### Diagnosticar
+
+```bash
+.venv/bin/python manage.py notificar_podar            # que borraria ahora
+journalctl -u webcmp-huey -n 50 | grep -i notificac  # poda y recordatorios
+```
+
+Si el badge no coincide con el historial, la fuente es una sola
+(`apps.core.notifications.visible_for`): la usan el navbar, el historial y el
+contador. Un aviso vencido no se muestra aunque la poda todavia no lo haya
+borrado, y eso es a proposito: `expires_at` es la fecha del hecho, la poda es
+solo mantenimiento.
+
+
 ## Lo que el workflow NO puede hacer
 
 Un runner hospedado de GitHub Actions hace `ssh` por el puerto 22. Si el servidor

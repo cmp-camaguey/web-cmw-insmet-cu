@@ -9,6 +9,7 @@ Ver `openspec/changes/026-sistema-notificaciones/design.md` §3.
 
 import hashlib
 import logging
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -148,3 +149,76 @@ def notify_task_failure(task_name, *, task_id='', logical_key='', error=''):
         # ese mismo encolado comparten.
         dedupe_key=make_dedupe_key('huey', logical_key or task_id, 'ERROR'),
     )
+
+
+def visible_for(user):
+    """Avisos del usuario que todavía se deben mostrar.
+
+    Una sola definición para el navbar, el historial y el contador: si cada uno
+    filtrara por su lado, el badge podría decir 3 mientras la lista muestra 2, y
+    ese desacuerdo es justo lo que hace desconfiar del aviso.
+
+    Un aviso vencido no se muestra aunque la poda todavía no lo haya borrado:
+    `expires_at` es la fecha del hecho, la poda es solo mantenimiento.
+    """
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from apps.core.models import Notification
+
+    return Notification.objects.filter(recipient=user).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
+    )
+
+
+def unread_count(user):
+    """Cuántos avisos vigentes le quedan sin leer. `None` si el sistema está apagado.
+
+    `None` y `0` no son lo mismo: el navbar esconde el icono con `None` (sistema
+    apagado) y pinta "sin badge" con `0` (sistema encendido y nada pendiente).
+    """
+    if not getattr(settings, 'NOTIFICATIONS_ENABLED', True):
+        return None
+    return visible_for(user).filter(read_at__isnull=True).count()
+
+
+def prune_notifications(now=None):
+    """Borra los avisos que ya no sirven. Idempotente.
+
+    Tres reglas, aplicadas en este orden para que los conteos del log sean
+    excluyentes entre sí:
+
+    1. Vencidos: `expires_at < ahora`. El hecho que anunciaban ya pasó.
+    2. Leídos viejos: `read_at < ahora - RETENTION_READ`. Ya se vieron; el
+       historial largo solo ocupa espacio.
+    3. No leídos viejos: `created_at < ahora - RETENTION_UNREAD`. Un aviso de
+       hace 90 días que nadie abrió ya no es accionable, y dejarlo solo infla el
+       badge para siempre.
+
+    Devuelve un dict con el conteo de cada categoría para que quien lo llame
+    (comando o tarea) lo registre.
+    """
+    from django.utils import timezone
+
+    from apps.core.models import Notification
+
+    now = now or timezone.now()
+    read_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_READ)
+    unread_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_UNREAD)
+
+    # Secuencial y no tres `count()` previos: despues de cada `delete()` las
+    # filas ya no existen, asi que las categorias no se solapan y el log no
+    # suma dos veces la misma fila.
+    deleted = {
+        'expired': Notification.objects.filter(expires_at__lt=now).delete()[0],
+        'read': Notification.objects.filter(
+            read_at__isnull=False, read_at__lt=read_cutoff
+        ).delete()[0],
+        'unread': Notification.objects.filter(
+            read_at__isnull=True, created_at__lt=unread_cutoff
+        ).delete()[0],
+    }
+
+    if any(deleted.values()):
+        logger.info('Notificaciones podadas: %s', deleted)
+    return deleted

@@ -1,0 +1,74 @@
+{% if visible %}
+  <div class="nav-item dropdown d-flex" id="notifications-navbar">
+    <a href="#"
+       class="nav-link px-0 position-relative"
+       data-bs-toggle="dropdown"
+       data-bs-auto-close="outside"
+       aria-label="Avisos del sistema{% if unread %} ({{ unread }} sin leer){% endif %}">
+      <i class="icon ti ti-bell"
+         data-bs-toggle="tooltip"
+         data-bs-placement="bottom"
+         title="Avisos del sistema"></i>
+      {% comment %}
+        El badge se renderiza en servidor con el conteo ya hecho y lo refresca
+        el polling de 025 (dashboard-update.js). No hay endpoint propio: el
+        numero viaja en el mismo JSON del estado de actualizaciones.
+      {% endcomment %}
+      <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
+                     d-none{% endif %}"
+            id="notifications-navbar-badge"
+            aria-hidden="true">{{ badge }}</span>
+    </a>
+    <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow"
+         style="min-width: 22rem;
+                max-width: 92vw">
+      <div class="px-3 py-2 d-flex align-items-center justify-content-between">
+        <div class="fw-bold">Avisos</div>
+        {% if unread %}
+          <span class="text-secondary small">{{ unread }} sin leer</span>
+        {% endif %}
+      </div>
+      <div class="dropdown-divider"></div>
+      {% if recent %}
+        <ul class="list-unstyled mb-0">
+          {% for notification in recent %}
+            <li>
+              <a href="{% if notification.url %}{{ notification.url }}{% else %}#{% endif %}"
+                 class="dropdown-item text-wrap py-2{% if notification.is_read %}
+                          text-secondary{% endif %}">
+                <span class="d-flex align-items-start gap-2">
+                  {% if notification.severity == 'error' %}
+                    <i class="icon ti ti-alert-circle text-danger"></i>
+                  {% elif notification.severity == 'warning' %}
+                    <i class="icon ti ti-alert-triangle text-warning"></i>
+                  {% else %}
+                    <i class="icon ti ti-info-circle text-info"></i>
+                  {% endif %}
+                  <span class="flex-fill">
+                    <span class="d-block fw-medium">{{ notification.title }}</span>
+                    <span class="d-block small text-secondary">{{ notification.created_at|timesince }} atrás</span>
+                  </span>
+                </span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="px-3 py-4 text-center text-secondary small">No hay avisos.</div>
+      {% endif %}
+      <div class="dropdown-divider"></div>
+      <div class="px-3 pb-2 d-flex gap-2">
+        <a href="{% url 'dashboard:notifications' %}"
+           class="btn btn-sm btn-outline-secondary flex-fill">Ver todas</a>
+        {% if unread %}
+          <form method="post"
+                action="{% url 'dashboard:notifications_read_all' %}"
+                class="flex-fill">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-primary w-100">Marcar todas</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endif %}
