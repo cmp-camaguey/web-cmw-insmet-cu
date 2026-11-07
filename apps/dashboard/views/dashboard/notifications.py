@@ -1,15 +1,16 @@
-"""Avisos operativos del panel (cambio 026, fase 3).
+"""Notificaciones operativas del panel (cambio 026, fase 3).
 
-Tres vistas y un solo destinatario posible: el superusuario autenticado. Los
-avisos de 026 son operativos —una tarea que fallo, una factura que no se pudo
-generar, un aviso por vencer—, asi que un usuario normal no tiene nada que ver
-aqui, y el queryset siempre se filtra por `recipient=request.user` ademas del
+Cinco vistas y un solo destinatario posible: el superusuario autenticado. Las
+notificaciones de 026 son operativas —una tarea que fallo, una factura que no se
+pudo generar, un aviso por vencer—, asi que un usuario normal no tiene nada que
+ver aqui, y el queryset siempre se filtra por `recipient=request.user` ademas del
 permiso. Un superusuario no puede leer los avisos de otro aunque los dos sean
 administradores: cada fila tiene un destinatario concreto.
 """
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -58,7 +59,7 @@ class NotificationListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['title'] = 'Avisos'
+        context['title'] = 'Notificaciones'
         context['parent'] = 'Panel'
         context['segment'] = 'notifications'
         context['unread'] = unread_count(self.request.user) or 0
@@ -81,6 +82,12 @@ class NotificationReadView(LoginRequiredMixin, UserPassesTestMixin, View):
             # `created_at` que no cambia: solo se toca lo que se pidio.
             notification.read_at = timezone.now()
             notification.save(update_fields=['read_at'])
+        # El clic en el desplegable dispara un POST de fondo y navega por el
+        # enlace: un 302 ahi haria que el navegador descargue la pagina destino
+        # dos veces. 204 cierra la peticion sin redireccion; el POST normal del
+        # historial sigue recibiendo el redirect de siempre.
+        if request.headers.get('X-Requested-With') == 'fetch':
+            return HttpResponse(status=204)
         return redirect(_redirect_back(request))
 
 
@@ -100,7 +107,49 @@ class NotificationReadAllView(LoginRequiredMixin, UserPassesTestMixin, View):
         if updated:
             messages.success(
                 request,
-                f'{updated} aviso{"s" if updated != 1 else ""} marcado'
-                f'{"s" if updated != 1 else ""} como leído{"s" if updated != 1 else ""}.',
+                f'{updated} notificación{"es" if updated != 1 else ""} marcada'
+                f'{"s" if updated != 1 else ""} como leída{"s" if updated != 1 else ""}.',
+            )
+        return redirect(_redirect_back(request))
+
+
+class NotificationDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """Elimina una notificacion concreta. Solo POST: borrar no es idempotente
+    desde la perspectiva del usuario y no puede dispararse con un GET que
+    prefetchee un navegador o un bot.
+    """
+
+    raise_exception = True
+    http_method_names = ['post']
+
+    def test_func(self):
+        return self.request.user.is_superuser
+
+    def post(self, request, uuid):
+        notification = get_object_or_404(Notification, uuid=uuid, recipient=request.user)
+        notification.delete()
+        return redirect(_redirect_back(request))
+
+
+class NotificationDeleteAllView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """Elimina todas las notificaciones del usuario, leidas y sin leer.
+
+    Borra tambien las vencidas que `visible_for` no muestra: el usuario pidio
+    vaciar su bandeja, no conservar lo que ya no ve.
+    """
+
+    raise_exception = True
+    http_method_names = ['post']
+
+    def test_func(self):
+        return self.request.user.is_superuser
+
+    def post(self, request):
+        deleted, _ = Notification.objects.filter(recipient=request.user).delete()
+        if deleted:
+            messages.success(
+                request,
+                f'{deleted} notificación{"es" if deleted != 1 else ""} eliminada'
+                f'{"s" if deleted != 1 else ""}.',
             )
         return redirect(_redirect_back(request))

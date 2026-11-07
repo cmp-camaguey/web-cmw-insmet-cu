@@ -40,7 +40,13 @@ def notifications_navbar(context):
     from apps.core.notifications import unread_count, visible_for
 
     unread = unread_count(user) or 0
-    recent = list(visible_for(user)[: settings.NOTIFICATIONS_MAX_VISIBLE])
+    # Solo no leidas: el desplegable es una bandeja de entrada, no el historial.
+    # Si mezclara leidas, el badge y la lista dirian cosas distintas y una no
+    # leida antigua podria quedar fuera del tope por culpa de diez leidas nuevas.
+    # El historial completo vive en `dashboard:notifications`.
+    recent = list(
+        visible_for(user).filter(read_at__isnull=True)[: settings.NOTIFICATIONS_MAX_VISIBLE]
+    )
 
     return {
         'visible': True,

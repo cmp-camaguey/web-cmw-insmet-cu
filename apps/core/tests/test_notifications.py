@@ -10,6 +10,7 @@ from apps.core.notifications import (
     TASK_ERROR_ALLOWLIST,
     make_dedupe_key,
     notify,
+    notify_superusers,
     notify_task_failure,
 )
 from apps.core.tasks import send_email_task
@@ -90,6 +91,49 @@ class NotificationFlagTests(TestCase):
     def test_flag_encendido_por_defecto_crea_una_fila(self):
         self.assertIsNotNone(notify(self.user, **self._args()))
         self.assertEqual(Notification.objects.count(), 1)
+
+
+class NotifySuperusersCountTests(TestCase):
+    """`notify_superusers` reporta filas creadas, no destinatarios alcanzados.
+
+    La tarea diaria de avisos por vencer registra `len(creadas)`: si devolviera
+    las existentes, cada corrida informaría de recordatorios que no creó y el
+    log dejaría de servir para saber si la tarea hizo algo.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin1 = User.objects.create_superuser('cuenta-admin1', 'cuenta1@example.com', 'x')
+        cls.admin2 = User.objects.create_superuser('cuenta-admin2', 'cuenta2@example.com', 'x')
+
+    def _args(self):
+        return {
+            'source': 'warning',
+            'severity': Notification.Severity.WARNING,
+            'title': 'Aviso por vencer',
+            'dedupe_key': make_dedupe_key('warning', 'w1'),
+        }
+
+    def test_la_segunda_corrida_no_reporta_lo_que_ya_existia(self):
+        self.assertEqual(len(notify_superusers(**self._args())), 2)
+
+        self.assertEqual(notify_superusers(**self._args()), [])
+        self.assertEqual(Notification.objects.count(), 2)
+
+    def test_solo_cuenta_el_admin_que_no_lo_habia_visto(self):
+        notify_superusers(**self._args())
+        Notification.objects.filter(recipient=self.admin1).update(read_at=timezone.now())
+
+        nuevas = notify_superusers(**self._args())
+
+        self.assertEqual(len(nuevas), 1)
+        self.assertEqual(nuevas[0].recipient, self.admin1)
+        self.assertEqual(Notification.objects.count(), 3)
+
+    @override_settings(NOTIFICATIONS_ENABLED=False)
+    def test_sistema_apagado_no_reporta_nada(self):
+        self.assertEqual(notify_superusers(**self._args()), [])
+        self.assertEqual(Notification.objects.count(), 0)
 
 
 class TaskFailureNotificationTests(TestCase):

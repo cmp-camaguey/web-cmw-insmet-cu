@@ -145,6 +145,34 @@ class NotificationListTests(TestCase):
 
         self.assertEqual(response.context['unread'], 2)
 
+    def test_el_historial_se_titula_notificaciones(self):
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertEqual(response.context['title'], 'Notificaciones')
+
+    def test_el_historial_ofrece_eliminar_todas(self):
+        _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertContains(response, 'Eliminar todas')
+
+    def test_el_borrado_se_confirma_en_un_modal(self):
+        aviso = _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertContains(response, 'id="notification-delete-modal"')
+        self.assertContains(
+            response,
+            f'data-delete-url="{reverse("dashboard:notification_delete", args=[aviso.uuid])}"',
+        )
+        self.assertContains(
+            response,
+            f'data-delete-url="{reverse("dashboard:notifications_delete_all")}"',
+        )
+        self.assertNotContains(response, 'return confirm(')
+
 
 class NotificationMarkReadTests(TestCase):
     def setUp(self):
@@ -172,6 +200,19 @@ class NotificationMarkReadTests(TestCase):
         self.assertEqual(response.status_code, 404)
         ajeno.refresh_from_db()
         self.assertIsNone(ajeno.read_at)
+
+    def test_el_post_del_desplegable_recibe_204_sin_redireccion(self):
+        aviso = _notification(self.admin, title='Pendiente')
+
+        response = self.client.post(
+            reverse('dashboard:notification_read', args=[aviso.uuid]),
+            headers={'X-Requested-With': 'fetch'},
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b'')
+        aviso.refresh_from_db()
+        self.assertIsNotNone(aviso.read_at)
 
     def test_marcar_todas_no_toca_los_avisos_de_otro(self):
         _notification(self.admin, title='Mio')
@@ -239,6 +280,39 @@ class NotificationNavbarTests(TestCase):
 
         self.assertEqual(html.count('Aviso '), 10)
 
+    def test_el_desplegable_solo_lista_las_no_leidas(self):
+        admin = _superuser()
+        _notification(admin, title='Pendiente')
+        _notification(admin, title='Ya leida', read=True)
+
+        html = _navbar_html(admin)
+
+        self.assertIn('Pendiente', html)
+        self.assertNotIn('Ya leida', html)
+
+    def test_el_desplegable_no_lleva_titulo_ni_marcar_todas(self):
+        admin = _superuser()
+        _notification(admin, title='Pendiente')
+
+        html = _navbar_html(admin)
+
+        # El pie alcanza con "Ver todas": el titulo de seccion y el boton de
+        # marcar en bloque viven en el historial, no en el desplegable.
+        self.assertNotIn('Marcar todas', html)
+        self.assertNotIn('Avisos', html)
+        self.assertIn('Ver todas', html)
+
+    def test_el_desplegable_enlaza_al_marcado_sin_depender_de_js(self):
+        admin = _superuser()
+        aviso = _notification(admin, title='Pendiente')
+
+        html = _navbar_html(admin)
+
+        self.assertIn(
+            f'data-notification-read="{reverse("dashboard:notification_read", args=[aviso.uuid])}"',
+            html,
+        )
+
     def test_el_icono_se_renderiza_en_el_navbar_del_panel(self):
         admin = _superuser()
         self.client.force_login(admin)
@@ -267,3 +341,64 @@ class NotificationCounterTests(TestCase):
         response = self.client.get(reverse('dashboard:update_status'))
 
         self.assertIsNone(response.json()['notifications'])
+
+
+class NotificationDeleteTests(TestCase):
+    def setUp(self):
+        self.admin = _superuser()
+        self.other = _superuser('otro-admin')
+        self.client.force_login(self.admin)
+
+    def test_elimina_solo_la_indicada(self):
+        primera = _notification(self.admin, title='Primera')
+        segunda = _notification(self.admin, title='Segunda')
+
+        response = self.client.post(reverse('dashboard:notification_delete', args=[primera.uuid]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Notification.objects.filter(pk=primera.pk).exists())
+        self.assertTrue(Notification.objects.filter(pk=segunda.pk).exists())
+
+    def test_no_se_puede_eliminar_la_de_otro(self):
+        ajena = _notification(self.other, title='Ajena')
+
+        response = self.client.post(reverse('dashboard:notification_delete', args=[ajena.uuid]))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Notification.objects.filter(pk=ajena.pk).exists())
+
+    def test_eliminar_todas_borra_solo_las_propias(self):
+        _notification(self.admin, title='Mia sin leer')
+        _notification(self.admin, title='Mia leida', read=True)
+        ajena = _notification(self.other, title='Ajena')
+
+        response = self.client.post(reverse('dashboard:notifications_delete_all'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Notification.objects.filter(recipient=self.admin).count(), 0)
+        self.assertTrue(Notification.objects.filter(pk=ajena.pk).exists())
+
+    def test_eliminar_exige_post(self):
+        aviso = _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notification_delete', args=[aviso.uuid]))
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(Notification.objects.filter(pk=aviso.pk).exists())
+
+    def test_eliminar_todas_exige_post(self):
+        _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications_delete_all'))
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(Notification.objects.filter(recipient=self.admin).count(), 1)
+
+    def test_un_no_superusuario_no_puede_eliminar(self):
+        aviso = _notification(self.admin, title='Mia')
+        self.client.force_login(_user('intruso'))
+
+        response = self.client.post(reverse('dashboard:notification_delete', args=[aviso.uuid]))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Notification.objects.filter(pk=aviso.pk).exists())

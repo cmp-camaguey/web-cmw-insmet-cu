@@ -5,18 +5,31 @@
       <div class="page-pretitle">{{ parent }}</div>
       <h2 class="page-title">{{ title }}</h2>
     </div>
-    {% if unread %}
-      <div class="col-auto ms-auto d-print-none">
-        <form method="post" action="{% url 'dashboard:notifications_read_all' %}">
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <button type="submit" class="btn btn-primary">
-            <i class="icon ti ti-checks"></i>
-            Marcar todas como leídas
+    <div class="col-auto ms-auto d-print-none">
+      <div class="d-flex gap-2 flex-wrap justify-content-end">
+        {% if unread %}
+          <form method="post" action="{% url 'dashboard:notifications_read_all' %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="btn btn-primary">
+              <i class="icon ti ti-checks"></i>
+              Marcar todas como leídas
+            </button>
+          </form>
+        {% endif %}
+        {% if page_obj.paginator.count %}
+          <button type="button"
+                  class="btn btn-outline-danger"
+                  data-bs-toggle="modal"
+                  data-bs-target="#notification-delete-modal"
+                  data-delete-url="{% url 'dashboard:notifications_delete_all' %}"
+                  data-delete-message="¿Eliminar todas las notificaciones?">
+            <i class="icon ti ti-trash"></i>
+            Eliminar todas
           </button>
-        </form>
+        {% endif %}
       </div>
-    {% endif %}
+    </div>
   </div>
 {% endblock %}
 {% block content %}
@@ -46,19 +59,69 @@
               <a href="{{ notification.url }}" class="small">Ver detalle</a>
             {% endif %}
           </div>
-          {% if not notification.is_read %}
-            <form method="post"
-                  action="{% url 'dashboard:notification_read' notification.uuid %}">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar leída</button>
-            </form>
-          {% endif %}
+          <div class="d-flex align-items-center gap-2">
+            {% if not notification.is_read %}
+              <form method="post"
+                    action="{% url 'dashboard:notification_read' notification.uuid %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar leída</button>
+              </form>
+            {% endif %}
+            <button type="button"
+                    class="btn btn-icon btn-outline-danger btn-sm"
+                    title="Eliminar"
+                    aria-label="Eliminar notificación"
+                    data-bs-toggle="modal"
+                    data-bs-target="#notification-delete-modal"
+                    data-delete-url="{% url 'dashboard:notification_delete' notification.uuid %}"
+                    data-delete-message="¿Eliminar «{{ notification.title }}»?">
+              <i class="icon ti ti-trash"></i>
+            </button>
+          </div>
         </div>
       {% empty %}
-        <div class="card-body py-5 text-center text-secondary">No hay avisos.</div>
+        <div class="card-body py-5 text-center text-secondary">No hay notificaciones.</div>
       {% endfor %}
     </div>
     {% include 'includes/pagination.html' with page_obj=page_obj param_name='page' %}
+  </div>
+{% endblock %}
+{% block modal %}
+  {% comment %}
+    Un solo modal para todos los botones de borrado: cada uno trae su accion y
+    su mensaje en `data-*`, y `static/dist/js/notifications.js` los copia al
+    abrirlo. Diez modales por pagina serian diez copias del mismo bloque.
+  {% endcomment %}
+  <div class="modal fade"
+       id="notification-delete-modal"
+       tabindex="-1"
+       aria-labelledby="notification-delete-title"
+       aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title" id="notification-delete-title">
+            <i class="icon me-2 ti ti-alert-triangle"></i>
+            Eliminar notificación
+          </h5>
+          <button type="button"
+                  class="btn-close btn-close-white"
+                  data-bs-dismiss="modal"
+                  aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p id="notification-delete-text" class="mb-1">¿Eliminar esta notificación?</p>
+          <p class="text-danger mb-0">Esta acción no se puede deshacer.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <form method="post" id="notification-delete-form" action="">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Eliminar</button>
+          </form>
+        </div>
+      </div>
+    </div>
   </div>
 {% endblock %}

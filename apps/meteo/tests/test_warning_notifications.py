@@ -65,9 +65,12 @@ class WarningExpiryNotificationTests(TestCase):
         self._warning(hours=24)
 
         avisos_por_vencer(horizon_hours=HORIZON)
-        avisos_por_vencer(horizon_hours=HORIZON)
+        segunda = avisos_por_vencer(horizon_hours=HORIZON)
 
         self.assertEqual(Notification.objects.count(), 1)
+        # El log de la tarea cuenta esta lista: una fila que ya existía no es
+        # trabajo hecho por esta corrida.
+        self.assertEqual(segunda, [])
 
     def test_el_horizonte_por_defecto_sale_de_settings(self):
         self._warning(hours=24)

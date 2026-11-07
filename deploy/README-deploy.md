@@ -676,21 +676,32 @@ escribir `failed`. Pasada una hora el panel deja de creer ese estado
 sigue en el archivo. La fuente de verdad es `journalctl`, no el panel.
 
 
-## Los avisos del panel
+## Las notificaciones del panel
 
-El mismo navbar trae un icono de campana con el numero de avisos sin leer. Los
-avisos los escribe el propio sistema en `Notification` (`apps/core/models.py`),
-nunca una persona, y salen de cuatro hechos:
+El mismo navbar trae un icono de campana con el numero de notificaciones sin
+leer. Las notificaciones las escribe el propio sistema en `Notification`
+(`apps/core/models.py`), nunca una persona, y salen de cuatro hechos:
 
 | Origen | Que lo dispara |
 |---|---|
-| `huey` | una tarea de Huey termino en `ERROR` **y no le quedan reintentos** |
-| `invoice_pdf` | fallo la generacion del PDF de una factura |
-| `invoice_email` | fallo el envio del correo de una factura |
+| `huey` | una tarea de Huey termino en `ERROR` **y no le quedan reintentos** (solo `send_email_task`) |
+| `invoice` | fallo el PDF o el correo de una factura (la clave incluye cual de los dos) |
 | `warning` | un `Warning` vence dentro del horizonte configurado |
+| `subscription` | un cliente solicita un servicio desde el portal |
+| `invoice_pending` | una factura lleva `INVOICE_PENDING_REMINDER_DAYS` dias sin pagarse |
 
 Los destinatarios son **todos los superusuarios activos**, y el queryset se
-filtra ademas por `recipient`: un administrador no ve el aviso de otro.
+filtra ademas por `recipient`: un administrador no ve la notificacion de otro.
+
+El recordatorio de facturas corre en la tarea periodica
+`apps.commercial.tasks.recordar_facturas_pendientes` (`crontab(minute=0,
+hour=13)`, las **09:00 en `America/Havana`**). Mientras la factura siga sin
+cobrarse vuelve cada `INVOICE_PENDING_REMINDER_DAYS` dias, no en cada corrida
+diaria: leer el aviso no lo hace reaparecer al dia siguiente.
+
+El desplegable lista **solo las no leidas**; abrir una la marca leida y navega
+al objeto. Las leidas quedan en "Ver todas", donde tambien se pueden eliminar
+una a una o todas de golpe.
 
 ### Configuracion
 
@@ -698,11 +709,12 @@ Todo por variables de entorno, con default en `config/settings/base.py`:
 
 | Variable | Default | Que controla |
 |---|---|---|
-| `NOTIFICATIONS_ENABLED` | `True` | Si se crean avisos y se muestra el icono |
-| `NOTIFICATIONS_RETENTION_READ` | `30` | Dias que se conserva un aviso **leido** |
-| `NOTIFICATIONS_RETENTION_UNREAD` | `90` | Dias que se conserva un aviso **sin leer** |
-| `NOTIFICATIONS_MAX_VISIBLE` | `10` | Entradas del desplegable (el historial no depende de esto) |
+| `NOTIFICATIONS_ENABLED` | `True` | Si se crean notificaciones y se muestra el icono |
+| `NOTIFICATIONS_RETENTION_READ` | `30` | Dias que se conserva una notificacion **leida** |
+| `NOTIFICATIONS_RETENTION_UNREAD` | `90` | Dias que se conserva una notificacion **sin leer** |
+| `NOTIFICATIONS_MAX_VISIBLE` | `10` | Notificaciones sin leer que caben en el desplegable |
 | `NOTIFICATIONS_WARNING_HORIZON_HOURS` | `48` | Antelacion con que se recuerda un aviso por vencer |
+| `INVOICE_PENDING_REMINDER_DAYS` | `7` | Dias sin cobrar que disparan el recordatorio, y cadencia con que se repite |
 
 ### Apagarlos
 
@@ -743,11 +755,12 @@ borra cero la segunda y lo informa.
 journalctl -u webcmp-huey -n 50 | grep -i notificac  # poda y recordatorios
 ```
 
-Si el badge no coincide con el historial, la fuente es una sola
+El badge cuenta las **no leidas** y el historial muestra todas: que no coincidan
+no es un defecto. Dentro de cada uno la fuente es una sola
 (`apps.core.notifications.visible_for`): la usan el navbar, el historial y el
-contador. Un aviso vencido no se muestra aunque la poda todavia no lo haya
-borrado, y eso es a proposito: `expires_at` es la fecha del hecho, la poda es
-solo mantenimiento.
+contador. Una notificacion vencida no se muestra aunque la poda todavia no la
+haya borrado, y eso es a proposito: `expires_at` es la fecha del hecho, la poda
+es solo mantenimiento.
 
 
 ## Lo que el workflow NO puede hacer

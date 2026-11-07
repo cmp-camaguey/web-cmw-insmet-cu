@@ -10,6 +10,7 @@ from django.views.generic import FormView, ListView
 
 from apps.commercial.forms import PaymentMethodForm
 from apps.commercial.models import Customer, Invoice, Service, ServiceSubscription
+from apps.commercial.notifications import notificar_solicitud_suscripcion
 
 
 class CommercialServicesListView(LoginRequiredMixin, ListView):
@@ -158,7 +159,7 @@ class ServiceDetailView(LoginRequiredMixin, FormView):
 
         # Sin `end_date`: la suscripción no vence, se queda viva hasta que se
         # cancele. La cantidad es sólo el factor que multiplica al precio.
-        ServiceSubscription.objects.create(
+        subscription = ServiceSubscription.objects.create(
             customer=customer,
             service=self.service,
             start_date=start_date,
@@ -166,5 +167,8 @@ class ServiceDetailView(LoginRequiredMixin, FormView):
             payment_status='requested',
             payment_method=form.cleaned_data['payment_method'],
         )
+        # La venta queda esperando una persona: sin este aviso, la solicitud
+        # solo existe si alguien abre la lista de suscripciones por casualidad.
+        notificar_solicitud_suscripcion(subscription)
         messages.success(self.request, 'Solicitud enviada. El staff generará una factura.')
         return redirect(self.success_url)
