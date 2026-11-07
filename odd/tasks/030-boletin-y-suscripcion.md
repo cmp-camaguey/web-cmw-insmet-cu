@@ -1,0 +1,118 @@
+# 030 — boletín y suscripción (PR A)
+
+Objetivo: que el formulario del landing suscriba de verdad, con doble opt-in y
+baja, y que `mail_send` deje de fallar en silencio cuando no hay destinatarios.
+Rama: `feat/030-boletin-y-suscripcion` (desde `dev`).
+Delivery: PR a `dev`; PR B (in-app) va aparte.
+Runner: `python manage.py test` (Django unittest).
+Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`.
+
+## Specs
+
+- **S1.** `Subscriber` guarda la persona y su consentimiento: `email` único,
+  `source` (`landing`/`registro`/`perfil`/`admin`), `confirmed_at`,
+  `confirmation_token` de un solo uso, `unsubscribe_token` permanente y
+  `active`.
+- **S2.** `Subscription` guarda la pertenencia: `unique_together
+  ('subscriber', 'recipient_list')`. La misma dirección puede estar en dos
+  listas sin duplicar la persona.
+- **S3.** Como máximo una `EmailRecipientList` tiene `is_default=True`; es la
+  audiencia automática de avisos, pronósticos y boletín. Ningún código busca la
+  lista por `name='newsletter'`.
+- **S4.** Las filas existentes de `EmailRecipient` se migran como confirmadas,
+  `source='admin'`, `confirmed_at=created_at`, y el modelo viejo se borra.
+- **S5.** Escribir un correo en el landing y pulsar "Suscribirse" crea una
+  suscripción **pendiente** y envía un correo de confirmación; sin confirmar no
+  recibe ningún envío.
+- **S6.** El enlace de confirmación es de un solo uso y caduca a las 72 h.
+- **S7.** Un correo vacío o inválido falla **visiblemente** en el servidor, no
+  solo en el navegador.
+- **S8.** Cada correo masivo lleva un enlace de baja que funciona sin login y
+  corta los envíos siguientes. La baja es idempotente y no borra la fila.
+- **S9.** `Profile.newsletter = False` deja de recibir el boletín en el envío
+  siguiente; `True` lo reactiva sin doble opt-in (usuario autenticado).
+- **S10.** Cambiar el correo del perfil **mueve** la suscripción: no queda una
+  fila con la dirección anterior.
+- **S11.** La audiencia es **automática**: todos los suscriptores confirmados y
+  activos de la lista principal, sin que el operador elija lista en ningún
+  formulario. Las direcciones externas que deben recibir avisos (instituciones,
+  prensa) se cargan en esa misma lista con `source='admin'`. `mail_send` sin
+  destinatarios deja rastro (log + aviso al admin), no un `return` mudo.
+- **S14.** El envío es un acto explícito: cada publicación tiene una casilla
+  «Enviar por correo» con el número de destinatarios a la vista. Un aviso nuevo
+  arranca marcado; un aviso editado y un pronóstico (crear o editar) arrancan
+  desmarcados. Sin marcar no sale ningún correo.
+- **S15.** Cada correo masivo se envía **uno por destinatario**, con su propio
+  enlace de baja: ningún suscriptor ve la dirección de otro.
+- **S12.** El endpoint público tiene límite por IP (`5/hour`) y no revela si una
+  dirección ya estaba en la lista.
+- **S13.** Una edición de boletín es una entidad con asunto, cuerpo y estado
+  `draft`/`sending`/`sent`; se envía por comando o pantalla, con vista previa,
+  confirmación, lotes de 50 y ventana horaria.
+
+## Tasks
+
+- [x] **T1** Modelos + migración de datos + admin · S1–S4 · inline
+- [x] **T2** `apps/core/subscriptions.py` · S5–S10 · inline
+- [x] **T3** Signal del perfil y cambio de correo · S9–S10 · inline
+- [x] **T4** `apps/core/audiences.py` + `mail_send` · S11, S15 · inline
+- [x] **T4b** Casilla «Enviar por correo» y retiro de la FK de lista en
+      `Warning`/`WeatherReport` · S14 · inline
+- [x] **T5** Endpoint público (suscribir, confirmar, baja) · S5–S8, S12 · inline
+- [x] **T6** Landing operativo · S5, S7 · inline
+- [x] **T7** `Newsletter` + comando + pantalla · S13 · inline
+- [ ] **T8** Verificación completa · S1–S15 · inline
+
+## Log
+
+- **L1** (2026-11-07) Pedido original: notificaciones para clientes, aviso por
+  correo a quien habilite "recibir novedades" en su perfil, formulario del
+  landing operativo, y listas de correo que no se elijan a mano. Registrado en
+  `proposal.md` (PR #149).
+- **L2** (2026-11-07) "Sí, cierra las 9 y escribe el diseño (Recomendado)".
+  Las nueve decisiones de §6 quedan cerradas con los valores propuestos y se
+  escriben `design.md` y `tasks.md`.
+- **L3** (2026-11-07) Cambio de requisito, verbatim: «para los avisos la idea es
+  que tampoco el operador tenga que seleccionar la lista de correo, es decir la
+  idea es que se haga automatico en la lista van todos los que quieran recivir
+  actualizaciones por correo o el newsleter mas algunos email que no tienen
+  porque estar en el sitio refistrados pero si se necesita enviarles el correo
+  de los avisos, lo que prefiero que esto se haga automatico no que el operador
+  tenga que seleccionar la lista de correo manualmente, otra cosa se necesita
+  tambien la opcion de darse de baja del newsleter, analiza bien esto y no me
+  des la razon porque si, mejoremos esta parte si es necesario, asi brindamos la
+  mejor experiencia tanto de operadores, usuarios clientes etc».
+  Consecuencia: la FK `email_recipient_list` se retira de `Warning` y
+  `WeatherReport`, la audiencia pasa a ser única y automática (S11) y el envío
+  se vuelve explícito con una casilla (S14) para no convertir cada guardado en
+  un correo masivo. La baja ya estaba en S8 y ahora viaja en todos los correos.
+- **L4** (2026-11-07) Pregunta del usuario: ¿la casilla arranca marcada o
+  desmarcada? Decisión: depende de la publicación y del momento. Un aviso nuevo
+  sí (nace para comunicarse); un aviso editado no (reenviar por una errata es
+  peor que no reenviar); un pronóstico nunca (se corrige varias veces al día).
+
+- **L5** (2026-11-07) Pruebas en verde para T1–T6: `test_subscriptions`,
+  `test_audiences`, `test_email_recipient_views`, `test_site_url`,
+  `test_newsletter`, `test_warning_views`, `test_weather_report_views` y
+  `test_send_email_toggle` (47 + 5). Gotcha corregido: `Warning.uuid` es PK con
+  `default=uuid4`, así que una instancia nueva ya trae pk y `pk is not None`
+  miente al decidir si es edición; se usa `instance._state.adding`.
+
+- **L6** (2026-11-07) Dos bugs reportados en la base real:
+  1. «Un aviso se publicó sin destinatarios de correo» con un único superusuario
+     que tenía el boletín marcado. Causa: la base no tenía **ninguna**
+     `EmailRecipientList`, y `0002` solo marcaba la lista `newsletter` si ya
+     existía. `resolve_audience` devolvía cero y el signal del perfil no tenía
+     dónde suscribir. Corregido con `core.0003`, que crea la lista principal y
+     da de alta a los perfiles con `newsletter=True`.
+  2. El enlace «Ver detalle» abría `xdg-open`. Causa: la notificación guardaba
+     el **nombre** de la URL (`home:warnings_tropical_cyclone`) en `url`; el
+     navegador lo lee como esquema propio y delega en el sistema. `mail_send`
+     guarda ahora una ruta (`reverse`) y `Notification.link` resuelve las filas
+     viejas al vuelo.
+
+- **L7** (2026-11-07) Aclaración del usuario: la BD de producción está vacía
+  mientras se prepara el contenedor, así que el backfill de `0003` no inscribe a
+  nadie real. Se mantiene tal cual. Las migraciones no transportan datos entre
+  entornos: cada una corre contra la base donde se aplica, y ninguna contiene
+  correos hardcodeados.
