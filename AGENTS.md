@@ -176,7 +176,7 @@ Consecuencia útil: un colaborador futuro con `write` puede mergear en `dev`, pe
 - **FileHandlerMixin** obligatorio en todo modelo que tenga FileField/ImageField
 - **Soft delete** en modelos de negocio con datos sensibles (Customer, Service, ServiceSubscription, Invoice, Contract, Certificate, Warning). NO forzar en modelos auxiliares/transaccionales (InvoiceItem, ForecastRegions, EmailRecipient).
 - **Paginación**: `paginate_by = 10` (convención uniforme) en vistas SIN DataTables. Las vistas con DataTables cargan todos los registros y delegan la paginación al cliente — NO llevan `paginate_by`. Esto aplica por igual a listas públicas de servicios por cards (catálogo comercial y Mis Servicios), que usan `paginate_by = 10` para proteger la UX móvil; los tests codifican ese valor.
-- **Migrations** NO versionadas (`.gitignore`)
+- **Migrations** versionadas: `makemigrations` + commit en el mismo PR; el gate es `makemigrations --check --dry-run`
 - **Estáticos**: `static/` dev, `staticfiles/` prod con WhiteNoise
 - **Idioma**: español (`es-mx`, `America/Havana`)
 - **Tema**: Tabler (Bootstrap 5), iconos meteorológicos PNG en `static/dist/img/weather_icon/`
@@ -234,7 +234,7 @@ Estos items NO los cubren los skills genéricos. Verificarlos siempre:
 - [ ] FileHandlerMixin + `file_fields` definido si hay FileField/ImageField
 - [ ] Soft delete: filtrar `record_active=True` (usa el manager por defecto, no `all_objects`)
 - [ ] Tareas/imports Huey registrados en `AppConfig.ready()`
-- [ ] Migraciones ejecutadas y NO versionadas (`.gitignore`)
+- [ ] Migraciones versionadas y `makemigrations --check --dry-run` en verde
 
 ## Modelo de dominio (referencia rápida)
 

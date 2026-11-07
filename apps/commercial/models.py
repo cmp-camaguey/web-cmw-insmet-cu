@@ -634,7 +634,8 @@ class Invoice(SoftDeleteModel, FileHandlerMixin):
         """La frase del período facturado que imprime el PDF.
 
         Sin período cae a la fecha de emisión: es un respaldo de lectura, no una
-        migración de datos, porque en este repo las migraciones no se versionan.
+        migración de datos, porque la frase se calcula en lectura en vez de
+        guardarse duplicada.
         """
         if self.period_start and self.period_end:
             return frase_de_periodo(self.period_start, self.period_end)

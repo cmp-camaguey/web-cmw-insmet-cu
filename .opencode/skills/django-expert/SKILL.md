@@ -23,7 +23,7 @@ Cargar al escribir o revisar modelos, vistas, serializers, queries, autenticaci�
 - Vistas con DataTables cargan todos los registros (pagina el cliente); el resto usa `paginate_by = 20`.
 - DRF: `DjangoModelPermissionsOrAnonReadOnly`; schema via drf-spectacular.
 - Tests: label completo `apps.<app>` (Django 5.2 no resuelve labels cortos).
-- Migraciones: generar y NO versionar (`.gitignore`).
+- Migraciones: versionadas; generar y commitear el archivo en el mismo PR.
 
 ## Workflow
 
@@ -60,7 +60,7 @@ Antes de presentar la solución:
 | Query N+1 o lento | `select_related`/`prefetch_related`; verificar con `connection.queries` en test |
 | Borrado lógico | `record_active=True` en manager por defecto |
 | Archivos subidos | `FileHandlerMixin` con `file_fields` |
-| Migraciones | Generar y NO versionar (`.gitignore`) |
+| Migraciones | Generar y commitear; gate `makemigrations --check --dry-run` |
 
 ## Common Pitfalls
 
