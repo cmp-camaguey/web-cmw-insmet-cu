@@ -73,4 +73,3 @@ assert_contains 'install.sh imprime el ssh-keyscan de DEPLOY_SSH_KNOWN_HOSTS' \
     '2>/dev/null > known_hosts' "$known_hosts_line"
 assert_not_contains 'install.sh no prefija el known_hosts con el sed roto' \
     '|1 h=|' "$known_hosts_line"
-
