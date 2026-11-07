@@ -30,6 +30,7 @@ python manage.py add_stations_data createsuperuser
 python manage.py runserver                    # desarrollo
 python manage.py test apps.<app>              # testing selectivo (label completo, ej: apps.meteo)
 python manage.py test                         # full suite (antes de commit)
+make test-deploy                              # pruebas de los scripts de deploy (deploy/tests/)
 PRODUCTION=true python manage.py runserver    # producción local (usa DB real, SSL, etc.)
 ./run_huey.sh &                               # worker de correos/PDF (Huey)
 ```
@@ -272,6 +273,7 @@ Lo que gentle-ai **no** cubre es la verificación funcional (`review validate --
 | Cambio | Verificación |
 |---|---|
 | Código Python (modelos, vistas, permisos) | `python manage.py test` |
+| Scripts shell (`deploy/`, `run_huey.sh`, hooks) | `make test-deploy` |
 | `requirements/` con **versiones cambiadas** | `python manage.py test` (el comportamiento puede cambiar) |
 | `requirements/` solo pines, sin cambio de versión | `pip install --dry-run -r requirements/<env>.txt` |
 | Solo workflows / Makefile / hooks | YAML parseable + `sh -n .githooks/pre-commit` + `make -n <target>` |
