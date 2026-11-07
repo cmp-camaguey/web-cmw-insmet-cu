@@ -14,6 +14,8 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import IntegrityError, transaction
 
+from apps.core.cache_utils import safe_cache_delete, safe_cache_get, safe_cache_set
+
 logger = logging.getLogger(__name__)
 
 # Tareas de Huey cuyo fallo merece un aviso. Es opt-in a propósito: la tarea de
@@ -104,10 +106,16 @@ def _notify_or_get(
     try:
         with transaction.atomic():
             obj, created = Notification.objects.get_or_create(**lookup, defaults=defaults)
-        return obj, created
     except IntegrityError:
         # Otro proceso la creó entre el SELECT y el INSERT. La suya es la buena.
         return Notification.objects.filter(**lookup).first(), False
+
+    if created:
+        # El aviso pudo crearse en un worker de Huey, que es otro proceso: con
+        # Redis la invalidacion cruza hasta los workers de Gunicorn, y sin Redis
+        # `invalidate_unread_count` no hace nada y el TTL corto cubre el hueco.
+        invalidate_unread_count(recipient)
+    return obj, created
 
 
 def notify(
@@ -236,6 +244,75 @@ def unread_count(user):
     if not getattr(settings, 'NOTIFICATIONS_ENABLED', True):
         return None
     return visible_for(user).filter(read_at__isnull=True).count()
+
+
+UNREAD_COUNT_CACHE_PREFIX = 'notifications:unread:'
+
+# Corto a proposito. Las acciones del usuario invalidan la clave en el acto,
+# pero un aviso creado por un worker de Huey, o una poda, pueden tocar filas sin
+# pasar por aqui: este TTL es el peor retraso aceptable para esos casos. 20 s es
+# el intervalo de refresco del panel, asi que el badge nunca llega tarde por
+# culpa del cache.
+UNREAD_COUNT_CACHE_TIMEOUT = 20
+
+
+def _unread_count_cache_is_shared():
+    """`True` solo cuando hay Redis detras.
+
+    LocMem vive en el proceso: los tres workers de Gunicorn tendrian copias
+    distintas y marcar un aviso como leido solo invalidaria la del worker que
+    atendio el POST. Cachear ahi no acelera nada y hace que el badge muestre un
+    numero distinto segun a quien le toque responder, que es peor que no
+    cachear.
+    """
+    return getattr(settings, 'USE_REDIS_CACHE', False)
+
+
+def unread_count_cache_key(user):
+    return f'{UNREAD_COUNT_CACHE_PREFIX}{user.pk}'
+
+
+def cached_unread_count(user):
+    """`unread_count` con cache compartido cuando lo hay."""
+    if not _unread_count_cache_is_shared():
+        return unread_count(user)
+
+    key = unread_count_cache_key(user)
+    cached = safe_cache_get(key)
+    if cached is not None:
+        return cached
+
+    value = unread_count(user)
+    if value is not None:
+        safe_cache_set(key, value, UNREAD_COUNT_CACHE_TIMEOUT)
+    return value
+
+
+def invalidate_unread_count(user):
+    """Olvida el conteo cacheado del usuario.
+
+    Se llama DESPUES de guardar la fila. Si el cache falla, el peor caso es un
+    badge viejo durante `UNREAD_COUNT_CACHE_TIMEOUT` segundos: el dato real ya
+    esta escrito y el siguiente refresco lo recoge.
+    """
+    if user is None or not getattr(user, 'pk', None):
+        return
+    if not _unread_count_cache_is_shared():
+        return
+    safe_cache_delete(unread_count_cache_key(user))
+
+
+def unread_for(user):
+    """Conteo listo para el endpoint JSON. `None` cuando el sistema esta apagado.
+
+    Deliberadamente NO comprueba permisos: quien puede pedir el numero lo decide
+    la vista con su `test_func`. Duplicar aqui la regla la convertiria en dos
+    reglas que se desincronizan el dia que el cambio 030 abra la campana a los
+    clientes.
+    """
+    if user is None or not getattr(user, 'pk', None):
+        return None
+    return cached_unread_count(user)
 
 
 def prune_notifications(now=None):

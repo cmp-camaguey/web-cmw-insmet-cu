@@ -23,6 +23,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.commercial.models import Service
+from apps.core.models import SiteConfiguration
 from apps.meteo.models import ForecastRegions, Forecasts, Warning
 
 BRANDS = ('facebook', 'instagram', 'x', 'telegram')
@@ -279,6 +280,56 @@ class LandingRenderTests(TestCase):
     def test_marketing_stylesheet_linked(self):
         """head.html links the vendored tabler-marketing CSS."""
         self.assertIn('dist/css/tabler-marketing.min.css?v=151', self.html)
+
+
+class LandingSevereWarningStripTests(TestCase):
+    """La franja del aviso cruza al landing solo cuando el aviso es grave.
+
+    El landing es la raíz del dominio y no replica el contenido vivo del home
+    (ver LandingRenderTests), pero un ciclón tropical o una tormenta fuerte son
+    la excepción: esconderlos tras un clic a "Tiempo" no se defiende. Un aviso
+    `early` por lluvias es rutina y se queda fuera, para que la franja no se
+    vuelva paisaje.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.author = User.objects.create_user(username='landing-strip-author', password='x')
+        SiteConfiguration.get_instance()
+
+    def _create_warning(self, warning_type, title):
+        return Warning.objects.create(
+            warning_type=warning_type,
+            title=title,
+            summary='Resumen del aviso.',
+            user=self.author,
+            valid_until=timezone.now() + timezone.timedelta(days=1),
+        )
+
+    def test_tropical_cyclone_warning_renders_strip_on_landing(self):
+        self._create_warning('tropical_cyclone', 'Huracán acercándose a la provincia')
+        html = self.client.get('/').content.decode()
+        self.assertIn('emergency-banner', html)
+        self.assertIn('Huracán acercándose a la provincia', html)
+
+    def test_storm_warning_renders_strip_on_landing(self):
+        self._create_warning('storm', 'Tormenta eléctrica severa')
+        html = self.client.get('/').content.decode()
+        self.assertIn('emergency-banner', html)
+        self.assertIn('Tormenta eléctrica severa', html)
+
+    def test_early_warning_does_not_render_strip_on_landing(self):
+        self._create_warning('early', 'Alerta por lluvias intensas')
+        html = self.client.get('/').content.decode()
+        self.assertNotIn('emergency-banner', html)
+        self.assertNotIn('Alerta por lluvias intensas', html)
+
+    def test_early_warning_still_renders_on_home(self):
+        """El home conserva la franja para cualquier aviso vigente."""
+        self._create_warning('early', 'Alerta por lluvias intensas')
+        html = self.client.get(reverse('home:index')).content.decode()
+        self.assertIn('emergency-banner', html)
+        self.assertIn('Alerta por lluvias intensas', html)
 
 
 class LandingMarketingRedesignEmptyTests(TestCase):

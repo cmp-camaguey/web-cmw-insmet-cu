@@ -18,7 +18,11 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import ListView, View
 
 from apps.core.models import Notification
-from apps.core.notifications import unread_count, visible_for
+from apps.core.notifications import (
+    cached_unread_count,
+    invalidate_unread_count,
+    visible_for,
+)
 
 
 def _redirect_back(request):
@@ -62,7 +66,7 @@ class NotificationListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
         context['title'] = 'Notificaciones'
         context['parent'] = 'Panel'
         context['segment'] = 'notifications'
-        context['unread'] = unread_count(self.request.user) or 0
+        context['unread'] = cached_unread_count(self.request.user) or 0
         return context
 
 
@@ -82,6 +86,9 @@ class NotificationReadView(LoginRequiredMixin, UserPassesTestMixin, View):
             # `created_at` que no cambia: solo se toca lo que se pidio.
             notification.read_at = timezone.now()
             notification.save(update_fields=['read_at'])
+            # Despues de escribir, nunca antes: el endpoint de conteo cachea con
+            # Redis y este es el momento en que su numero deja de ser cierto.
+            invalidate_unread_count(request.user)
         # El clic en el desplegable dispara un POST de fondo y navega por el
         # enlace: un 302 ahi haria que el navegador descargue la pagina destino
         # dos veces. 204 cierra la peticion sin redireccion; el POST normal del
@@ -105,6 +112,7 @@ class NotificationReadAllView(LoginRequiredMixin, UserPassesTestMixin, View):
             read_at=timezone.now()
         )
         if updated:
+            invalidate_unread_count(request.user)
             messages.success(
                 request,
                 f'{updated} notificación{"es" if updated != 1 else ""} marcada'
@@ -128,6 +136,7 @@ class NotificationDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request, uuid):
         notification = get_object_or_404(Notification, uuid=uuid, recipient=request.user)
         notification.delete()
+        invalidate_unread_count(request.user)
         return redirect(_redirect_back(request))
 
 
@@ -147,6 +156,7 @@ class NotificationDeleteAllView(LoginRequiredMixin, UserPassesTestMixin, View):
     def post(self, request):
         deleted, _ = Notification.objects.filter(recipient=request.user).delete()
         if deleted:
+            invalidate_unread_count(request.user)
             messages.success(
                 request,
                 f'{deleted} notificación{"es" if deleted != 1 else ""} eliminada'

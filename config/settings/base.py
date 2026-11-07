@@ -105,6 +105,15 @@ NOTIFICATIONS_WARNING_HORIZON_HOURS = int(os.getenv('NOTIFICATIONS_WARNING_HORIZ
 # vuelve a avisar como mucho una vez por intervalo, no en cada corrida diaria.
 INVOICE_PENDING_REMINDER_DAYS = int(os.getenv('INVOICE_PENDING_REMINDER_DAYS', '7'))
 
+# ---------------------------------------------------------------------------
+# Franja de aviso meteorológico vigente (portal público)
+# ---------------------------------------------------------------------------
+# No es una notificación: se renderiza en el HTML servido, sin sesión y sin
+# JavaScript, porque tiene que alcanzar a un visitante anónimo en una emergencia.
+# Apagarla es una decisión de operación; el contenido publicado (página de
+# avisos y badges del menú) sigue intacto.
+EMERGENCY_BANNER_ENABLED = os.getenv('EMERGENCY_BANNER_ENABLED', 'True') == 'True'
+
 
 def decrypt_secret_key(encrypted_secret_key, encryption_key):
     if not encrypted_secret_key or not encryption_key:

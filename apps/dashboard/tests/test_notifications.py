@@ -323,24 +323,18 @@ class NotificationNavbarTests(TestCase):
 
 
 class NotificationCounterTests(TestCase):
-    def test_el_estado_de_actualizacion_lleva_el_contador(self):
+    def test_el_estado_de_actualizacion_no_lleva_el_contador(self):
+        # El contador tiene su propio endpoint. Si volviera a viajar aqui, la
+        # campana del portal (cambio 030) lo pediria junto a `deployed_sha()` y
+        # `remote_sha()` en cada peticion de cada cliente.
         admin = _superuser()
         _notification(admin, title='Sin leer')
-        _notification(admin, title='Leido', read=True)
         self.client.force_login(admin)
 
         response = self.client.get(reverse('dashboard:update_status'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['notifications'], {'unread': 1})
-
-    @override_settings(NOTIFICATIONS_ENABLED=False)
-    def test_con_el_sistema_apagado_el_contador_es_nulo(self):
-        self.client.force_login(_superuser())
-
-        response = self.client.get(reverse('dashboard:update_status'))
-
-        self.assertIsNone(response.json()['notifications'])
+        self.assertNotIn('notifications', response.json())
 
 
 class NotificationDeleteTests(TestCase):

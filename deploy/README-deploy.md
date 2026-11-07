@@ -754,8 +754,10 @@ Todo por variables de entorno, con default en `config/settings/base.py`:
 NOTIFICATIONS_ENABLED=False
 ```
 
-Apagado: no se crean filas, el icono no se renderiza y el `update_status` del
-panel devuelve `notifications: null` (el JS no toca el badge). **La poda sigue
+Apagado: no se crean filas y el icono no se renderiza. El badge se refresca
+contra `GET /notificaciones/sin-leer/`, que responde `{"unread": null}` cuando el
+sistema esta apagado; el JS lo interpreta como "no hay numero que mostrar" y deja
+de preguntar. **La poda sigue
 corriendo**: limpiar datos viejos no es una funcion visible que haya que apagar,
 y dejarla detenida solo hace crecer la tabla.
 
@@ -792,6 +794,69 @@ no es un defecto. Dentro de cada uno la fuente es una sola
 contador. Una notificacion vencida no se muestra aunque la poda todavia no la
 haya borrado, y eso es a proposito: `expires_at` es la fecha del hecho, la poda
 es solo mantenimiento.
+
+### El endpoint del contador
+
+```
+GET /notificaciones/sin-leer/     ->  {"unread": 2}
+                                  ->  {"unread": null}      # sistema apagado
+                                  ->  304                    # con If-None-Match
+```
+
+Solo superusuario (403 en cualquier otro caso), `Cache-Control: private,
+no-cache` y `ETag` derivado del cuerpo, para que la mayoria de los sondeos
+devuelvan 0 bytes. El JS (`static/dist/js/notifications-badge.js`) pregunta cada
+20 s y **no pregunta mientras la pestaña esta oculta**.
+
+Vive aparte del estado de despliegue del panel a proposito. Ese JSON
+(`dashboard:update_status`) lee archivos y compara commits con el remoto: es
+caro por diseno y solo lo pide el panel de administracion. El contador es lo
+unico que podra consultar la campana del portal publico cuando lleguen los
+clientes (cambio 030), y un `COUNT` indexado no puede viajar pegado a esa carga.
+
+Con `USE_REDIS_CACHE=True` el conteo se guarda 20 s y se invalida al marcar,
+borrar o crear un aviso. Con `USE_REDIS_CACHE=False` **no se cachea**: LocMem
+vive en cada worker de Gunicorn, y ahi invalidar solo alcanzaria al worker que
+atendio el POST, dejando a los otros dos sirviendo un numero viejo.
+
+
+## La franja de aviso meteorologico
+
+El portal publico pinta una franja arriba de todo cuando hay un `Warning` vigente
+(`valid_until >= ahora`). **No es una notificacion**: se sirve en el HTML, sin
+sesion y sin JavaScript, porque tiene que alcanzar a un visitante anonimo. Sigue
+el tema del visitante (claro u oscuro); no impone fondo oscuro.
+
+Sale de `apps.core.context_processors.menu_notifications`, que ya recorria
+`Warning` para los badges del menu. Esa consulta alimenta las tres cuentas y el
+aviso que encabeza la franja: agregarla no costo una consulta extra y de paso
+elimino dos, porque antes eran tres `COUNT(*)` separados. Son dos consultas
+constantes menos en **cada** pagina, anonima o no.
+
+Decisiones que no se cambian sin pensar:
+
+- **Manda la gravedad, no la fecha.** Ciclon > tormenta > alerta temprana. Entre
+  dos del mismo tipo gana el mas reciente.
+- **No se puede cerrar.** Cerrar una alerta de ciclon es la unica accion que no
+  queremos facilitar.
+- **El color no es la unica senal**: el tipo va escrito al lado del punto, asi que
+  sirve igual para quien no distingue rojo de naranja.
+- **En el landing solo entran los avisos graves.** La portada de marketing omite
+  el contenido vivo a proposito (`apps/home/tests/test_landing.py`), con una
+  excepcion: ciclon tropical y tormenta. Es la raiz del dominio, y esos dos no se
+  esconden detras de un clic a "Tiempo". Un `early` no se pinta ahi: es rutina y
+  acostumbraria al visitante a ignorar la franja. La excepcion vive en
+  `templates/layouts/landing.html` (`severe_only=True`), no en Python.
+
+### Apagarla
+
+```bash
+# en el .env del servidor
+EMERGENCY_BANNER_ENABLED=False
+```
+
+Apagarla no toca el contenido publicado: las paginas de avisos y los badges del
+menu siguen igual.
 
 
 ## Lo que el workflow NO puede hacer

@@ -1,7 +1,8 @@
 {% if visible %}
   <div class="nav-item dropdown d-flex"
        id="notifications-navbar"
-       data-csrf-token="{{ csrf_token }}">
+       data-csrf-token="{{ csrf_token }}"
+       data-unread-url="{% url 'notifications:unread' %}">
     <a href="#"
        class="nav-link px-0"
        data-bs-toggle="dropdown"
@@ -18,9 +19,11 @@
            data-bs-placement="bottom"
            title="Notificaciones del sistema"></i>
         {% comment %}
-          El badge se renderiza en servidor con el conteo ya hecho y lo refresca
-          el polling de 025 (dashboard-update.js). No hay endpoint propio: el
-          numero viaja en el mismo JSON del estado de actualizaciones.
+          El badge se renderiza en servidor con el conteo ya hecho, y desde
+          `static/dist/js/notifications-badge.js` se refresca contra
+          `notifications:unread` (con ETag). Ese endpoint es exclusivamente el
+          contador: el estado de despliegue no lo lleva, porque leer archivos y
+          consultar el remoto no es algo que pueda pedir cada cliente.
         {% endcomment %}
         <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
                        d-none{% endif %}"
