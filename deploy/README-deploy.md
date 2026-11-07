@@ -797,8 +797,10 @@ sesion y sin JavaScript, porque tiene que alcanzar a un visitante anonimo. Sigue
 el tema del visitante (claro u oscuro); no impone fondo oscuro.
 
 Sale de `apps.core.context_processors.menu_notifications`, que ya recorria
-`Warning` para los badges del menu. La misma consulta alimenta las tres cuentas y
-el aviso que encabeza la franja, asi que agregarla no costo una consulta extra.
+`Warning` para los badges del menu. Esa consulta alimenta las tres cuentas y el
+aviso que encabeza la franja: agregarla no costo una consulta extra y de paso
+elimino dos, porque antes eran tres `COUNT(*)` separados. Son dos consultas
+constantes menos en **cada** pagina, anonima o no.
 
 Decisiones que no se cambian sin pensar:
 
