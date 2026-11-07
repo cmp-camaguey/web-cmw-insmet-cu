@@ -146,6 +146,58 @@ PY
 fi
 
 # ---------------------------------------------------------------------------
+# Lock compartido con deploy.sh
+# ---------------------------------------------------------------------------
+#
+# Es el mismo archivo que usa deploy.sh (`/var/lock/webcmp-deploy.lock`): si
+# fueran dos locks distintos no se excluirian y el problema seguiria igual.
+
+if LOCK_BLOCK=$(require_block deploy-lock "$INSTALL_SH"); then
+    run_lock() {  # <lockfile> <dry_run>
+        (
+            set -uo pipefail
+            die() { printf 'ERROR: %s\n' "$*" >&2; exit 90; }
+            DEPLOY_LOCKFILE=$1
+            DRY_RUN=$2
+            eval "$LOCK_BLOCK"
+        )
+    }
+
+    lock_free=$TEST_TMP/free.lock
+    lock_held=$TEST_TMP/held.lock
+    lock_ready=$TEST_TMP/held.ready
+
+    out=$(run_lock "$lock_free" 0 2>&1); rc=$?
+    assert_eq 'lock libre: se adquiere' 0 "$rc"
+    assert_contains 'lock libre: lo informa' 'lock adquirido' "$out"
+
+    # Un deploy corriendo = otro proceso tiene el lock. Se mantiene tomado desde
+    # un subshell y se avisa con un archivo, sin sleeps a ciegas.
+    (
+        exec 9>"$lock_held"
+        flock -n 9 || exit 1
+        : > "$lock_ready"
+        sleep 10
+    ) &
+    lock_holder=$!
+    for _ in {1..100}; do
+        [ -e "$lock_ready" ] && break
+        sleep 0.05
+    done
+
+    out=$(run_lock "$lock_held" 0 2>&1); rc=$?
+    assert_eq 'lock tomado: aborta' 90 "$rc"
+    assert_contains 'lock tomado: dice que hay un despliegue' 'Ya hay un despliegue en curso' "$out"
+
+    out=$(run_lock "$lock_held" 1 2>&1); rc=$?
+    assert_eq 'lock tomado + --dry-run: no aborta' 0 "$rc"
+    assert_not_contains 'lock tomado + --dry-run: no lo toma' 'lock adquirido' "$out"
+
+    kill "$lock_holder" 2>/dev/null
+    wait "$lock_holder" 2>/dev/null
+fi
+
+# ---------------------------------------------------------------------------
 # Respaldo antes de regenerar el .env
 # ---------------------------------------------------------------------------
 #

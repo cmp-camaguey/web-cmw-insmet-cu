@@ -74,6 +74,18 @@ AUTODEPLOY_STATE_DIR=${AUTODEPLOY_STATE_DIR:-/var/lib/webcmp}
 CONFIG_DIR=${CONFIG_DIR:-/etc/webcmp}
 CONFIG_FILE=${CONFIG_FILE:-$CONFIG_DIR/deploy.env}
 ENCRYPTION_ENV=${ENCRYPTION_ENV:-$CONFIG_DIR/encryption.env}
+# Commit que quedo sirviendo, para el boton "Actualizar" del panel
+# (change 025-update-web-deploy). deploy.sh lo escribe al final de cada deploy y
+# el instalador lo escribe al terminar: si no, una instalacion nueva deja el
+# panel sin referencia y el primer deploy manual queda invisible.
+# Mismo archivo, mismo formato (un SHA de 40 hex) y mismos permisos que deploy.sh.
+DEPLOYED_STATE=${DEPLOYED_STATE:-$CONFIG_DIR/deployed}
+# Lock compartido con deploy.sh. Es el MISMO archivo (no una copia del
+# mecanismo): el instalador escribe el checkout, las migraciones y el .env, y un
+# deploy.sh que corra a la vez haria lo mismo sobre el mismo arbol. El lock no
+# coordina dos instaladores por si solo, coordina instalador y deploy, que es el
+# par que comparte estado.
+DEPLOY_LOCKFILE=${DEPLOY_LOCKFILE:-/var/lock/webcmp-deploy.lock}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-/var/cache/webcmp-pip}
 MPLCONFIGDIR=${MPLCONFIGDIR:-$APP_DIR/.cache/matplotlib}
 VENV_DIR=${VENV_DIR:-$APP_DIR/.venv}
@@ -493,7 +505,8 @@ Opciones:
 
 Variables de entorno que se respetan (las preguntas usan el mismo nombre):
   REPO_URL, REPO_REF, APP_DIR, SERVICE_USER, DEPLOY_LOGIN_USER, SCRIPT_PATH,
-  CONFIG_DIR, CONFIG_FILE, ENCRYPTION_ENV, DB_NAME, DB_USER,
+  CONFIG_DIR, CONFIG_FILE, ENCRYPTION_ENV, DEPLOYED_STATE, DEPLOY_LOCKFILE,
+  DB_NAME, DB_USER,
   DB_PASS, DB_HOST, DB_PORT, DB_SSL_MODE, EMAIL_HOST, EMAIL_PORT,
   EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, DEFAULT_FROM_EMAIL, PUBLIC_HOSTNAME,
   REDIS_URL, USE_REDIS_CACHE, LOG_LEVEL, SUPERUSER_USERNAME, SUPERUSER_EMAIL,
@@ -1322,6 +1335,21 @@ echo "  python: $PYTHON_VERSION (minimo ${MIN_PYTHON[0]}.${MIN_PYTHON[1]})"
 require_systemd
 echo "  systemd-run disponible."
 
+# El lock de deploy.sh necesita flock(1). Se verifica en el Preflight, que es de
+# solo lectura, y no despues de empezar a mutar: si falta, el instalador tendria
+# que abortar con el checkout a medio escribir.
+command -v flock >/dev/null 2>&1 \
+    || die "flock no esta instalado (paquete util-linux). Sin el no se puede tomar el lock compartido con deploy.sh, y dos procesos mutando el mismo checkout a la vez no tienen vuelta atras."
+# Se comprueba en el Preflight y no se crea nada: un `exec 9>ruta` sobre un
+# directorio inexistente mata el shell con un error de bash que no dice cual es
+# el lock ni por que importa. /var/lock existe en cualquier systemd
+# (systemd-tmpfiles lo enlaza a /run/lock); solo falla si DEPLOY_LOCKFILE se
+# overridea a un path sin directorio.
+DEPLOY_LOCKDIR=$(dirname -- "$DEPLOY_LOCKFILE")
+[ -d "$DEPLOY_LOCKDIR" ] \
+    || die "El directorio del lock compartido no existe: $DEPLOY_LOCKDIR. Crearlo, o pasar DEPLOY_LOCKFILE a un path existente."
+echo "  flock disponible ($DEPLOY_LOCKFILE)."
+
 # Estado previo, SOLO de lectura. Se usa para armar los defaults de las
 # preguntas (el default es el valor vigente) y para avisar de re-corridas.
 ENV_FILE=$APP_DIR/.env
@@ -1649,6 +1677,27 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo
     echo "dry-run: se imprime el plan y no se ejecuta nada."
 fi
+
+# --- Lock compartido con deploy.sh ---------------------------------------
+#
+# Se toma DESPUES del resumen y ANTES de C.1: de aca en adelante todo muta el
+# checkout, el venv, la base y el .env. El resumen no toca nada, asi que tomarlo
+# antes solo retrasaria la salida cuando alguien mira el plan.
+#
+# Mismo archivo que deploy.sh (`/var/lock/webcmp-deploy.lock`), no un lock
+# paralelo: si fueran dos, no se excluirian entre si y el problema seguiria
+# igual. Es no bloqueante (`-n`): esperar turno en silencio deja al operador sin
+# saber que hay un deploy corriendo y cuanto va a tardar. Mejor fallar y decirlo.
+#
+# Se salta en --dry-run, que por definicion no muta nada y no deberia quedar
+# bloqueado porque otro proceso este desplegando.
+# >>> TEST-BLOCK: deploy-lock
+if [ "$DRY_RUN" -eq 0 ]; then
+    exec 9>"$DEPLOY_LOCKFILE"
+    flock -n 9 || die "Ya hay un despliegue en curso (lock $DEPLOY_LOCKFILE). No se toca nada: correr el instalador cuando termine, o esperar a que deploy.sh libere el lock."
+    echo "  lock adquirido: $DEPLOY_LOCKFILE"
+fi
+# <<< TEST-BLOCK: deploy-lock
 
 # --- C.1 Prerrequisitos de sistema --------------------------------------
 
