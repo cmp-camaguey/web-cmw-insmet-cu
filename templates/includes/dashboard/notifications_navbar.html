@@ -1,23 +1,30 @@
 {% if visible %}
   <div class="nav-item dropdown d-flex" id="notifications-navbar">
     <a href="#"
-       class="nav-link px-0 position-relative"
+       class="nav-link px-0"
        data-bs-toggle="dropdown"
        data-bs-auto-close="outside"
        aria-label="Avisos del sistema{% if unread %} ({{ unread }} sin leer){% endif %}">
-      <i class="icon ti ti-bell"
-         data-bs-toggle="tooltip"
-         data-bs-placement="bottom"
-         title="Avisos del sistema"></i>
       {% comment %}
-        El badge se renderiza en servidor con el conteo ya hecho y lo refresca
-        el polling de 025 (dashboard-update.js). No hay endpoint propio: el
-        numero viaja en el mismo JSON del estado de actualizaciones.
+        El badge se ancla a un contenedor del tamaño del icono, no al enlace: el
+        `nav-link` lleva 0.5rem de padding vertical y con `top-0` sobre el
+        enlace el numero quedaba 8px por encima del icono (y del navbar).
       {% endcomment %}
-      <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
-                     d-none{% endif %}"
-            id="notifications-navbar-badge"
-            aria-hidden="true">{{ badge }}</span>
+      <span class="d-inline-flex position-relative">
+        <i class="icon ti ti-bell"
+           data-bs-toggle="tooltip"
+           data-bs-placement="bottom"
+           title="Avisos del sistema"></i>
+        {% comment %}
+          El badge se renderiza en servidor con el conteo ya hecho y lo refresca
+          el polling de 025 (dashboard-update.js). No hay endpoint propio: el
+          numero viaja en el mismo JSON del estado de actualizaciones.
+        {% endcomment %}
+        <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
+                       d-none{% endif %}"
+              id="notifications-navbar-badge"
+              aria-hidden="true">{{ badge }}</span>
+      </span>
     </a>
     <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow"
          style="min-width: 22rem;

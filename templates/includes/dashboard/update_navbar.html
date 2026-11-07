@@ -5,18 +5,25 @@
        data-request-url="{% url 'dashboard:update_request' %}"
        data-csrf-token="{{ csrf_token }}">
     <a href="#"
-       class="nav-link px-0 position-relative"
+       class="nav-link px-0"
        data-bs-toggle="dropdown"
        data-bs-auto-close="outside"
        aria-label="Actualizaciones del servidor">
-      <i class="icon ti ti-refresh"
-         id="update-navbar-icon"
-         data-bs-toggle="tooltip"
-         data-bs-placement="bottom"
-         title="Actualizaciones del servidor"></i>
-      <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle d-none"
-            id="update-navbar-badge"
-            aria-hidden="true"></span>
+      {% comment %}
+        Igual que el badge de avisos: el punto se ancla al icono y no al enlace,
+        que lleva 0.5rem de padding vertical. Anclado al enlace, el punto sube
+        8px de mas y los dos iconos del navbar quedan a distinta altura.
+      {% endcomment %}
+      <span class="d-inline-flex position-relative">
+        <i class="icon ti ti-refresh"
+           id="update-navbar-icon"
+           data-bs-toggle="tooltip"
+           data-bs-placement="bottom"
+           title="Actualizaciones del servidor"></i>
+        <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle d-none"
+              id="update-navbar-badge"
+              aria-hidden="true"></span>
+      </span>
     </a>
     <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow"
          style="min-width: 22rem;
