@@ -263,3 +263,59 @@ if BACKUP_BLOCK=$(require_block env-backup "$INSTALL_SH"); then
 fi
 
 # ---------------------------------------------------------------------------
+# Commit desplegado (/etc/webcmp/deployed)
+# ---------------------------------------------------------------------------
+#
+# El panel lo lee en cada visita al dashboard
+# (apps/dashboard/views/dashboard/update.py): `.strip()` + `^[0-9a-f]{40}$`, y
+# espera 0644. Un archivo con otro formato deja el aviso de actualizacion muerto
+# sin decir por que.
+
+if STATE_BLOCK=$(require_block deployed-state "$INSTALL_SH"); then
+    # `runuser` es lo unico que no se puede probar sin root: se reemplaza por
+    # una funcion que descarta `-u <usuario> --` y ejecuta el resto. Se prueba la
+    # logica del bloque (que escriba, con que formato y con que permisos), no el
+    # cambio de usuario.
+    run_state() {  # <repo> <state_file> <gunicorn> <dry_run>
+        (
+            set -uo pipefail
+            warn() { printf 'AVISO: %s\n' "$*" >&2; }
+            runuser() { shift 3; "$@"; }
+            APP_DIR=$1
+            DEPLOYED_STATE=$2
+            GUNICORN_ENABLED=$3
+            DRY_RUN=$4
+            SERVICE_USER=webcmp
+            eval "$STATE_BLOCK"
+        )
+    }
+
+    state_repo=$TEST_TMP/repo
+    git init -q "$state_repo"
+    git -C "$state_repo" -c user.email=test@example.com -c user.name=test \
+        commit -q --allow-empty -m inicial
+    state_sha=$(git -C "$state_repo" rev-parse HEAD)
+
+    state_file=$TEST_TMP/deployed
+    out=$(run_state "$state_repo" "$state_file" 1 0 2>&1); rc=$?
+    assert_eq 'estado: sale 0 con el sitio sirviendo' 0 "$rc"
+    assert_file 'estado: escribe el archivo' "$state_file"
+    if [ -f "$state_file" ]; then
+        assert_eq 'estado: contiene el HEAD del checkout' "$state_sha" "$(cat "$state_file")"
+        assert_eq 'estado: una sola linea, con salto final' 1 "$(wc -l < "$state_file")"
+        assert_eq 'estado: modo 0644' 644 "$(stat -c %a "$state_file")"
+    fi
+    assert_no_file 'estado: no deja el .tmp' "$state_file.tmp"
+
+    state_off=$TEST_TMP/deployed-off
+    out=$(run_state "$state_repo" "$state_off" 0 0 2>&1); rc=$?
+    assert_eq 'estado: sale 0 con el sitio caido' 0 "$rc"
+    assert_no_file 'estado: no escribe si Gunicorn no quedo activo' "$state_off"
+    assert_contains 'estado: dice por que no lo escribe' 'no quedo sirviendo' "$out"
+
+    state_dry=$TEST_TMP/deployed-dry
+    out=$(run_state "$state_repo" "$state_dry" 1 1 2>&1); rc=$?
+    assert_eq 'estado --dry-run: sale 0' 0 "$rc"
+    assert_no_file 'estado --dry-run: no escribe' "$state_dry"
+    assert_contains 'estado --dry-run: muestra el comando' '[dry-run]' "$out"
+fi

@@ -3380,12 +3380,20 @@ if [ -n "$PENDING_CHANGES" ]; then
     warn "Cuando se completen los valores:"
     printf '  sudo systemctl enable --now %s %s\n' "$GUNICORN_UNIT" "$HUEY_UNIT" >&2
 else
-    run systemctl enable --now "$GUNICORN_UNIT"
-    run systemctl enable --now "$HUEY_UNIT"
+    run systemctl enable "$GUNICORN_UNIT"
+    run systemctl enable "$HUEY_UNIT"
+    # restart y no `enable --now`: en una re-corrida el unit ya esta activo y
+    # `enable --now` NO lo reinicia, asi que Gunicorn seguiria sirviendo el
+    # codigo viejo en memoria mientras el checkout ya tiene el nuevo, y C.12b
+    # registraria como desplegado un commit que no esta corriendo. deploy.sh usa
+    # restart por la misma razon: un reload de Gunicorn tampoco alcanza, porque
+    # los workers se re-forkean del master, que tiene el codigo viejo.
+    run systemctl restart "$GUNICORN_UNIT"
+    run systemctl restart "$HUEY_UNIT"
     sleep 2
-    # GUNICORN_ENABLED mide que el servicio quedo ACTIVO, no que se le dio enable:
-    # `enable --now` puede salir 0 y dejar el unit caido, y el resumen no tiene
-    # que afirmar "arrancado" cuando lo que paso fue que quedo inactivo.
+    # GUNICORN_ENABLED mide que el servicio quedo ACTIVO, no que se le dio
+    # enable: un `restart` puede salir 0 y el unit morir un segundo despues, y
+    # el resumen no tiene que afirmar "arrancado" cuando quedo inactivo.
     if run systemctl is-active --quiet "$GUNICORN_UNIT"; then
         GUNICORN_ENABLED=1
     else
@@ -3397,6 +3405,41 @@ else
     run systemctl restart nginx
     run systemctl is-active --quiet nginx || warn "nginx quedo inactivo (journalctl -u nginx)."
 fi
+
+# --- C.12b Commit que quedo sirviendo ------------------------------------
+
+# El panel compara $DEPLOYED_STATE contra el ultimo commit de main para decidir
+# si muestra "Actualizar" (apps/dashboard/views/dashboard/update.py). deploy.sh
+# lo escribe al final de cada deploy; el instalador tiene que escribir el mismo
+# archivo al terminar, o una instalacion nueva deja el panel sin referencia: sin
+# archivo no hay con que comparar y el primer deploy manual queda invisible.
+#
+# Se escribe SOLO cuando el sitio quedo sirviendo (misma condicion que C.12):
+# afirmar "este commit esta desplegado" con el unit caido es peor que no tener
+# el archivo, porque el panel diria que no hay nada que actualizar mientras el
+# sitio no responde.
+# >>> TEST-BLOCK: deployed-state
+if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  [dry-run] runuser -u %s -- git -C %s rev-parse HEAD > %s\n' \
+        "$SERVICE_USER" "$APP_DIR" "$DEPLOYED_STATE"
+elif [ "$GUNICORN_ENABLED" -eq 1 ]; then
+    # git corre como SERVICE_USER por la misma razon que el checkout: root sobre
+    # un repo de otro usuario se niega con "dubious ownership".
+    if deployed_sha=$(runuser -u "$SERVICE_USER" -- git -C "$APP_DIR" rev-parse HEAD 2>/dev/null); then
+        # Escritura atomica, igual que deploy.sh: el panel lee este archivo en
+        # cada visita al dashboard y un archivo a medio escribir haria parpadear
+        # el aviso sin motivo.
+        printf '%s\n' "$deployed_sha" > "$DEPLOYED_STATE.tmp"
+        chmod 0644 "$DEPLOYED_STATE.tmp"
+        mv -f "$DEPLOYED_STATE.tmp" "$DEPLOYED_STATE"
+        echo "  commit desplegado registrado en $DEPLOYED_STATE ($deployed_sha)."
+    else
+        warn "No se pudo leer el HEAD de $APP_DIR: $DEPLOYED_STATE no se actualizo."
+    fi
+else
+    echo "  $DEPLOYED_STATE no se escribe: el sitio no quedo sirviendo."
+fi
+# <<< TEST-BLOCK: deployed-state
 
 # --- C.13 Resumen --------------------------------------------------------
 
