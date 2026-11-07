@@ -49,28 +49,6 @@
     commitsBox.classList.add('d-none');
   }
 
-  function paintNotificationBadge(state) {
-    // El icono de avisos es de otro componente (change 026), asi que puede no
-    // estar en el DOM: se pinta solo si existe. `notifications` llega en null
-    // cuando no aplica (sistema apagado o usuario sin permisos) y en ese caso
-    // no se toca nada: el servidor ya decidio no mostrar el icono.
-    var badge = document.getElementById('notifications-navbar-badge');
-    if (!badge) {
-      return;
-    }
-    var info = state && state.notifications;
-    if (!info) {
-      return;
-    }
-    var unread = info.unread || 0;
-    badge.textContent = unread > 9 ? '9+' : String(unread);
-    if (unread) {
-      badge.classList.remove('d-none');
-    } else {
-      badge.classList.add('d-none');
-    }
-  }
-
   function paintCommits(state) {
     // Un template viejo en cache (o una pagina que no incluye la lista) deja
     // `commitsBox` en null. Sin esta guarda, `clearCommits` lanzaria
@@ -150,7 +128,6 @@
     // Antes de cualquier pintado: si el estado dejo de ser `available`, la
     // lista vieja tiene que desaparecer, no quedarse pegada al desplegable.
     paintCommits(state);
-    paintNotificationBadge(state);
 
     var run = state.last_run || {};
 

@@ -37,9 +37,12 @@ def notifications_navbar(context):
     # Import local: el tag se carga en el navbar de todas las paginas del panel,
     # y no queremos que importar la plantilla arrastre los modelos de `core`
     # en el arranque de la app.
-    from apps.core.notifications import unread_count, visible_for
+    from apps.core.notifications import cached_unread_count, visible_for
 
-    unread = unread_count(user) or 0
+    # El mismo numero que sirve `notifications:unread`: si el navbar contara por
+    # su cuenta, el badge recien pintado y el primer refresco del JS podrian
+    # discrepar y el numero parpadearia sin que nada haya cambiado.
+    unread = cached_unread_count(user) or 0
     # Solo no leidas: el desplegable es una bandeja de entrada, no el historial.
     # Si mezclara leidas, el badge y la lista dirian cosas distintas y una no
     # leida antigua podria quedar fuera del tope por culpa de diez leidas nuevas.

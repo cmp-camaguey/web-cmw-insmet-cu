@@ -55,6 +55,19 @@ def safe_cache_set(key, value, timeout):
         logger.warning('Cache SET failed for %s; skipping write. %s', key, exc)
 
 
+def safe_cache_delete(key):
+    """``cache.delete`` that swallows backend failures.
+
+    Se llama despues de una escritura que ya se guardo: un cache inalcanzable
+    no puede deshacer una fila marcada como leida, asi que fallar aca
+    convertiria una accion exitosa en un 500.
+    """
+    try:
+        cache.delete(key)
+    except _cache_failure_exceptions() as exc:
+        logger.warning('Cache DELETE failed for %s; value stays until TTL. %s', key, exc)
+
+
 def build_api_cache_key(request):
     """Build a stable cache key for a read-only API request.
 
