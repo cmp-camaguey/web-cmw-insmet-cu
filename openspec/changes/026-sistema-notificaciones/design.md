@@ -142,14 +142,22 @@ Icono en el navbar del dashboard, hermano del icono de actualizacion que ya vive
 en `templates/includes/dashboard/update_navbar.html`. Mismas reglas de espaciado
 (`gap-2` en el `navbar-nav`), mismo lenguaje visual de Tabler.
 
-- Sin avisos: icono normal, sin badge.
-- Con avisos: badge con el numero, tope visual `9+`.
-- Desplegable: las 10 mas recientes, cada una con titulo, `hace X`, severidad por
-  color y enlace al objeto original. Pie del desplegable: "Ver todas" y "Marcar
-  todas como leidas".
+- Sin notificaciones: icono normal, sin badge.
+- Con notificaciones: badge con el numero, tope visual `9+`.
+- Desplegable: **solo las no leidas**, hasta `NOTIFICATIONS_MAX_VISIBLE`, cada
+  una con titulo, `hace X`, severidad por color y enlace al objeto original. Sin
+  titulo de seccion ni boton de marcar en bloque: el pie alcanza con "Ver todas".
+  Abrir una la marca leida y navega; sin destino, la pagina se recarga para que
+  salga de la lista.
 - Pagina completa en `apps/dashboard/` para historial con paginacion
   (`paginate_by = 10`, convencion del proyecto; **sin** DataTables, que solo se
-  usa cuando se cargan todos los registros).
+  usa cuando se cargan todos los registros). El historial muestra leidas y no
+  leidas, y permite marcarlas, eliminar una o eliminarlas todas.
+
+**[Decidido: el desplegable no mezcla leidas.]** Listar las 10 ultimas sin mirar
+`read_at` hacia que el badge contara una cosa y la lista mostrara otra, y que una
+no leida antigua quedara fuera del tope por culpa de diez leidas nuevas. El
+desplegable es una bandeja de entrada; el historial es el archivo.
 
 ### 5.2 Contador
 

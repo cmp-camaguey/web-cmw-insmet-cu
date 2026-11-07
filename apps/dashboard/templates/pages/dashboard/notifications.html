@@ -5,18 +5,32 @@
       <div class="page-pretitle">{{ parent }}</div>
       <h2 class="page-title">{{ title }}</h2>
     </div>
-    {% if unread %}
-      <div class="col-auto ms-auto d-print-none">
-        <form method="post" action="{% url 'dashboard:notifications_read_all' %}">
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <button type="submit" class="btn btn-primary">
-            <i class="icon ti ti-checks"></i>
-            Marcar todas como leídas
-          </button>
-        </form>
+    <div class="col-auto ms-auto d-print-none">
+      <div class="d-flex gap-2 flex-wrap justify-content-end">
+        {% if unread %}
+          <form method="post" action="{% url 'dashboard:notifications_read_all' %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="btn btn-primary">
+              <i class="icon ti ti-checks"></i>
+              Marcar todas como leídas
+            </button>
+          </form>
+        {% endif %}
+        {% if page_obj.paginator.count %}
+          <form method="post"
+                action="{% url 'dashboard:notifications_delete_all' %}"
+                onsubmit="return confirm('¿Eliminar todas las notificaciones? Esta acción no se puede deshacer.');">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="btn btn-outline-danger">
+              <i class="icon ti ti-trash"></i>
+              Eliminar todas
+            </button>
+          </form>
+        {% endif %}
       </div>
-    {% endif %}
+    </div>
   </div>
 {% endblock %}
 {% block content %}
@@ -46,17 +60,31 @@
               <a href="{{ notification.url }}" class="small">Ver detalle</a>
             {% endif %}
           </div>
-          {% if not notification.is_read %}
+          <div class="d-flex align-items-center gap-2">
+            {% if not notification.is_read %}
+              <form method="post"
+                    action="{% url 'dashboard:notification_read' notification.uuid %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar leída</button>
+              </form>
+            {% endif %}
             <form method="post"
-                  action="{% url 'dashboard:notification_read' notification.uuid %}">
+                  action="{% url 'dashboard:notification_delete' notification.uuid %}"
+                  onsubmit="return confirm('¿Eliminar esta notificación?');">
               {% csrf_token %}
               <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar leída</button>
+              <button type="submit"
+                      class="btn btn-icon btn-outline-danger btn-sm"
+                      title="Eliminar"
+                      aria-label="Eliminar notificación">
+                <i class="icon ti ti-trash"></i>
+              </button>
             </form>
-          {% endif %}
+          </div>
         </div>
       {% empty %}
-        <div class="card-body py-5 text-center text-secondary">No hay avisos.</div>
+        <div class="card-body py-5 text-center text-secondary">No hay notificaciones.</div>
       {% endfor %}
     </div>
     {% include 'includes/pagination.html' with page_obj=page_obj param_name='page' %}
