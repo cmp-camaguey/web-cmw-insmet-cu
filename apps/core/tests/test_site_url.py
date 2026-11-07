@@ -136,4 +136,18 @@ class GenerateEnvWritesSiteUrlTests(unittest.TestCase):
     def test_produccion_escribe_site_url(self):
         result = self._run('--production')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self._read_env()['SITE_URL'], 'https://cmw.insmet.cu/')
+        self.assertEqual(self._read_env()['SITE_URL'], 'https://www.meteocamaguey.cu/')
+
+    def test_produccion_no_duplica_el_www(self):
+        """El canonico ya lleva `www.`: agregarlo otra vez da `www.www.`.
+
+        Ese nombre no existe en DNS y hace fallar la emision del certificado,
+        asi que el alias solo se agrega cuando el canonico no lo trae.
+        """
+        result = self._run('--production')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        env = self._read_env()
+        self.assertEqual(env['EXTERNAL_HOSTNAME'], 'www.meteocamaguey.cu')
+        self.assertEqual(env['ALLOWED_HOSTS'], 'www.meteocamaguey.cu')
+        self.assertEqual(env['CSRF_TRUSTED_ORIGINS'], 'https://www.meteocamaguey.cu')
+        self.assertEqual(env['CORS_ALLOWED_ORIGINS'], 'https://www.meteocamaguey.cu')

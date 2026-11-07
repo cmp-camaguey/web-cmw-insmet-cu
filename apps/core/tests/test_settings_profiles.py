@@ -29,7 +29,6 @@ DEBUG_TOOLBAR_APP = 'debug_toolbar'
 DEBUG_TOOLBAR_MIDDLEWARE = 'debug_toolbar.middleware.DebugToolbarMiddleware'
 STATIC_FILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 MANIFEST_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-SQLITE_ENGINE = 'django.db.backends.sqlite3'
 POSTGRES_ENGINE = 'django.db.backends.postgresql'
 # Literal, no el `base.console_email_backend`: el test tiene que fijar la cadena
 # exacta que el perfil de producción rechaza, no seguir a la constante.
@@ -129,12 +128,11 @@ class DebugToolbarAssertionsMixin:
 
 
 class DevProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMixin, SimpleTestCase):
-    """`DEBUG=True`: sqlite, toolbar, sin cookies seguras, sin WhiteNoise."""
+    """`DEBUG=True`: PostgreSQL, toolbar, sin cookies seguras, sin WhiteNoise."""
 
     def setUp(self):
         self.module = load_profile(
             'config.settings.dev',
-            # DB_ENGINE presente a propósito: sqlite tiene que ganar igual.
             {
                 'DEBUG': 'True',
                 'DB_ENGINE': 'postgresql',
@@ -161,41 +159,19 @@ class DevProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMixin, 
     def test_whitenoise_middleware_removed(self):
         self.assertNotIn(base.whitenoise_middleware, self.module.MIDDLEWARE)
 
-    def test_sqlite_wins_over_db_engine_env(self):
-        """Riesgo del doc de diseño: con DB_ENGINE en `.env`, dev no conecta a la DB real."""
-        self.assertEqual(self.module.DATABASES['default']['ENGINE'], SQLITE_ENGINE)
-
-    def test_postgres_en_dev_requiere_opt_in_explicito(self):
-        """`DEV_USE_DB_ENGINE=True` es la unica forma de salir de sqlite en dev.
-
-        El test de arriba protege a la laptop de un `.env` copiado de produccion;
-        este habilita probar Postgres de verdad sin tocar esa garantia.
-        """
-        module = load_profile(
-            'config.settings.dev',
-            {
-                'DEBUG': 'True',
-                'DEV_USE_DB_ENGINE': 'True',
-                'DB_ENGINE': 'postgresql',
-                'DB_NAME': 'meteo',
-                'DB_USER': 'u',
-                'DB_HOST': 'h',
-                'DB_PASS': 'p',
-            },
-        )
-
-        config = module.DATABASES['default']
+    def test_database_comes_from_the_environment(self):
+        """Dev usa el mismo motor que producción: no tiene base de datos propia."""
+        config = self.module.DATABASES['default']
         self.assertEqual(config['ENGINE'], POSTGRES_ENGINE)
         self.assertEqual(config['NAME'], 'meteo')
         self.assertEqual(config['PORT'], '5432')
+        self.assertEqual(config['CONN_MAX_AGE'], 600)
 
-    def test_opt_in_sin_credenciales_falla_claro(self):
-        """El opt-in no adivina: sin las cuatro variables, no arranca."""
-        with self.assertRaises(ImproperlyConfigured):
-            load_profile(
-                'config.settings.dev',
-                {'DEBUG': 'True', 'DEV_USE_DB_ENGINE': 'True', 'DB_ENGINE': 'postgresql'},
-            )
+    def test_without_db_engine_does_not_fall_back(self):
+        """Sin `DB_ENGINE` no hay respaldo silencioso a SQLite: el arranque falla."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_profile('config.settings.dev', {'DEBUG': 'True'})
+        self.assertIn('DB_ENGINE', str(ctx.exception))
 
     def test_local_synop_simulations(self):
         self.assertIs(self.module.OBS_LOCAL_ONLY_DEFAULT, True)
@@ -208,7 +184,15 @@ class DevProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMixin, 
         """Un valor explícito NO se pisa: desde dev se prueba envío real (MailHog, etc.)."""
         module = load_profile(
             'config.settings.dev',
-            {'DEBUG': 'True', 'EMAIL_BACKEND': CUSTOM_EMAIL_BACKEND},
+            {
+                'DEBUG': 'True',
+                'EMAIL_BACKEND': CUSTOM_EMAIL_BACKEND,
+                'DB_ENGINE': 'postgresql',
+                'DB_NAME': 'meteo',
+                'DB_USER': 'u',
+                'DB_HOST': 'h',
+                'DB_PASS': 'p',
+            },
         )
         self.assertEqual(module.EMAIL_BACKEND, CUSTOM_EMAIL_BACKEND)
 
@@ -217,7 +201,17 @@ class TestingProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMix
     """Sin `DEBUG` y sin `PRODUCTION`: es CI, no "dev con la toolbar apagada"."""
 
     def setUp(self):
-        self.module = load_profile('config.settings.testing', {'DEBUG': 'False'})
+        self.module = load_profile(
+            'config.settings.testing',
+            {
+                'DEBUG': 'False',
+                'DB_ENGINE': 'postgresql',
+                'DB_NAME': 'meteo',
+                'DB_USER': 'u',
+                'DB_HOST': 'h',
+                'DB_PASS': 'p',
+            },
+        )
 
     def test_flags(self):
         self.assertIs(self.module.DEBUG, False)
@@ -235,23 +229,16 @@ class TestingProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMix
     def test_whitenoise_middleware_removed(self):
         self.assertNotIn(base.whitenoise_middleware, self.module.MIDDLEWARE)
 
-    def test_sqlite_without_db_engine(self):
-        self.assertEqual(self.module.DATABASES['default']['ENGINE'], SQLITE_ENGINE)
+    def test_database_comes_from_the_environment(self):
+        config = self.module.DATABASES['default']
+        self.assertEqual(config['ENGINE'], POSTGRES_ENGINE)
+        self.assertEqual(config['NAME'], 'meteo')
 
-    def test_db_engine_env_still_wins(self):
-        """A diferencia de dev: acá `DB_ENGINE` sí define la base de datos."""
-        module = load_profile(
-            'config.settings.testing',
-            {
-                'DEBUG': 'False',
-                'DB_ENGINE': 'postgresql',
-                'DB_NAME': 'meteo',
-                'DB_USER': 'u',
-                'DB_HOST': 'h',
-                'DB_PASS': 'p',
-            },
-        )
-        self.assertEqual(module.DATABASES['default']['ENGINE'], 'django.db.backends.postgresql')
+    def test_without_db_engine_does_not_fall_back(self):
+        """Testing tampoco cae a SQLite: el perfil de CI exige el motor real."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_profile('config.settings.testing', {'DEBUG': 'False'})
+        self.assertIn('DB_ENGINE', str(ctx.exception))
 
     def test_secret_key_comes_from_the_injected_pair(self):
         """El perfil `testing` arranca sin `.env` porque su par sale del par inyectado."""
@@ -259,6 +246,35 @@ class TestingProfileTests(SecureCookieAssertionsMixin, DebugToolbarAssertionsMix
 
     def test_ftp_simulations_off(self):
         self.assertIs(self.module.OBS_LOCAL_ONLY_DEFAULT, False)
+
+
+class SqliteIsNotSupportedTests(SimpleTestCase):
+    """SQLite se retiró del proyecto: tiene que fallar, no degradar en silencio.
+
+    El riesgo no es "elegir mal el motor", es que un `.env` viejo con
+    `DB_ENGINE=sqlite3` siga arrancando y la suite verde mida un motor que no
+    existe en producción.
+    """
+
+    PROFILES = (
+        ('config.settings.dev', {'DEBUG': 'True'}),
+        ('config.settings.testing', {'DEBUG': 'False'}),
+        (
+            'config.settings.production',
+            {'PRODUCTION': '1', 'SITE_URL': 'https://cmw.insmet.cu/'},
+        ),
+    )
+
+    def test_sqlite_engine_is_rejected_in_every_profile(self):
+        for module_path, env in self.PROFILES:
+            for engine in ('sqlite', 'sqlite3'):
+                with self.subTest(profile=module_path, engine=engine):
+                    with self.assertRaises(ImproperlyConfigured) as ctx:
+                        load_profile(module_path, {**env, 'DB_ENGINE': engine})
+                    message = str(ctx.exception)
+                    self.assertIn('SQLite', message)
+                    self.assertIn('postgresql', message)
+                    self.assertIn('generate_env.py', message)
 
 
 class ProductionProfileTests(
@@ -405,6 +421,92 @@ class ProductionProfileTests(
         self.assertIs(self.module.OBS_LOCAL_ONLY_DEFAULT, False)
 
 
+class EmailTlsTests(SimpleTestCase):
+    """El puerto 465 es TLS implícito: `EMAIL_USE_SSL` tiene que llegar a Django.
+
+    La historia tuvo dos mitades. Primero ningún archivo de settings leía la
+    variable, así que `EMAIL_USE_SSL` quedaba en su default `False` y Django
+    abría una conexión en claro contra un puerto que espera el handshake TLS en
+    el primer byte: el error no nombraba el puerto ni la variable. Después se
+    agregó la lectura, pero `deploy/install.sh` seguía escribiendo `si`, que
+    contra `== 'True'` también es False. Las dos mitades están cubiertas:
+    `test_install_script_booleans` fija la del instalador.
+    """
+
+    DEV_DB = {
+        'DEBUG': 'True',
+        'DB_ENGINE': 'postgresql',
+        'DB_NAME': 'meteo',
+        'DB_USER': 'u',
+        'DB_HOST': 'h',
+        'DB_PASS': 'p',
+    }
+
+    def _production(self, **env):
+        return {
+            'PRODUCTION': '1',
+            'DB_ENGINE': 'postgresql',
+            'DB_NAME': 'meteo',
+            'DB_USER': 'u',
+            'DB_HOST': 'h',
+            'DB_PASS': 'p',
+            'SITE_URL': 'https://cmw.insmet.cu/',
+            **secret_env(),
+            **env,
+        }
+
+    def test_ssl_is_read_from_the_environment(self):
+        module = load_profile(
+            'config.settings.dev',
+            {**self.DEV_DB, 'EMAIL_USE_TLS': 'False', 'EMAIL_USE_SSL': 'True'},
+        )
+        self.assertIs(module.EMAIL_USE_TLS, False)
+        self.assertIs(module.EMAIL_USE_SSL, True)
+
+    def test_ssl_defaults_to_false(self):
+        """Sin la variable, STARTTLS sigue siendo el default: no se cambia el 587."""
+        module = load_profile('config.settings.dev', self.DEV_DB)
+        self.assertIs(module.EMAIL_USE_SSL, False)
+        self.assertIs(module.EMAIL_USE_TLS, True)
+
+    def test_tls_and_ssl_are_mutually_exclusive(self):
+        """Django lanzaría `ValueError` al enviar; el arranque lo dice antes."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_profile(
+                'config.settings.dev',
+                {**self.DEV_DB, 'EMAIL_USE_TLS': 'True', 'EMAIL_USE_SSL': 'True'},
+            )
+        message = str(ctx.exception)
+        self.assertIn('EMAIL_USE_TLS', message)
+        self.assertIn('EMAIL_USE_SSL', message)
+
+    def test_port_465_without_ssl_is_rejected_in_production(self):
+        """465 es SMTPS por definición: con STARTTLS no se llega ni al banner."""
+        with self.assertRaises(ImproperlyConfigured) as ctx:
+            load_profile(
+                'config.settings.production',
+                self._production(EMAIL_PORT='465', EMAIL_USE_TLS='True'),
+            )
+        message = str(ctx.exception)
+        self.assertIn('465', message)
+        self.assertIn('EMAIL_USE_SSL', message)
+
+    def test_port_465_with_ssl_loads(self):
+        """El 465 con TLS implícito es la configuración correcta, y no se rechaza."""
+        module = load_profile(
+            'config.settings.production',
+            self._production(EMAIL_PORT='465', EMAIL_USE_TLS='False', EMAIL_USE_SSL='True'),
+        )
+        self.assertIs(module.EMAIL_USE_SSL, True)
+        self.assertIs(module.EMAIL_USE_TLS, False)
+
+    def test_port_587_with_starttls_loads(self):
+        """El 587 no se toca: STARTTLS es su modo, y sigue siendo el default."""
+        module = load_profile('config.settings.production', self._production(EMAIL_PORT='587'))
+        self.assertIs(module.EMAIL_USE_TLS, True)
+        self.assertIs(module.EMAIL_USE_SSL, False)
+
+
 class SiteUrlNormalizationTests(SimpleTestCase):
     """`SITE_URL` se expone con barra final: el host y la ruta se unen con una
     sola barra, nunca con dos.
@@ -531,7 +633,18 @@ class SecretKeyFailClosedTests(SimpleTestCase):
         hacer bootstrap: CI y un clon limpio no tienen `.env`.
         """
         with (
-            mock.patch.dict(os.environ, {'DEBUG': 'False'}, clear=True),
+            mock.patch.dict(
+                os.environ,
+                {
+                    'DEBUG': 'False',
+                    'DB_ENGINE': 'postgresql',
+                    'DB_NAME': 'meteo',
+                    'DB_USER': 'u',
+                    'DB_HOST': 'h',
+                    'DB_PASS': 'p',
+                },
+                clear=True,
+            ),
             mock.patch('dotenv.load_dotenv'),
         ):
             inject_testing_key_pair()

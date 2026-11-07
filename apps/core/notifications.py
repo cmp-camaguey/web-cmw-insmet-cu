@@ -1,0 +1,357 @@
+"""Creación de avisos operativos (cambio 026).
+
+La notificación se crea **en el borde que conoce el hecho**, nunca por una
+señal genérica: un `post_save` sobre `Invoice` que mire `pdf_status` y otro
+sobre `TaskExecutionLog` se pisarían, porque el PDF fallido de una factura
+también deja una tarea en `ERROR` y el admin vería dos avisos del mismo hecho.
+Ver `openspec/changes/026-sistema-notificaciones/design.md` §3.
+"""
+
+import hashlib
+import logging
+from datetime import timedelta
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+
+from apps.core.cache_utils import safe_cache_delete, safe_cache_get, safe_cache_set
+
+logger = logging.getLogger(__name__)
+
+# Tareas de Huey cuyo fallo merece un aviso. Es opt-in a propósito: la tarea de
+# factura queda FUERA porque tiene su aviso específico (PDF y correo fallidos en
+# `apps/commercial/views/invoice_utils.py`), y avisar por las dos vías mostraría
+# dos veces el mismo hecho. Una tarea nueva no avisa hasta que alguien decida
+# que su fallo es accionable: un worker que falla en algo interno no es noticia
+# para quien administra el portal.
+TASK_ERROR_ALLOWLIST = frozenset({'send_email_task'})
+
+
+def make_dedupe_key(*parts):
+    """sha256 hex de lo que identifica el HECHO, no el momento.
+
+    Cada fuente define sus partes (ver la tabla de `design.md` §2). Regla común:
+    el `created_at` no entra. Sin eso, tres reintentos de la misma tarea dejan
+    tres filas.
+    """
+    raw = '|'.join(str(p) for p in parts)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def _notify_or_get(
+    recipient,
+    *,
+    source,
+    severity,
+    title,
+    body='',
+    url='',
+    dedupe_key,
+    expires_at=None,
+    repeat_after=None,
+):
+    """Crea el aviso si no existe uno sin leer con la misma clave.
+
+    Devuelve `(notification, created)`. Existe separado de `notify` porque quien
+    *cuenta* lo notificado necesita distinguir una fila nueva de una que ya
+    estaba: si no, un llamador que corre a diario reporta cada día el mismo
+    recordatorio aunque no haya creado nada.
+
+    `repeat_after` es para los recordatorios que sí deben volver: el índice
+    único parcial solo impide duplicados mientras el aviso está sin leer, así
+    que sin este límite un hecho que sigue pendiente después de leerlo
+    reaparecería en cada corrida diaria. Con él, el hecho vuelve a avisar como
+    mucho una vez por intervalo. `None` conserva el comportamiento de 026.
+
+    El dedup real lo hace el índice único parcial de la base, no un `exists()`
+    previo: dos workers de Gunicorn pueden ver el mismo fallo a la vez y un
+    `get_or_create` sin protección pierde la carrera con `IntegrityError`. El
+    `atomic` es necesario además por otra razón: en PostgreSQL un
+    `IntegrityError` deja la transacción en estado abortado, y sin el savepoint
+    el error se propagaría hasta el llamador y arrastraría trabajo que no tiene
+    nada que ver.
+    """
+    from apps.core.models import Notification
+
+    if not getattr(settings, 'NOTIFICATIONS_ENABLED', True):
+        return None, False
+
+    if severity not in Notification.Severity.values:
+        raise ValueError(
+            f"severity='{severity}' no es una severidad válida "
+            f'({", ".join(Notification.Severity.values)}).'
+        )
+
+    if repeat_after is not None:
+        from django.utils import timezone
+
+        last = (
+            Notification.objects.filter(recipient=recipient, dedupe_key=dedupe_key)
+            .order_by('-created_at')
+            .first()
+        )
+        if last is not None and last.created_at > timezone.now() - repeat_after:
+            return last, False
+
+    lookup = {'recipient': recipient, 'dedupe_key': dedupe_key, 'read_at__isnull': True}
+    defaults = {
+        'source': source,
+        'severity': severity,
+        'title': title[:200],
+        'body': body,
+        'url': url,
+        'expires_at': expires_at,
+    }
+
+    try:
+        with transaction.atomic():
+            obj, created = Notification.objects.get_or_create(**lookup, defaults=defaults)
+    except IntegrityError:
+        # Otro proceso la creó entre el SELECT y el INSERT. La suya es la buena.
+        return Notification.objects.filter(**lookup).first(), False
+
+    if created:
+        # El aviso pudo crearse en un worker de Huey, que es otro proceso: con
+        # Redis la invalidacion cruza hasta los workers de Gunicorn, y sin Redis
+        # `invalidate_unread_count` no hace nada y el TTL corto cubre el hueco.
+        invalidate_unread_count(recipient)
+    return obj, created
+
+
+def notify(
+    recipient,
+    *,
+    source,
+    severity,
+    title,
+    body='',
+    url='',
+    dedupe_key,
+    expires_at=None,
+):
+    """Devuelve la `Notification` creada o la que ya existía sin leer.
+
+    `None` cuando el sistema está apagado. Para saber si la fila es nueva, usar
+    `_notify_or_get`; el resto de llamadores solo necesita el objeto.
+    """
+    obj, _created = _notify_or_get(
+        recipient,
+        source=source,
+        severity=severity,
+        title=title,
+        body=body,
+        url=url,
+        dedupe_key=dedupe_key,
+        expires_at=expires_at,
+    )
+    return obj
+
+
+def notify_superusers(
+    *,
+    source,
+    severity,
+    title,
+    body='',
+    url='',
+    dedupe_key,
+    expires_at=None,
+    repeat_after=None,
+):
+    """Notifica a todos los superusuarios activos y devuelve las recién creadas.
+
+    "Creadas" no es "destinatarios": si un aviso ya existía sin leer, esta
+    corrida no hizo nada por ese admin y no debe contarlo. El conjunto de
+    destinatarios es fijo a propósito (dos admins en el repo): una tabla de
+    preferencias por usuario sería complejidad sin uso. Si algún día entra un rol
+    que deba ver solo una parte, esa es la señal para agregarla.
+
+    `repeat_after` se reenvía tal cual a `_notify_or_get`: lo usan los
+    recordatorios que deben reaparecer si el hecho sigue pendiente.
+    """
+    from django.contrib.auth import get_user_model
+
+    created = []
+    for user in get_user_model().objects.filter(is_superuser=True, is_active=True):
+        obj, was_created = _notify_or_get(
+            user,
+            source=source,
+            severity=severity,
+            title=title,
+            body=body,
+            url=url,
+            dedupe_key=dedupe_key,
+            expires_at=expires_at,
+            repeat_after=repeat_after,
+        )
+        if was_created:
+            created.append(obj)
+    return created
+
+
+def notify_task_failure(task_name, *, task_id='', logical_key='', error=''):
+    """Aviso de una tarea de Huey que terminó en ERROR, si está en la allowlist.
+
+    Devuelve la lista vacía cuando la tarea no es accionable, que es el caso
+    normal: solo las tareas de `TASK_ERROR_ALLOWLIST` avisan.
+    """
+    from django.urls import reverse
+
+    from apps.core.models import Notification
+
+    if task_name not in TASK_ERROR_ALLOWLIST:
+        return []
+
+    return notify_superusers(
+        source='huey',
+        severity=Notification.Severity.ERROR,
+        title=f'Falló la tarea {task_name}',
+        body=(error or '')[:500],
+        url=reverse('dashboard:tasks'),
+        # La clave es el trabajo lógico cuando existe (reintentar la misma
+        # factura no duplica); si no, el id del encolado, que los reintentos de
+        # ese mismo encolado comparten.
+        dedupe_key=make_dedupe_key('huey', logical_key or task_id, 'ERROR'),
+    )
+
+
+def visible_for(user):
+    """Avisos del usuario que todavía se deben mostrar.
+
+    Una sola definición para el navbar, el historial y el contador: si cada uno
+    filtrara por su lado, el badge podría decir 3 mientras la lista muestra 2, y
+    ese desacuerdo es justo lo que hace desconfiar del aviso.
+
+    Un aviso vencido no se muestra aunque la poda todavía no lo haya borrado:
+    `expires_at` es la fecha del hecho, la poda es solo mantenimiento.
+    """
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from apps.core.models import Notification
+
+    return Notification.objects.filter(recipient=user).filter(
+        Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
+    )
+
+
+def unread_count(user):
+    """Cuántos avisos vigentes le quedan sin leer. `None` si el sistema está apagado.
+
+    `None` y `0` no son lo mismo: el navbar esconde el icono con `None` (sistema
+    apagado) y pinta "sin badge" con `0` (sistema encendido y nada pendiente).
+    """
+    if not getattr(settings, 'NOTIFICATIONS_ENABLED', True):
+        return None
+    return visible_for(user).filter(read_at__isnull=True).count()
+
+
+UNREAD_COUNT_CACHE_PREFIX = 'notifications:unread:'
+
+# Corto a proposito. Las acciones del usuario invalidan la clave en el acto,
+# pero un aviso creado por un worker de Huey, o una poda, pueden tocar filas sin
+# pasar por aqui: este TTL es el peor retraso aceptable para esos casos. 20 s es
+# el intervalo de refresco del panel, asi que el badge nunca llega tarde por
+# culpa del cache.
+UNREAD_COUNT_CACHE_TIMEOUT = 20
+
+
+def _unread_count_cache_is_shared():
+    """`True` solo cuando hay Redis detras.
+
+    LocMem vive en el proceso: los tres workers de Gunicorn tendrian copias
+    distintas y marcar un aviso como leido solo invalidaria la del worker que
+    atendio el POST. Cachear ahi no acelera nada y hace que el badge muestre un
+    numero distinto segun a quien le toque responder, que es peor que no
+    cachear.
+    """
+    return getattr(settings, 'USE_REDIS_CACHE', False)
+
+
+def unread_count_cache_key(user):
+    return f'{UNREAD_COUNT_CACHE_PREFIX}{user.pk}'
+
+
+def cached_unread_count(user):
+    """`unread_count` con cache compartido cuando lo hay."""
+    if not _unread_count_cache_is_shared():
+        return unread_count(user)
+
+    key = unread_count_cache_key(user)
+    cached = safe_cache_get(key)
+    if cached is not None:
+        return cached
+
+    value = unread_count(user)
+    if value is not None:
+        safe_cache_set(key, value, UNREAD_COUNT_CACHE_TIMEOUT)
+    return value
+
+
+def invalidate_unread_count(user):
+    """Olvida el conteo cacheado del usuario.
+
+    Se llama DESPUES de guardar la fila. Si el cache falla, el peor caso es un
+    badge viejo durante `UNREAD_COUNT_CACHE_TIMEOUT` segundos: el dato real ya
+    esta escrito y el siguiente refresco lo recoge.
+    """
+    if user is None or not getattr(user, 'pk', None):
+        return
+    if not _unread_count_cache_is_shared():
+        return
+    safe_cache_delete(unread_count_cache_key(user))
+
+
+def unread_for(user):
+    """Conteo listo para el endpoint JSON. `None` cuando el sistema esta apagado.
+
+    Deliberadamente NO comprueba permisos: quien puede pedir el numero lo decide
+    la vista con su `test_func`. Duplicar aqui la regla la convertiria en dos
+    reglas que se desincronizan el dia que el cambio 030 abra la campana a los
+    clientes.
+    """
+    if user is None or not getattr(user, 'pk', None):
+        return None
+    return cached_unread_count(user)
+
+
+def prune_notifications(now=None):
+    """Borra los avisos que ya no sirven. Idempotente.
+
+    Tres reglas, aplicadas en este orden para que los conteos del log sean
+    excluyentes entre sí:
+
+    1. Vencidos: `expires_at < ahora`. El hecho que anunciaban ya pasó.
+    2. Leídos viejos: `read_at < ahora - RETENTION_READ`. Ya se vieron; el
+       historial largo solo ocupa espacio.
+    3. No leídos viejos: `created_at < ahora - RETENTION_UNREAD`. Un aviso de
+       hace 90 días que nadie abrió ya no es accionable, y dejarlo solo infla el
+       badge para siempre.
+
+    Devuelve un dict con el conteo de cada categoría para que quien lo llame
+    (comando o tarea) lo registre.
+    """
+    from django.utils import timezone
+
+    from apps.core.models import Notification
+
+    now = now or timezone.now()
+    read_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_READ)
+    unread_cutoff = now - timedelta(days=settings.NOTIFICATIONS_RETENTION_UNREAD)
+
+    # Secuencial y no tres `count()` previos: despues de cada `delete()` las
+    # filas ya no existen, asi que las categorias no se solapan y el log no
+    # suma dos veces la misma fila.
+    deleted = {
+        'expired': Notification.objects.filter(expires_at__lt=now).delete()[0],
+        'read': Notification.objects.filter(
+            read_at__isnull=False, read_at__lt=read_cutoff
+        ).delete()[0],
+        'unread': Notification.objects.filter(
+            read_at__isnull=True, created_at__lt=unread_cutoff
+        ).delete()[0],
+    }
+
+    if any(deleted.values()):
+        logger.info('Notificaciones podadas: %s', deleted)
+    return deleted

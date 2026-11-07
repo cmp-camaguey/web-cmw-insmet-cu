@@ -6,6 +6,7 @@ natural se factura igual, porque en el centro no lleva contrato. La regla vive e
 escribir la fila, porque `Model.save()` no ejecuta `clean()`.
 """
 
+import itertools
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -46,6 +47,21 @@ def _build_request(user):
 
 def _aware(fecha):
     return timezone.make_aware(datetime(fecha.year, fecha.month, fecha.day, 12, 0))
+
+
+_username_seq = itertools.count(1)
+
+
+def _short_username(prefix):
+    """Usuario único y corto para `setUp`.
+
+    `self.id()` devuelve el nombre cualificado del test: 141 caracteres en este
+    archivo. Sumarle un prefijo daba 156 y `User.username` es `varchar(150)`.
+    SQLite no valida `max_length`; PostgreSQL sí, así que el test moría con
+    `DataError` al crear el usuario en vez de evaluar la regla de facturación.
+    El contador mantiene la unicidad sin depender del nombre del test.
+    """
+    return f'{prefix}-{next(_username_seq)}'
 
 
 class _Linea:
@@ -156,10 +172,10 @@ class InvoiceContractRuleFlowTests(TestCase):
         )
 
     def setUp(self):
-        self.juridica = juridica_customer(username=f'juridica-flujo-{self.id()}')
-        self.natural = natural_customer(username=f'natural-flujo-{self.id()}')
+        self.juridica = juridica_customer(username=_short_username('juridica-flujo'))
+        self.natural = natural_customer(username=_short_username('natural-flujo'))
         self.view = InvoiceCreateView()
-        self.view.request = _build_request(make_user(f'operador-{self.id()}'))
+        self.view.request = _build_request(make_user(_short_username('operador')))
 
     def _suscripcion(self, customer, cantidad=1, inicio=date(2026, 3, 10)):
         return ServiceSubscription.objects.create(

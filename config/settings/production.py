@@ -38,6 +38,15 @@ if EMAIL_BACKEND.strip() in insecure_email_backends:
         '`python scripts/generate_env.py --production`.'
     )
 
+if str(EMAIL_PORT or '').strip() == '465' and not EMAIL_USE_SSL:
+    raise ImproperlyConfigured(
+        'EMAIL_PORT=465 es SMTPS: el servidor espera el handshake TLS en el primer byte, '
+        'no un STARTTLS después del banner. Con STARTTLS la conexión no llega a '
+        'saludar y el error no nombra el puerto. Defina EMAIL_USE_SSL=True y '
+        'EMAIL_USE_TLS=False en el archivo .env, que es lo que escribe '
+        '`deploy/install.sh` al elegir el 465.'
+    )
+
 # Security
 SECURE_SSL_REDIRECT = False  # Nginx termina TLS y redirige a HTTPS; Django no lo hace.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -61,7 +70,7 @@ if whitenoise_middleware not in MIDDLEWARE:
     MIDDLEWARE = [*MIDDLEWARE[:1], whitenoise_middleware, *MIDDLEWARE[1:]]
 
 
-DATABASES = get_database_config(is_production=True, prefer_sqlite=False)
+DATABASES = get_database_config()
 
 if not os.getenv('SITE_URL', '').strip():
     raise ImproperlyConfigured(
@@ -69,7 +78,7 @@ if not os.getenv('SITE_URL', '').strip():
         'y restablecimiento de contraseña) necesitan la URL pública del sitio, y esa URL '
         'no se puede adivinar: un enlace a un host interno no lo puede abrir el '
         'destinatario. Defina SITE_URL en el archivo .env (por ejemplo '
-        'SITE_URL=https://cmw.insmet.cu/) y regenere el archivo con '
+        'SITE_URL=https://www.meteocamaguey.cu/) y regenere el archivo con '
         '`python scripts/generate_env.py --production`.'
     )
 

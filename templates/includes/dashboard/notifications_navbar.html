@@ -1,0 +1,77 @@
+{% if visible %}
+  <div class="nav-item dropdown d-flex"
+       id="notifications-navbar"
+       data-csrf-token="{{ csrf_token }}"
+       data-unread-url="{% url 'notifications:unread' %}">
+    <a href="#"
+       class="nav-link px-0"
+       data-bs-toggle="dropdown"
+       data-bs-auto-close="outside"
+       aria-label="Notificaciones del sistema{% if unread %} ({{ unread }} sin leer){% endif %}">
+      {% comment %}
+        El badge se ancla a un contenedor del tamaño del icono, no al enlace: el
+        `nav-link` lleva 0.5rem de padding vertical y con `top-0` sobre el
+        enlace el numero quedaba 8px por encima del icono (y del navbar).
+      {% endcomment %}
+      <span class="d-inline-flex position-relative">
+        <i class="icon ti ti-bell"
+           data-bs-toggle="tooltip"
+           data-bs-placement="bottom"
+           title="Notificaciones del sistema"></i>
+        {% comment %}
+          El badge se renderiza en servidor con el conteo ya hecho, y desde
+          `static/dist/js/notifications-badge.js` se refresca contra
+          `notifications:unread` (con ETag). Ese endpoint es exclusivamente el
+          contador: el estado de despliegue no lo lleva, porque leer archivos y
+          consultar el remoto no es algo que pueda pedir cada cliente.
+        {% endcomment %}
+        <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
+                       d-none{% endif %}"
+              id="notifications-navbar-badge"
+              aria-hidden="true">{{ badge }}</span>
+      </span>
+    </a>
+    <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow"
+         style="min-width: 22rem;
+                max-width: 92vw">
+      {% if recent %}
+        <ul class="list-unstyled mb-0">
+          {% for notification in recent %}
+            <li>
+              {% comment %}
+                Sin titulo de seccion ni "Marcar todas": el desplegable muestra
+                solo lo pendiente y el pie alcanza con "Ver todas". El clic
+                marca leida y navega (static/dist/js/notifications.js); el
+                `href` sigue siendo un enlace real para no romper ctrl+clic.
+              {% endcomment %}
+              <a href="{% if notification.url %}{{ notification.url }}{% else %}#{% endif %}"
+                 class="dropdown-item text-wrap py-2"
+                 data-notification-read="{% url 'dashboard:notification_read' notification.uuid %}">
+                <span class="d-flex align-items-start gap-2">
+                  {% if notification.severity == 'error' %}
+                    <i class="icon ti ti-alert-circle text-danger"></i>
+                  {% elif notification.severity == 'warning' %}
+                    <i class="icon ti ti-alert-triangle text-warning"></i>
+                  {% else %}
+                    <i class="icon ti ti-info-circle text-info"></i>
+                  {% endif %}
+                  <span class="flex-fill">
+                    <span class="d-block fw-medium">{{ notification.title }}</span>
+                    <span class="d-block small text-secondary">{{ notification.created_at|timesince }} atrás</span>
+                  </span>
+                </span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="px-3 py-4 text-center text-secondary small">No hay notificaciones.</div>
+      {% endif %}
+      <div class="dropdown-divider"></div>
+      <div class="px-3 pb-2">
+        <a href="{% url 'dashboard:notifications' %}"
+           class="btn btn-sm btn-outline-secondary w-100">Ver todas</a>
+      </div>
+    </div>
+  </div>
+{% endif %}

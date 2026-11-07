@@ -3,7 +3,7 @@
 Sistema web del **Centro Meteorológico Provincial Camagüey** (CMP): portal público
 meteorológico, panel administrativo y API REST para terceros.
 
-**Producción:** [https://web.cmw.insmet.cu](https://web.cmw.insmet.cu)
+**Producción:** [https://www.meteocamaguey.cu](https://www.meteocamaguey.cu)
 
 Django 5.2 + Django REST Framework sobre PostgreSQL, interfaz con
 [Tabler](https://tabler.io/), servidor Gunicorn detrás de Nginx y un worker de Huey
@@ -25,6 +25,8 @@ para correos y PDFs. Interfaz y configuración en español (`es-mx`, `America/Ha
   - [3. Código, venv y `.env`](#3-código-venv-y-env)
   - [4. systemd](#4-systemd)
   - [5. Nginx](#5-nginx)
+    - [Con TLS en esta máquina](#con-tls-en-esta-máquina)
+    - [Detrás de un proxy externo](#detrás-de-un-proxy-externo)
   - [6. Datos iniciales y usuario administrador](#6-datos-iniciales-y-usuario-administrador)
   - [7. Verificar](#7-verificar)
   - [8. Deploy automático con GitHub Actions](#8-deploy-automático-con-github-actions)
@@ -104,21 +106,21 @@ git config core.hooksPath .githooks
 
 </details>
 
-### PostgreSQL en desarrollo (opcional)
+### PostgreSQL en desarrollo (obligatorio)
 
-Por defecto el perfil `dev` usa SQLite, y `DB_ENGINE` en el `.env` **no lo
-cambia**: un `.env` copiado de producción no puede hacer que tu máquina escriba
-en la base real. Para probar contra PostgreSQL de verdad hay que pedirlo:
+El proyecto corre sobre **PostgreSQL en los tres perfiles**. No hay respaldo a
+SQLite: si falta `DB_ENGINE`, `manage.py` falla al arrancar en vez de crear un
+`db.sqlite3` que mida un motor que no existe en producción.
 
 ```bash
-# 1. Rol y base locales (una vez). El rol necesita CREATEDB para la base de tests.
+# 1. Rol y base locales (una vez). El rol necesita CREATEDB: la suite crea y
+#    destruye su propia base de tests.
 sudo -u postgres psql <<'SQL'
 CREATE USER webcmp_dev WITH PASSWORD 'CAMBIAR_ESTA_CLAVE' CREATEDB;  -- pragma: allowlist secret
 CREATE DATABASE webcmp_dev OWNER webcmp_dev;
 SQL
 
-# 2. Opt-in explícito en el .env de desarrollo
-DEV_USE_DB_ENGINE=True
+# 2. Credenciales en el .env de desarrollo
 DB_ENGINE=postgresql
 DB_NAME=webcmp_dev
 DB_USER=webcmp_dev
@@ -131,9 +133,13 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Sin `DEV_USE_DB_ENGINE=True` esas cinco variables se ignoran y sigue usando
-`db.sqlite3`. Lo que se valida en SQLite no prueba lo que corre en PostgreSQL:
-`LIKE` con mayúsculas, orden de `NULL`, constraints y transacciones no se
+`python scripts/generate_env.py --development` escribe ese bloque por vos. Si un
+`.env` viejo dice `DB_ENGINE=sqlite3`, el arranque falla con un mensaje que lo
+explica: los datos de `db.sqlite3` **no se convierten solos**, hay que volcarlos
+aparte antes de borrar el archivo.
+
+Lo que se valida en SQLite no prueba lo que corre en PostgreSQL: `LIKE` con
+mayúsculas, orden de `NULL`, constraints, secuencias y transacciones no se
 comportan igual.
 
 ### Dependencias: un archivo por entorno
@@ -145,7 +151,7 @@ Cada archivo es autocontenido (incluye `base.txt` con `-r base.txt`).
 | `requirements/base.txt` | Runtime de la app. Sin gunicorn ni herramientas de desarrollo. |
 | `requirements/dev.txt` | `base.txt` + ruff, bandit, pip-audit, djlint, pre-commit, django-debug-toolbar |
 | `requirements/test.txt` | `base.txt` + django-debug-toolbar |
-| `requirements/prod.txt` | `base.txt` + gunicorn y el driver de PostgreSQL |
+| `requirements/prod.txt` | `base.txt` + gunicorn, whitenoise y redis |
 
 ```bash
 pip install -r requirements/dev.txt   # desarrollo
@@ -354,9 +360,26 @@ Para un servidor **nuevo**, en Ubuntu 26.04 LTS con Python 3.14 nativo. Si vení
 supervisor, hay una nota al final de la sección.
 
 ```
+# TLS en esta máquina (PROXY_MODE=nginx-local)
 Nginx (TLS, estáticos, media) → Gunicorn (systemd) → PostgreSQL
                                               └──→ worker Huey (systemd)
+
+# TLS en un proxy externo (PROXY_MODE=external)
+NPM (otra máquina, TLS) → Nginx del servidor (HTTP, estáticos, media)
+                        → Gunicorn (socket unix) → PostgreSQL
 ```
+
+**Nginx se instala en las dos topologías.** La diferencia no es "con Nginx o sin
+Nginx", es quién termina el TLS. Y en las dos, Gunicorn escucha únicamente en
+`/run/webcmp/gunicorn.sock`: no se expone a la red.
+
+Por qué Nginx es obligatorio incluso cuando el TLS lo termina otro: es el único
+que sirve `media/` desde ese filesystem. Con `DEBUG=False`, Django no publica
+`/media/` (`config/urls.py` solo agrega esa ruta con el debug toolbar activo) y
+WhiteNoise sirve únicamente `staticfiles`. Sin el Nginx local, el logo y el
+favicon de todas las páginas dan 404, igual que cada PDF subido, mientras el
+resto del sitio responde 200. Un proxy externo no puede cubrirlo: está en otra
+máquina y no ve `/srv/webcmp/media`.
 
 Redis es opcional: el caché por defecto corre en memoria del proceso.
 
@@ -376,11 +399,12 @@ certificados, y eso se edita en el servidor.
 
 | Archivo | Para qué |
 | --- | --- |
-| `deploy/install.sh` | Bootstrap del andamiaje de deploy. Idempotente, corre una vez por servidor |
+| `deploy/install.sh` | Instalador del servidor completo: sistema, usuario, base, app, Nginx y andamiaje de deploy. Idempotente, corre una vez por servidor |
 | `deploy/deploy.sh` | La lógica del deploy, en un solo lugar. Se instala como `/usr/local/sbin/webcmp-deploy` |
 | `deploy/deploy.env.example` | Config del deploy → `/etc/webcmp/deploy.env` |
 | `deploy/systemd/*.service` | Gunicorn y el worker Huey |
-| `deploy/nginx/webcmp.conf.example` | El vhost de Nginx |
+| `deploy/nginx/webcmp.conf.example` | El vhost de Nginx cuando el TLS se termina en esta máquina |
+| `deploy/nginx/webcmp-http.conf.example` | El vhost sin TLS, cuando el TLS lo termina un proxy externo |
 | `deploy/sudoers/webcmp-deploy` | El sudoers acotado a un único comando |
 | `deploy/README-deploy.md` | Los porqués del diseño, el rollback y los errores que solo salen en producción |
 
@@ -522,7 +546,7 @@ que poder leerlo. La `ENCRYPTION_KEY` queda en root y el `.env` en 600: entrar a
 grupo `webcmp` (lo necesita Nginx, ver el paso 5) no da acceso a ninguna de las dos.
 
 Después de generar el `.env` hay que **cambiar el hostname**: el generador escribe
-`EXTERNAL_HOSTNAME=cmw.insmet.cu` por default y no tiene flag para pasarlo, así
+`EXTERNAL_HOSTNAME=www.meteocamaguey.cu` por default y no tiene flag para pasarlo, así
 que hay que editar a mano `EXTERNAL_HOSTNAME`, `ALLOWED_HOSTS`,
 `CSRF_TRUSTED_ORIGINS` y `CORS_ALLOWED_ORIGINS`. Si no, el sitio responde
 `DisallowedHost` a cada petición.
@@ -584,6 +608,14 @@ Los logs van a journald, no a archivos.
 
 ### 5. Nginx
 
+Hay **dos topologías** y cambia solo qué vhost se copia. `deploy/install.sh`
+resuelve la elección con la pregunta `PROXY_MODE`; lo que sigue es el camino
+manual, equivalente.
+
+#### Con TLS en esta máquina
+
+`PROXY_MODE=nginx-local`: Nginx hace TLS y hace de proxy.
+
 ```bash
 sudo cp deploy/nginx/webcmp.conf.example /etc/nginx/sites-available/webcmp.conf
 sudo nano /etc/nginx/sites-available/webcmp.conf   # certificados y rutas
@@ -595,23 +627,71 @@ sudo ln -s /etc/nginx/sites-available/webcmp.conf /etc/nginx/sites-enabled/
 # "connect() failed (13: Permission denied)", que no parece un problema de grupo.
 sudo usermod -aG webcmp www-data
 
-sudo nginx -t && sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl restart nginx
 ```
+
+#### Detrás de un proxy externo
+
+`PROXY_MODE=external`: el TLS lo termina un Nginx Proxy Manager (NPM) que corre
+**en otra máquina**. Acá Nginx escucha HTTP, sirve `/static/` y `/media/`, y hace
+proxy a Gunicorn por el socket.
+
+```bash
+sudo cp deploy/nginx/webcmp-http.conf.example /etc/nginx/sites-available/webcmp.conf
+sudo nano /etc/nginx/sites-available/webcmp.conf   # server_name y rutas
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -s /etc/nginx/sites-available/webcmp.conf /etc/nginx/sites-enabled/
+
+sudo usermod -aG webcmp www-data
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+En NPM, el upstream es:
+
+| Campo | Valor |
+| --- | --- |
+| Scheme | `http` (NPM habla HTTP con el servidor; el TLS lo pone él) |
+| Forward Hostname / IP | IP de LAN de este servidor |
+| Forward Port | puerto HTTP del vhost (80 por defecto) |
+| Websockets Support | on (el gráfico de sounding las usa) |
+| SSL | Let's Encrypt en NPM; el dominio tiene que resolver a NPM |
+
+No hacen falta Custom Locations: el vhost local ya sirve `/static/` y `/media/`.
+El puerto HTTP tiene que quedar alcanzable **solo** desde la máquina del NPM:
+
+```bash
+sudo ufw allow from <IP_DEL_NPM> to any port 80 proto tcp
+sudo ufw deny 80/tcp
+```
+
+En esta topología el health check del deploy apunta a `http://` en
+`127.0.0.1:$HTTP_PORT`, no al 443: ese puerto acá no lo escucha nadie. Sin
+`HEALTHCHECK_URL` y `HEALTHCHECK_RESOLVE` en `/etc/webcmp/deploy.env`, el deploy
+falla por construcción.
 
 > **Reinicio de Nginx, no `reload`.** Los grupos suplementarios se leen al crear
 > los workers. Un `reload` alcanza para leer la config, pero si acabás de cambiar
 > la pertenencia a un grupo, reiniciá el servicio.
 
-> **No quites `proxy_set_header X-Forwarded-Proto $scheme;`.** Django lo lee con
-> `SECURE_PROXY_SSL_HEADER` para resolver `request.is_secure()`. Sin esa línea las
-> cookies de sesión seguras no se envían y el usuario entra en un bucle de logout.
+> **`X-Forwarded-Proto` es el header que rompe el login, en las dos direcciones.**
+> Django lo lee con `SECURE_PROXY_SSL_HEADER` para resolver `request.is_secure()`.
+> Si falta, las cookies de sesión seguras no se envían y el usuario entra en un
+> bucle de logout sin un solo error en el log.
+>
+> - Con TLS acá (`webcmp.conf.example`) la línea correcta es
+>   `proxy_set_header X-Forwarded-Proto $scheme;`. **No la quites.**
+> - Detrás de un proxy externo (`webcmp-http.conf.example`) esa misma línea es el
+>   bug: `$scheme` vale `http` y **sobrescribe** el `https` que manda NPM. Ese
+>   vhost usa un `map` que **propaga** el valor recibido y cae a `$scheme` solo
+>   cuando no viene header. No lo reemplaces por el `$scheme` del otro vhost.
 
 > **`Host` está repetido dentro de `location /`, y no es una redundancia.** En
 > Nginx, `proxy_set_header` se hereda del `server` solo si el `location` no declara
 > ninguno. `location /` declara dos (para el websocket), así que los del `server`
 > se descartan ahí y el `Host` vuelve al default, que es `$proxy_host`: el nombre
 > del upstream. Gunicorn recibía `Host: webcmp` y contestaba `DisallowedHost` en
-> todas las peticiones. Si sacás esas líneas, el sitio entero responde 400.
+> todas las peticiones. Si sacás esas líneas, el sitio entero responde 400. Aplica
+> a los dos vhosts.
 
 ### 6. Datos iniciales y usuario administrador
 
@@ -683,11 +763,15 @@ sudo systemd-run --pipe --wait --uid=webcmp \
   -p Environment=PRODUCTION=1 --working-directory=/srv/webcmp \
   /srv/webcmp/.venv/bin/python manage.py check --deploy
 
-curl -I https://web.cmw.insmet.cu
+curl -I https://www.meteocamaguey.cu
 ```
 
 `check --deploy` tiene que salir con 0 issues. Lo único tolerado es `security.W008` (el
 TLS lo termina Nginx, no Django) y está silenciado en `config/settings/base.py`.
+
+Con proxy externo, ese `curl` pasa por NPM y prueba la cadena completa. Para
+validar solo la capa local del servidor —vhost, `/static/` y `/media/`— sin salir
+de él: `curl -sSI http://127.0.0.1/`.
 
 ### 8. Deploy automático con GitHub Actions
 
@@ -696,8 +780,9 @@ de acá, `main` en verde se despliega solo.
 
 #### 8.1 Instalar el andamiaje en el servidor (una vez)
 
-El deploy por workflow no es autocontenido: la primera vez hay que instalar el
-usuario de despliegue, su clave, el script, la config y el sudoers.
+El deploy por workflow no es autocontenido: la primera vez hay que dejar el
+servidor armado —usuario de despliegue, su clave, el script, la config, el
+sudoers y el resto del andamiaje—.
 
 ```bash
 sudo ./deploy/install.sh --dry-run   # muestra qué haría, sin tocar nada
@@ -708,20 +793,28 @@ Qué hace, y por qué en ese orden:
 
 | Paso | Qué instala |
 | --- | --- |
-| 1 | Usuario `deploy` + su keypair SSH (distinto de `webcmp`, que tiene shell `/bin/false`) |
-| 2 | `deploy.sh` en `/usr/local/sbin/webcmp-deploy`, **fuera** del checkout |
-| 3 | `/etc/webcmp/deploy.env` desde el ejemplo, sin pisar uno existente |
-| 4 | `/etc/sudoers.d/webcmp-deploy`, validado con `visudo -c` **antes** de instalar |
-| 5 | `www-data` al grupo `webcmp`, para que Nginx toque el socket de Gunicorn |
+| 1 | Prerrequisitos de sistema por `apt` y verificación de la versión de Python |
+| 2 | Usuario `webcmp` + `media/`, `logs/`, `staticfiles/`, `.cache/` |
+| 3 | Clon del repo en `APP_DIR`, propiedad de `webcmp` |
+| 4 | Rol y base de datos en PostgreSQL, con las credenciales que se preguntaron |
+| 5 | `venv` + `requirements/prod.txt` |
+| 6 | `.env` con `scripts/generate_env.py` y los valores preguntados, sin `CHANGE_ME` |
+| 7 | `makemigrations`, `migrate`, `collectstatic`, `check --deploy` |
+| 8 | Unidades systemd renderizadas a `APP_DIR` y al usuario reales |
+| 9 | Nginx en las dos topologías, y el vhost que corresponde a `PROXY_MODE` |
+| 10 | `/etc/webcmp/deploy.env` con el destino del health check que corresponde |
+| 11 | Andamiaje de deploy: usuario `deploy`, keypair, sudoers y `webcmp-deploy` |
+| 12 | Superusuario, por `systemd-run` con la `ENCRYPTION_KEY` |
 
 Es idempotente: correrlo dos veces no cambia nada y no regenera secretos. Importa
 porque el script se puede necesitar correr más de una vez, y porque cada paso que
 regenera una clave o pisa una config editada a mano convierte un reintento en un
 incidente.
 
-A propósito **no** hace: generar el `.env`, crear el venv, instalar prerrequisitos
-de sistema, ni tocar Nginx o los certificados. Son cosas que dependen del dominio
-real, y automatizarlas a ciega deja más basura de la que recoge.
+A propósito **no** hace: tocar el firewall (imprime los comandos de `ufw`),
+configurar el proxy externo (imprime los datos para NPM), crear los secrets del
+environment de GitHub, ni tomar snapshots. Son decisiones que dependen de la red
+real del sitio, y automatizarlas a ciegas deja más basura de la que recoge.
 
 > **Por qué el script vive en `/usr/local/sbin` y no en `/srv/webcmp/deploy/`.** El
 > deploy corre como root y el checkout es escribible por `webcmp`. Con el sudoers
@@ -742,11 +835,27 @@ sudo nano /etc/webcmp/deploy.env
 | Variable | Por qué importa |
 | --- | --- |
 | `PUBLIC_HOSTNAME` | Debe ser el `server_name` de Nginx y el `EXTERNAL_HOSTNAME` del `.env` |
+| `HEALTHCHECK_URL` | Qué se consulta. Vacío = `https://<PUBLIC_HOSTNAME>/` |
+| `HEALTHCHECK_RESOLVE` | `curl --resolve host:port:ip`. Vacío = `<PUBLIC_HOSTNAME>:443:127.0.0.1` |
 | `HEALTHCHECK_INSECURE` | Ver abajo |
 
 `PUBLIC_HOSTNAME` tiene que ser **exactamente** esos otros dos, porque el health
-check entra por `127.0.0.1:443` con ese nombre como SNI y como `Host`: si no
-coinciden, TLS no encaja y el deploy falla aunque el sitio esté perfecto.
+check entra con ese nombre como SNI y como `Host`: si no coinciden, TLS no encaja
+y el deploy falla aunque el sitio esté perfecto.
+
+Los defaults del health check (`443` en `127.0.0.1`) son los de Nginx con TLS en
+esta máquina. Con proxy externo hay que cambiarlos, porque el 443 de acá no lo
+escucha nadie:
+
+```bash
+HEALTHCHECK_URL=http://www.meteocamaguey.cu/
+HEALTHCHECK_RESOLVE=www.meteocamaguey.cu:80:127.0.0.1
+```
+
+Así el health check atraviesa el Nginx local —vhost, `/media/` y socket
+incluidos— en vez de ir directo a Gunicorn, que dejaba en verde un vhost roto.
+`webcmp-deploy --configure` pregunta lo mismo y propone los defaults según el
+modo.
 
 Mientras `HEALTHCHECK_INSECURE=1`, el health check corre `curl --insecure` y deja de
 detectar un certificado vencido o con nombre incorrecto. Sacalo cuando tengas un
@@ -886,18 +995,81 @@ sudo -u webcmp .venv/bin/python manage.py cleanup_orphan_media --dry-run
 ## Contribuir
 
 El proyecto usa un ciclo de trabajo con registro: los cambios con impacto se
-describen en `openspec/changes/<nombre>/` (proposal, spec, tasks) antes de
-implementarse, y `AGENTS.md` describe las convenciones que hay que respetar. Es el
-mismo flujo que usa la documentación interna; no es burocracia de comité, es lo que
-permite retomar un trabajo a medias.
+describen en `openspec/changes/<NNN-nombre>/` antes de implementarse, y
+`AGENTS.md` describe las convenciones que hay que respetar. Es el mismo flujo que
+usa la documentación interna; no es burocracia de comité, es lo que permite
+retomar un trabajo a medias.
 
-Flujo práctico:
+Un cambio en OpenSpec son cuatro archivos, y el `tasks.md` es el que se va
+marcando:
 
-1. `git checkout -b feat/lo-que-sea`
-2. Commits conventional: `feat(meteo): agregar pronóstico de 5 días`. Un commit es
-   una unidad de trabajo revisable, con sus tests y su documentación adentro.
-3. `python manage.py test` en verde antes de pushear.
-4. PR contra `main`. El CI corre los tests de las apps que tocaste.
+```text
+openspec/changes/030-lo-que-sea/
+├── proposal.md              # por qué y qué resuelve
+├── design.md                # cómo, con las decisiones técnicas
+├── tasks.md                 # checkboxes; se implementa una tarea a la vez
+└── specs/030-lo-que-sea/spec.md
+```
+
+Cuando el cambio llega a producción, `gentle-ai sdd-archive` promueve los specs
+y mueve el directorio a `openspec/changes/archive/<fecha>-<nombre>/`.
+
+### Ramas y PRs
+
+Dos ramas de larga vida: `dev` integra, `main` es producción. **Las features
+entran siempre por `dev`**; `main` sólo recibe promociones por lote y hotfixes.
+
+1. `git checkout dev && git pull`, y desde ahí `git checkout -b feat/030-lo-que-sea`
+   (o `fix/…`, `chore/…`).
+2. Commits conventional, en español: `feat(meteo): agregar pronóstico de 5 días`.
+   Un commit es una unidad de trabajo revisable, con sus tests y su documentación
+   adentro.
+3. `python manage.py test` en verde antes de pushear. Los hooks de pre-commit
+   (ruff, djlint, detect-secrets) corren solos si hiciste `make setup`.
+4. PR **contra `dev`**, que se fusiona en squash: un PR es un commit en el
+   historial y la rama corta no necesita merge commit.
+5. Al fusionarse, un workflow borra la rama.
+
+`dev` no exige aprobación: el gate son los required status checks. `main` sí
+exige una aprobación humana —`@orl92` o `@yoelvismr`, vía `.github/CODEOWNERS`—,
+porque el CI que da el verde lo define el propio PR y un bot no puede ser code
+owner.
+
+### Promoción a producción
+
+1. Con `dev` verde, PR `dev` → `main`. Es una promoción por lote, no feature por
+   feature: `dev` acumula y `main` recibe un bloque cerrado.
+2. Una persona aprueba y se fusiona con **merge commit** (las features entran por
+   squash; la promoción no).
+3. Se etiqueta el merge: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`.
+4. **Inmediatamente**, PR `main` → `dev`. El merge de release crea en `main` un
+   commit que `dev` no tiene, y con `strict_required_status_checks_policy` la
+   próxima promoción saldría `BEHIND` aunque el contenido sea idéntico: la
+   comprobación es de ascendencia de commits, no de árboles.
+
+Un hotfix sale de `main`, pero vuelve a `dev` igual que un release. Si se omite,
+`dev` deja de representar lo que corre en producción.
+
+### Qué corre el CI
+
+El job de tests es selectivo por app, no la suite completa:
+
+- En un PR, `dorny/paths-filter` detecta qué apps cambiaron (`apps/<app>/**`) y
+  corre `python manage.py test apps.<app>` sólo para ésas.
+- Los cambios globales —`config/**`, `manage.py`, `requirements/**`,
+  `pyproject.toml`, `.github/**`, `templates/**`, `static/**`— fuerzan la suite
+  completa.
+- El push a `main` y cada merge de release siempre corren la suite completa, como
+  red de seguridad.
+
+Los labels de app van con la ruta completa (`apps.meteo`, no `meteo`): en Django
+5.2 el label corto ya no resuelve el paquete de tests.
+
+Ocho jobs son required status checks en las dos ramas: *Detect affected apps*,
+*Tests (Django)*, *Lint (Ruff)*, *Templates (djlint)*, *Pre-commit hooks*,
+*Bandit SAST*, *Security (pip-audit + migrations)* y *Deploy check (check
+--deploy)*. Si un PR renombra o borra uno de esos jobs, el check requerido nunca
+reporta y el merge queda bloqueado: **fail-closed** a propósito.
 
 Autores: el Instituto de Meteorología de Cuba.
 

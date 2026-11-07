@@ -57,7 +57,8 @@ KEY_ALPHABET = string.ascii_lowercase + string.digits + '!@#$%^&*(-_=+)'
 KEY_LENGTH = 50
 
 DEFAULT_ENCRYPTION_KEY_FILE = '/etc/webcmp/encryption.env'
-DEFAULT_PRODUCTION_HOSTNAME = 'cmw.insmet.cu'
+# El canonico lleva `www.` a proposito: es la unica URL que el proveedor publica.
+DEFAULT_PRODUCTION_HOSTNAME = 'www.meteocamaguey.cu'
 CUSTOM_EMAIL_BACKEND = 'config.custom_email_backend.CustomSTARTTLSBackend'
 
 # El `.env` se resuelve contra la raíz del repo, NO contra el CWD.
@@ -81,6 +82,17 @@ BANNER = """# ============================================================
 def generate_secret_key() -> str:
     """50 caracteres del alfabeto de Django, sin importar Django."""
     return ''.join(secrets.choice(KEY_ALPHABET) for _ in range(KEY_LENGTH))
+
+
+def www_alias(hostname: str) -> str:
+    """Alias `www.` solo si el canonico no lo trae ya.
+
+    Prefijar a ciegas cuando el canonico ya es `www.meteocamaguey.cu` produce
+    `www.www.meteocamaguey.cu`: un nombre que no existe en DNS. Va al
+    `ALLOWED_HOSTS` y a la emision del certificado, donde hace fallar el deploy
+    con un error de validacion de dominio en vez de uno de configuracion.
+    """
+    return '' if hostname.startswith('www.') else f'www.{hostname}'
 
 
 def generate_encryption_key() -> str:
@@ -143,6 +155,12 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
     se escribe en el `.env` (ver docstring del módulo).
     """
     hostname = DEFAULT_PRODUCTION_HOSTNAME if production else 'localhost'
+    # Una sola fuente para hosts y origins: el canonico y su alias tienen que
+    # decir lo mismo en ALLOWED_HOSTS, CSRF y CORS. Si difieren, una capa acepta
+    # un nombre que las otras rechazan y el sintoma es un 400 en el login.
+    alias = www_alias(hostname) if production else ''
+    production_hosts = ','.join(h for h in (hostname, alias) if h)
+    production_origins = ','.join(f'https://{h}' for h in (hostname, alias) if h)
     parts = [BANNER.format(timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))]
 
     parts.append(section('CONFIGURACIÓN BÁSICA (REQUERIDA)'))
@@ -161,8 +179,8 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
     parts.append(section('CONFIGURACIÓN DE DOMINIO'))
     if production:
         parts.append(f'EXTERNAL_HOSTNAME={hostname}\n')
-        parts.append(f'ALLOWED_HOSTS={hostname},www.{hostname}\n')
-        parts.append(f'CSRF_TRUSTED_ORIGINS=https://{hostname},https://www.{hostname}\n')
+        parts.append(f'ALLOWED_HOSTS={production_hosts}\n')
+        parts.append(f'CSRF_TRUSTED_ORIGINS={production_origins}\n')
         # La URL pública del sitio: es la que viajan los enlaces de los correos.
         parts.append(f'SITE_URL=https://{hostname}/\n\n')
     else:
@@ -188,7 +206,7 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
     if production:
         parts.append(
             '# CHANGE_ME: credenciales reales de PostgreSQL. El driver (psycopg[binary]) está\n'
-            '# en requirements/prod.txt.\n'
+            '# en requirements/base.txt.\n'
         )
         parts.append('DB_ENGINE=postgresql\n')
         parts.append('DB_NAME=webcmp\n')
@@ -198,7 +216,18 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
         parts.append('DB_PORT=5432\n')
         parts.append('DB_SSL_MODE=prefer\n\n')
     else:
-        parts.append('DB_ENGINE=sqlite3\n\n')
+        parts.append(
+            '# PostgreSQL local. El rol necesita CREATEDB porque la suite crea su propia base\n'
+            '# de tests. Los pasos para crearlo están en el README, sección\n'
+            '# "PostgreSQL en desarrollo".\n'
+        )
+        parts.append('DB_ENGINE=postgresql\n')
+        parts.append('DB_NAME=webcmp_dev\n')
+        parts.append('DB_USER=webcmp_dev\n')
+        parts.append('DB_PASS=CAMBIAR_ESTA_CLAVE\n')
+        parts.append('DB_HOST=127.0.0.1\n')
+        parts.append('DB_PORT=5432\n')
+        parts.append('DB_SSL_MODE=prefer\n\n')
 
     parts.append(section('CACHÉ (REDIS)'))
     parts.append('REDIS_URL=redis://127.0.0.1:6379/1\n')
@@ -210,7 +239,7 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
 
     parts.append(section('CORS'))
     if production:
-        parts.append(f'CORS_ALLOWED_ORIGINS=https://{hostname},https://www.{hostname}\n\n')
+        parts.append(f'CORS_ALLOWED_ORIGINS={production_origins}\n\n')
     else:
         parts.append('CORS_ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000\n\n')
 

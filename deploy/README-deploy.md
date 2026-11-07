@@ -15,7 +15,7 @@ El orden no es estetico, es la garantia:
 
 | # | Paso | Por que en ese lugar |
 | --- | --- | --- |
-| 1 | `flock` | Dos pushes seguidos no pueden migrar a la vez |
+| 1 | `flock` | Dos pushes seguidos, o un deploy y el instalador, no pueden mutar el mismo checkout a la vez |
 | 2 | Aborta si hay cambios sin commitear | `git checkout --force` los perderia |
 | 3 | `git checkout` del SHA exacto | Desplegar un SHA, no una rama: la rama se movio entre el CI y el deploy |
 | 4 | `pip install -r requirements/prod.txt` | Antes de los gates, que importan las deps |
@@ -71,7 +71,8 @@ Los comandos de Django corren en una unidad transitoria con el mismo
 `EnvironmentFile` y `PRODUCTION=1` que `webcmp.service`. Un `manage.py` corrido a
 mano en una shell sin `PRODUCTION` cae en el perfil de **desarrollo**
 (`config/settings/__init__.py` elige perfil por la variable de entorno): migra
-contra sqlite3 y dice que todo bien mientras el sitio sigue en PostgreSQL.
+con las credenciales del entorno en vez de con las de produccion, y el deploy
+"pasa" contra la base equivocada.
 
 ## Rollback
 
@@ -262,6 +263,85 @@ Por eso el orden es: **primero el sitio arriba y desplegable a mano; despues,
 si hay conectividad, el automatico.** Al reves se depura el sitio y el CI al
 mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
 
+### Topologia con Nginx Proxy Manager externo
+
+El caso del proveedor: NPM corre en Docker **en otra maquina** y termina TLS
+ahi. `install.sh` lo soporta con `PROXY_MODE=external`, y esa opcion **si
+instala Nginx en el LXC**:
+
+```text
+Navegador --https--> NPM (otra maquina) --http--> LXC:80 Nginx --> socket unix --> Gunicorn
+```
+
+El Nginx del contenedor no es un lujo: es el unico que puede servir `/media/` y
+`/static/` desde ese filesystem. Django no sirve media con `DEBUG=False` y
+WhiteNoise solo sirve `staticfiles`, asi que sin el Nginx, el logo, el favicon y
+cada PDF subido dan 404 mientras el resto del sitio "funciona". Gunicorn sigue
+escuchando **solo** en el socket unix: no se expone en la red en ninguna de las
+dos topologias.
+
+Lo que se configura en NPM:
+
+| Campo | Valor |
+| --- | --- |
+| Scheme | `http` (NPM habla HTTP con el LXC; el TLS lo pone el) |
+| Forward Hostname / IP | IP de LAN del LXC |
+| Forward Port | puerto HTTP del instalador (80 por defecto) |
+| Websockets Support | on (el grafico de sounding las usa) |
+| SSL | Let's Encrypt en NPM; el dominio tiene que resolver a NPM |
+
+No hacen falta Custom Locations ni headers extra: el `X-Forwarded-Proto` que
+manda NPM lo **propaga** el vhost HTTP (`map`), no lo reescribe con `$scheme`.
+Si lo reescribiera, Django no veria la peticion como segura y el login entraria
+en un bucle de logout sin un solo error en el log.
+
+El puerto HTTP del LXC tiene que quedar alcanzable **solo** desde la maquina del
+NPM. El instalador no toca el firewall y lo imprime como advertencia:
+
+```bash
+sudo ufw allow from <IP_DEL_NPM> to any port 80 proto tcp
+sudo ufw deny 80/tcp
+```
+
+El health check del deploy atraviesa ese Nginx por HTTP (`HEALTHCHECK_URL` +
+`HEALTHCHECK_RESOLVE` a `127.0.0.1:$HTTP_PORT`), asi que un vhost roto o un
+`/media/` sin servir no quedan en verde.
+
+### Probar el sitio antes de que exista el NPM
+
+Con `external`, este Nginx escucha HTTP y nada mas, y `production.py` deja
+`SESSION_COOKIE_SECURE` y `CSRF_COOKIE_SECURE` en `True`. El navegador **no
+guarda** una cookie `Secure` que llega por `http://`: el sitio abre, pero el
+login devuelve el formulario vacio, sin un solo error en pantalla ni en el log.
+Parece que el deploy esta roto y no lo esta.
+
+Dos formas de validar el login sin el NPM:
+
+1. Instalar con `nginx-local` + TLS autofirmado, probar el login completo, y
+   despues reinstalar **de cero** con `external`. No re-correr `install.sh`
+   sobre la misma instalacion: borra `.env` y `encryption.env`, rota
+   `SECRET_KEY` y la clave de cifrado.
+2. Dejar el login sin verificar hasta que el NPM apunte al contenedor. Todo lo
+   demas se valida igual, y no necesita el NPM:
+
+```bash
+systemctl status webcmp webcmp-huey --no-pager
+
+# El Host importa: ALLOWED_HOSTS lleva solo el dominio, asi que un pedido con
+# Host: 127.0.0.1 lo rechaza Django con 400 y Nginx no registra nada. Es el
+# mismo motivo por el que el health check usa --resolve.
+H='Host: www.meteocamaguey.cu'
+
+curl -sI -H "$H" http://127.0.0.1/ | head -1
+curl -s -o /dev/null -w '%{http_code}\n' -H "$H" http://127.0.0.1/api/doc/
+# Los estaticos los sirve Nginx, no Django: aca el Host da igual.
+curl -s -o /dev/null -w '%{http_code}\n' \
+    http://127.0.0.1/static/dist/css/tabler.min.css
+```
+
+`/api/doc/` tiene que dar `200` y `/` un `200` o `302`. Un `400` en los dos es
+`ALLOWED_HOSTS`, no un deploy roto.
+
 ### Checklist antes de instalar
 
 - [ ] Contenedor LXC creado (sin privilegios, sin `nesting`), x86_64
@@ -274,6 +354,8 @@ mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
 - [ ] Zona horaria `America/Havana`
 - [ ] Snapshot `pre-install` tomado
 - [ ] Puerto 22 alcanzable desde donde se va a correr el deploy (o decision explicita de desplegar a mano)
+- [ ] Topologia de proxy decidida: TLS en Nginx local (`nginx-local`) o en un NPM externo (`external`)
+- [ ] Con NPM externo: IP o subred del NPM, para limitar el firewall del puerto HTTP del LXC
 
 ## Instalacion en el servidor (una vez)
 
@@ -315,6 +397,35 @@ Opciones que importan:
 
 `sudo bash -s -- --help` imprime el uso y sale 0 sin exigir root ni terminal.
 
+`install.sh` toma **el mismo lock que `deploy.sh`** (`/var/lock/webcmp-deploy.lock`,
+no bloqueante). Si hay un deploy en curso, aborta sin tocar nada en vez de escribir
+el mismo checkout por detras; el `--dry-run` no lo toma, porque no muta nada.
+
+Si encuentra un `.env` de una instalacion anterior cuyo par
+`SECRET_KEY`/`ENCRYPTION_KEY` no descifra, en modo interactivo **pregunta antes de
+regenerarlo**. El par roto impide que Django arranque, y regenerar invalida todas
+las sesiones; antes de borrar nada, los dos archivos quedan respaldados al lado
+como `.env.bak.<fecha>` y `encryption.env.bak.<fecha>`, con el mismo modo 0600.
+Responder que no aborta sin tocar nada: la otra salida es restaurar la mitad que
+falta (por ejemplo, el `encryption.env` de la instalacion a la que pertenece ese
+`.env`). Con `--non-interactive` no hay a quien preguntar y se regenera avisando.
+
+### Pruebas de los scripts
+
+`deploy/tests/` cubre la sintaxis de todos los scripts y la logica que se puede
+aislar del sistema operativo: el validador del par `SECRET_KEY`/`ENCRYPTION_KEY`,
+el lock, el respaldo previo a regenerar el `.env` y la escritura de
+`/etc/webcmp/deployed`. Los bloques se extraen del propio `install.sh` entre
+marcadores `# >>> TEST-BLOCK: <nombre>`, asi que se prueba el codigo que se
+ejecuta y no una copia.
+
+```bash
+make test-deploy          # o: bash deploy/tests/run.sh
+```
+
+No corre el instalador: necesita root, systemd, apt, PostgreSQL y Nginx, y muta
+la maquina. Ese camino se prueba en un servidor.
+
 Lo que decide el operador, y que antes habia que editar a mano en tres
 lugares distintos (`generate_env.py`, `server_name` de Nginx y `PublicHostname`
 del deploy): el dominio y su `www`, los puertos, la base de datos (rol y base
@@ -335,9 +446,12 @@ si la genero el. Las claves Django se pueden rotar despues con
 `manage.py rotatekeys`; la contrasena de la base esta en el `.env` y se edita
 alla.
 
-Al final imprime el keypair de despliegue. La publica va al secret
-`DEPLOY_SSH_KEY` de GitHub (ver **Secrets de GitHub**); la privada ya quedo en
-`/etc/webcmp/deploy_key` con modo `0600`.
+Al final queda el keypair de despliegue. Lo que va al secret `DEPLOY_SSH_KEY`
+de GitHub es la **privada** (`/etc/webcmp/deploy_key`, modo `0600`); la publica
+queda instalada en `/home/deploy/.ssh/authorized_keys`, que es contra lo que sshd
+la compara (ver **Secrets de GitHub**). Pegar la publica en el secret es el error
+natural y falla con `Permission denied (publickey)`, un mensaje que no dice cual
+de las dos claves esta mal.
 
 Re-correr el script es seguro: cada pregunta muestra el valor actual como
 default, no regenera claves, no borra la base y no pisa ni `/etc/webcmp/deploy.env`
@@ -380,12 +494,17 @@ sudo systemctl restart nginx     # reinicio, no reload: los grupos se leen al
                                   # crear los workers
 ```
 
-El `deploy.env` del camino manual sale de `deploy.env.example`, que ya trae los
-mismos `HEALTHCHECK_*` que escribe el instalador: `HEALTHCHECK_URL`,
-`HEALTHCHECK_RESOLVE`, `HEALTHCHECK_UNIX_SOCKET`, `HEALTHCHECK_HOST_HEADER` y
-`HEALTHCHECK_INSECURE`. Para el proxy externo (opcion B), el health check va al
-socket unix y no a `https://`; para Nginx local, a `https://` con
-`HEALTHCHECK_RESOLVE` apuntando a `127.0.0.1`.
+El `deploy.env` del camino manual sale de `deploy.env.example`, que **no define
+ninguna `HEALTHCHECK_*`**. Sin ellas el health check va al 443 de `127.0.0.1`
+con el SNI de `PUBLIC_HOSTNAME`, que es lo correcto con Nginx local y TLS en
+esta maquina. Con proxy externo hay que agregarlas a mano: el 443 de este
+servidor no lo escucha nadie y el health check fallaria siempre.
+
+```bash
+# En /etc/webcmp/deploy.env, solo con PROXY_MODE=external
+HEALTHCHECK_URL=http://www.meteocamaguey.cu/
+HEALTHCHECK_RESOLVE=www.meteocamaguey.cu:80:127.0.0.1
+```
 
 `webcmp-deploy --configure` reescribe ese archivo preguntando lo mismo, y
 `webcmp-deploy --check` valida la configuracion sin desplegar nada.
@@ -428,7 +547,7 @@ sudo chown webcmp:webcmp /srv/webcmp/.env     # Django corre como webcmp
 sudo chmod 600 /srv/webcmp/.env
 ```
 
-Ahi va el hostname real: el generador escribe `EXTERNAL_HOSTNAME=cmw.insmet.cu` por
+Ahi va el hostname real: el generador escribe `EXTERNAL_HOSTNAME=www.meteocamaguey.cu` por
 default y no tiene flag para cambiarlo, asi que `EXTERNAL_HOSTNAME`,
 `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` y `CORS_ALLOWED_ORIGINS` hay que
 editarlos a mano. Si no, el sitio responde `DisallowedHost` a cada peticion.
@@ -472,13 +591,23 @@ con `accept-new`, porque `accept-new` acepta cualquier clave la primera vez: un
 deploy que no verifica a quien se conecta le entrega la clave de despliegue a
 cualquiera que responda ese puerto.
 
-Generar el par:
+Con el par que genera el instalador, la publica ya esta del lado del servidor y
+lo unico que hay que sacar de alla es la privada:
+
+```bash
+sudo cat /etc/webcmp/deploy_key    # -> DEPLOY_SSH_KEY (la PRIVADA)
+```
+
+Para un servidor real conviene el camino inverso: generar el par en la maquina
+desde la que se despliega y subir solo la publica. Una privada que nacio en el
+servidor es una llave mas que hay que rotar si el servidor se ve comprometido.
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-deploy@webcmp" -f ~/.ssh/webcmp_deploy
+ssh-copy-id -i ~/.ssh/webcmp_deploy.pub deploy@<host-del-servidor>
 ssh-keyscan -p 22 <host-del-servidor> > ~/.ssh/known_hosts_webcmp
-cat ~/.ssh/webcmp_deploy.pub      # -> DEPLOY_SSH_KEY (la PRIVADA es la .pub de la otra)
-cat ~/.ssh/known_hosts_webcmp     # -> DEPLOY_SSH_KNOWN_HOSTS
+cat ~/.ssh/webcmp_deploy           # -> DEPLOY_SSH_KEY (la PRIVADA)
+cat ~/.ssh/known_hosts_webcmp      # -> DEPLOY_SSH_KNOWN_HOSTS
 ```
 
 ## Correr un deploy a mano
@@ -497,7 +626,8 @@ Un superusuario ve en el **navbar del dashboard** un icono de refresco; cuando e
 servidor no esta en el ultimo commit de `main`, le aparece un punto rojo. Al
 abrirlo, el desplegable muestra el rango `deployed → latest` y el boton. Vive en el
 layout, asi que aparece en todas las paginas del dashboard, no solo en el index. El
-commit desplegado sale de `/etc/webcmp/deployed` (lo escribe `deploy.sh`), y el
+commit desplegado sale de `/etc/webcmp/deployed` (lo escriben `deploy.sh` en cada
+deploy e `install.sh` al terminar la instalacion), y el
 ultimo de `main` de un `git ls-remote` contra el repositorio publico: sin
 credenciales, sin clave y sin tocar el checkout.
 
@@ -548,7 +678,8 @@ El 2775 del directorio lleva setgid a proposito: hace que el archivo de peticion
 el de estado nazcan con grupo `webcmp` los escriba quien los escriba, asi que cada
 lado puede leer lo que escribio el otro.
 
-`install.sh` crea todo esto en `setup_autodeploy()`. Si se corre con
+`install.sh` crea todo esto: el andamiaje en `setup_autodeploy()` y
+`/etc/webcmp/deployed` al terminar. Si se corre con
 `--skip-deploy-scaffold`, el boton no se instala (necesita el usuario `deploy`).
 
 ### Apagarlo
@@ -574,6 +705,158 @@ Si el panel se queda en "Desplegando..." para siempre, el ejecutor murio antes d
 escribir `failed`. Pasada una hora el panel deja de creer ese estado
 (`RUN_STALE_SECONDS`) y vuelve a mostrar el aviso con el boton; el estado crudo
 sigue en el archivo. La fuente de verdad es `journalctl`, no el panel.
+
+
+## Las notificaciones del panel
+
+El mismo navbar trae un icono de campana con el numero de notificaciones sin
+leer. Las notificaciones las escribe el propio sistema en `Notification`
+(`apps/core/models.py`), nunca una persona, y salen de cuatro hechos:
+
+| Origen | Que lo dispara |
+|---|---|
+| `huey` | una tarea de Huey termino en `ERROR` **y no le quedan reintentos** (solo `send_email_task`) |
+| `invoice` | fallo el PDF o el correo de una factura (la clave incluye cual de los dos) |
+| `warning` | un `Warning` vence dentro del horizonte configurado |
+| `subscription` | un cliente solicita un servicio desde el portal |
+| `invoice_pending` | una factura lleva `INVOICE_PENDING_REMINDER_DAYS` dias sin pagarse |
+
+Los destinatarios son **todos los superusuarios activos**, y el queryset se
+filtra ademas por `recipient`: un administrador no ve la notificacion de otro.
+
+El recordatorio de facturas corre en la tarea periodica
+`apps.commercial.tasks.recordar_facturas_pendientes` (`crontab(minute=0,
+hour=13)`, las **09:00 en `America/Havana`**). Mientras la factura siga sin
+cobrarse vuelve cada `INVOICE_PENDING_REMINDER_DAYS` dias, no en cada corrida
+diaria: leer el aviso no lo hace reaparecer al dia siguiente.
+
+El desplegable lista **solo las no leidas**; abrir una la marca leida y navega
+al objeto. Las leidas quedan en "Ver todas", donde tambien se pueden eliminar
+una a una o todas de golpe.
+
+### Configuracion
+
+Todo por variables de entorno, con default en `config/settings/base.py`:
+
+| Variable | Default | Que controla |
+|---|---|---|
+| `NOTIFICATIONS_ENABLED` | `True` | Si se crean notificaciones y se muestra el icono |
+| `NOTIFICATIONS_RETENTION_READ` | `30` | Dias que se conserva una notificacion **leida** |
+| `NOTIFICATIONS_RETENTION_UNREAD` | `90` | Dias que se conserva una notificacion **sin leer** |
+| `NOTIFICATIONS_MAX_VISIBLE` | `10` | Notificaciones sin leer que caben en el desplegable |
+| `NOTIFICATIONS_WARNING_HORIZON_HOURS` | `48` | Antelacion con que se recuerda un aviso por vencer |
+| `INVOICE_PENDING_REMINDER_DAYS` | `7` | Dias sin cobrar que disparan el recordatorio, y cadencia con que se repite |
+
+### Apagarlos
+
+```bash
+# en el .env del servidor
+NOTIFICATIONS_ENABLED=False
+```
+
+Apagado: no se crean filas y el icono no se renderiza. El badge se refresca
+contra `GET /notificaciones/sin-leer/`, que responde `{"unread": null}` cuando el
+sistema esta apagado; el JS lo interpreta como "no hay numero que mostrar" y deja
+de preguntar. **La poda sigue
+corriendo**: limpiar datos viejos no es una funcion visible que haya que apagar,
+y dejarla detenida solo hace crecer la tabla.
+
+### Poda
+
+Dos entradas a la misma funcion (`apps.core.notifications.prune_notifications`):
+
+- **Huey**, tarea `apps.core.tasks.podar_notificaciones`, `crontab(minute=0,
+  hour=4)`. Huey corre con `utc=True`, asi que son las **00:00 en
+  `America/Havana`**. Se registra porque `CoreConfig.ready()` importa
+  `apps/core/tasks.py`; `apps/core/tests/test_huey_registry.py` afirma el
+  conjunto exacto de tareas del consumer y falla si esa cadena se rompe.
+- **A mano**, cuando haga falta:
+
+```bash
+.venv/bin/python manage.py notificar_podar
+```
+
+Borra, en este orden, los vencidos (`expires_at`), los leidos mas viejos que
+`NOTIFICATIONS_RETENTION_READ` y los no leidos mas viejos que
+`NOTIFICATIONS_RETENTION_UNREAD`. Es idempotente: correrlo dos veces seguido
+borra cero la segunda y lo informa.
+
+### Diagnosticar
+
+```bash
+.venv/bin/python manage.py notificar_podar            # que borraria ahora
+journalctl -u webcmp-huey -n 50 | grep -i notificac  # poda y recordatorios
+```
+
+El badge cuenta las **no leidas** y el historial muestra todas: que no coincidan
+no es un defecto. Dentro de cada uno la fuente es una sola
+(`apps.core.notifications.visible_for`): la usan el navbar, el historial y el
+contador. Una notificacion vencida no se muestra aunque la poda todavia no la
+haya borrado, y eso es a proposito: `expires_at` es la fecha del hecho, la poda
+es solo mantenimiento.
+
+### El endpoint del contador
+
+```
+GET /notificaciones/sin-leer/     ->  {"unread": 2}
+                                  ->  {"unread": null}      # sistema apagado
+                                  ->  304                    # con If-None-Match
+```
+
+Solo superusuario (403 en cualquier otro caso), `Cache-Control: private,
+no-cache` y `ETag` derivado del cuerpo, para que la mayoria de los sondeos
+devuelvan 0 bytes. El JS (`static/dist/js/notifications-badge.js`) pregunta cada
+20 s y **no pregunta mientras la pestaña esta oculta**.
+
+Vive aparte del estado de despliegue del panel a proposito. Ese JSON
+(`dashboard:update_status`) lee archivos y compara commits con el remoto: es
+caro por diseno y solo lo pide el panel de administracion. El contador es lo
+unico que podra consultar la campana del portal publico cuando lleguen los
+clientes (cambio 030), y un `COUNT` indexado no puede viajar pegado a esa carga.
+
+Con `USE_REDIS_CACHE=True` el conteo se guarda 20 s y se invalida al marcar,
+borrar o crear un aviso. Con `USE_REDIS_CACHE=False` **no se cachea**: LocMem
+vive en cada worker de Gunicorn, y ahi invalidar solo alcanzaria al worker que
+atendio el POST, dejando a los otros dos sirviendo un numero viejo.
+
+
+## La franja de aviso meteorologico
+
+El portal publico pinta una franja arriba de todo cuando hay un `Warning` vigente
+(`valid_until >= ahora`). **No es una notificacion**: se sirve en el HTML, sin
+sesion y sin JavaScript, porque tiene que alcanzar a un visitante anonimo. Sigue
+el tema del visitante (claro u oscuro); no impone fondo oscuro.
+
+Sale de `apps.core.context_processors.menu_notifications`, que ya recorria
+`Warning` para los badges del menu. Esa consulta alimenta las tres cuentas y el
+aviso que encabeza la franja: agregarla no costo una consulta extra y de paso
+elimino dos, porque antes eran tres `COUNT(*)` separados. Son dos consultas
+constantes menos en **cada** pagina, anonima o no.
+
+Decisiones que no se cambian sin pensar:
+
+- **Manda la gravedad, no la fecha.** Ciclon > tormenta > alerta temprana. Entre
+  dos del mismo tipo gana el mas reciente.
+- **No se puede cerrar.** Cerrar una alerta de ciclon es la unica accion que no
+  queremos facilitar.
+- **El color no es la unica senal**: el tipo va escrito al lado del punto, asi que
+  sirve igual para quien no distingue rojo de naranja.
+- **En el landing solo entran los avisos graves.** La portada de marketing omite
+  el contenido vivo a proposito (`apps/home/tests/test_landing.py`), con una
+  excepcion: ciclon tropical y tormenta. Es la raiz del dominio, y esos dos no se
+  esconden detras de un clic a "Tiempo". Un `early` no se pinta ahi: es rutina y
+  acostumbraria al visitante a ignorar la franja. La excepcion vive en
+  `templates/layouts/landing.html` (`severe_only=True`), no en Python.
+
+### Apagarla
+
+```bash
+# en el .env del servidor
+EMERGENCY_BANNER_ENABLED=False
+```
+
+Apagarla no toca el contenido publicado: las paginas de avisos y los badges del
+menu siguen igual.
 
 
 ## Lo que el workflow NO puede hacer

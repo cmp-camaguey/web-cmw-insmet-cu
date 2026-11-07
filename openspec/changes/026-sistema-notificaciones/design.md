@@ -1,8 +1,7 @@
 # 026-sistema-notificaciones — diseno tecnico
 
-> Borrador de diseno para la propuesta `026`. Nada de esto esta implementado.
-> Las decisiones marcadas **[abierta]** requieren una respuesta antes de escribir
-> codigo.
+> Diseno aprobado el 2026-11-06: las decisiones que antes estaban marcadas
+> **[abierta]** estan resueltas en §10. Nada de esto esta implementado todavia.
 
 ## 1. Modelo
 
@@ -51,10 +50,10 @@ indexes = [
 ```
 
 El indice unico **parcial** es lo que hace que el dedup sea una garantia de la
-base y no una condicion de carrera en Python. PostgreSQL y SQLite lo soportan.
-MySQL **no** soporta indices parciales: si algun dia se despliega sobre MySQL, el
-dedup baja a `get_or_create` dentro de `transaction.atomic()` con un `SELECT ...
-FOR UPDATE` **[abierta: confirmar motor de produccion]**.
+base y no una condicion de carrera en Python. **[Decidido: PostgreSQL]** en los
+tres perfiles desde 028, y lo soporta. La rama MySQL —sin indices parciales,
+dedup dentro de `transaction.atomic()` con `SELECT ... FOR UPDATE`— se descarta:
+el proyecto no corre sobre MySQL.
 
 ## 2. Dedup
 
@@ -74,11 +73,22 @@ el momento**.
 | Correo de factura | `invoice`, `uuid` de la factura, `email` |
 | Despliegue | `deploy`, `sha` desplegado, estado final |
 | Aviso por vencer | `warning`, `uuid` del aviso |
+| Solicitud de servicio | `subscription`, `uuid` de la suscripción, `requested` |
+| Factura pendiente de pago | `invoice_pending`, `uuid` de la factura |
 
 Sin el `created_at` en la clave, tres reintentos de la misma tarea producen una
 fila. Si el admin la lee y el fallo se repite, el indice parcial ya no aplica y
 aparece una fila nueva: eso es lo deseado, porque un fallo repetido despues de
 haberlo visto **es** informacion nueva.
+
+### 2.1 Recordatorios que deben repetirse
+
+El indice parcial solo impide duplicados **sin leer**. Un recordatorio cuya
+condicion sigue siendo cierta —una factura que sigue sin pagarse— reapareceria
+en cada corrida diaria despues de que el admin lo lea, que es la forma mas
+rapida de que deje de mirar el icono. `_notify_or_get` acepta `repeat_after`:
+con el, el mismo hecho vuelve a avisar como mucho una vez por intervalo.
+`None` conserva el comportamiento de 026.
 
 ## 3. Creacion: explicita, no por señal
 
@@ -94,39 +104,46 @@ generica.
 | Tarea Huey falla | En el receiver `on_error` de `CoreConfig.register_task_signals()`, con una **allowlist** de `task_name`. Las tareas de factura quedan fuera porque tienen su propio aviso mas especifico. |
 | PDF falla | En la tarea que genera el PDF, rama `FAILED`. |
 | Correo falla | En la tarea que envia el correo, rama `FAILED`. |
-| Despliegue termina | `deploy/autodeploy.sh` invoca `python manage.py notificar_despliegue` al cerrar **[abierta: ver 3.1]**. |
+| Despliegue termina | **Descartado** (opcion C de 3.1): no se crea aviso. |
 | Aviso por vencer | Tarea Huey periodica diaria. |
 
 ### 3.1 El aviso de despliegue
 
+**Decidido: opcion C, no se notifica.** Se deja el analisis porque es la razon
+de la decision, no porque quede abierta.
+
 `autodeploy.sh` corre como el usuario `deploy`; el proceso Django corre como
 `webcmp`. Escribir en la base desde `deploy` funciona (PostgreSQL, no SQLite),
-pero **abre una ruta de escritura que hoy no existe** y hay que decidirla a
-consciencia:
+pero **abre una ruta de escritura que hoy no existe**:
 
-- **Opcion A (preferida):** el unit termina con
+- **Opcion A (descartada):** el unit termina con
   `sudo -u webcmp /opt/webcmp/venv/bin/python manage.py notificar_despliegue
-  --status-file /var/lib/webcmp/deploy-status.json`. Requiere `deploy` pueda
-  hacer `sudo -u webcmp` sin password, o que el comando viva detras de un
-  `systemd` `.service` de un solo disparo.
-- **Opcion B (menos infraestructura):** el navbar detecta el cambio de `running`
-  a `success`/`failed` en `UpdateStatusView` y crea la fila la primera vez que
-  alguien mira. **La desventaja es real:** si nadie abre el panel, el aviso no
-  existe. Se acepta como degradacion consciente, no como diseno.
-- **Opcion C:** no notificar despliegues (ya los cubre el propio widget de 025,
-  que cambia de estado solo). La mas honesta si A resulta costosa.
+  --status-file /var/lib/webcmp/deploy-status.json`. Requiere que `deploy` pueda
+  hacer `sudo -u webcmp` sin password. Eso es exactamente la frontera que 025
+  cerro a proposito: `webcmp` tiene shell `/bin/false` y no tiene sudo, por eso
+  se descarto el `systemctl restart` de SquidStats. Un aviso que el widget ya
+  muestra no justifica reabrirla.
+- **Opcion B (descartada):** el navbar detecta el cambio de `running` a
+  `success`/`failed` en `UpdateStatusView` y crea la fila la primera vez que
+  alguien mira. La desventaja es real: si nadie abre el panel, el aviso no
+  existe. Un aviso que solo nace cuando lo vas a mirar no es un aviso.
+- **Opcion C (elegida):** no notificar despliegues. `update_navbar.html` ya
+  cambia de estado solo, con el polling de `dashboard-update.js`.
 
-**Decision pendiente.** Sin resolverla, la fuente 4 no se implementa.
+Sin `notificar_despliegue`, `deploy/autodeploy.sh` no se toca y no aparece un
+segundo camino de escritura a la base.
 
 ## 4. Destinatarios
 
-Fase 1: superusuarios. Es un conjunto que ya existe, ya esta autorizado a ver
-todo y no requiere una pantalla de preferencias.
+Superusuarios. Es un conjunto que ya existe, ya esta autorizado a ver todo y no
+requiere una pantalla de preferencias.
 
-Fase 2 **[abierta]**: suscripcion por tipo. Antes de eso hay que responder si
-esto lo va a usar **una** persona (el admin del CMP) o **varias**. Con una sola,
-cualquier modelo de preferencias es complejidad sin uso. Con varias, hace falta
-una relacion `NotificationPreference(user, source, enabled)`.
+**[Decidido: varios administradores.]** El repositorio tiene siempre dos
+(`@orl92` y `@yoelvismr`), y los dos reciben todos los avisos.
+`NotificationPreference(user, source, enabled)` queda **fuera de alcance**:
+con un conjunto fijo y chico, una tabla de preferencias por usuario es
+complejidad sin uso. Si algun dia entra un tercer rol que deba ver solo una
+parte, esa es la señal para agregarla.
 
 ## 5. UI
 
@@ -136,14 +153,23 @@ Icono en el navbar del dashboard, hermano del icono de actualizacion que ya vive
 en `templates/includes/dashboard/update_navbar.html`. Mismas reglas de espaciado
 (`gap-2` en el `navbar-nav`), mismo lenguaje visual de Tabler.
 
-- Sin avisos: icono normal, sin badge.
-- Con avisos: badge con el numero, tope visual `9+`.
-- Desplegable: las 10 mas recientes, cada una con titulo, `hace X`, severidad por
-  color y enlace al objeto original. Pie del desplegable: "Ver todas" y "Marcar
-  todas como leidas".
+- Sin notificaciones: icono normal, sin badge.
+- Con notificaciones: badge con el numero, tope visual `9+`.
+- Desplegable: **solo las no leidas**, hasta `NOTIFICATIONS_MAX_VISIBLE`, cada
+  una con titulo, `hace X`, severidad por color y enlace al objeto original. Sin
+  titulo de seccion ni boton de marcar en bloque: el pie alcanza con "Ver todas".
+  Abrir una la marca leida y navega; sin destino, la pagina se recarga para que
+  salga de la lista.
 - Pagina completa en `apps/dashboard/` para historial con paginacion
   (`paginate_by = 10`, convencion del proyecto; **sin** DataTables, que solo se
-  usa cuando se cargan todos los registros).
+  usa cuando se cargan todos los registros). El historial muestra leidas y no
+  leidas, y permite marcarlas, eliminar una o eliminarlas todas; el borrado se
+  confirma en un modal compartido, con el mismo estilo que el resto del sitio.
+
+**[Decidido: el desplegable no mezcla leidas.]** Listar las 10 ultimas sin mirar
+`read_at` hacia que el badge contara una cosa y la lista mostrara otra, y que una
+no leida antigua quedara fuera del tope por culpa de diez leidas nuevas. El
+desplegable es una bandeja de entrada; el historial es el archivo.
 
 ### 5.2 Contador
 
@@ -208,12 +234,21 @@ Apagado: no se crean filas, no se renderiza el icono, la poda sigue corriendo
 8. El aviso no incluye el `traceback` completo; el enlace apunta a la vista del
    log.
 
-## 10. Preguntas abiertas
+## 10. Decisiones (cerradas el 2026-11-06)
 
-1. **Motor de produccion final** — PostgreSQL o MySQL. Cambia el mecanismo de
-   dedup (indice parcial vs transaccion).
-2. **Fuente de despliegue** — opcion A, B o C de la seccion 3.1.
-3. **Un usuario o varios** — decide si hace falta `NotificationPreference`.
-4. **Avisos meteorologicos** — ¿es un aviso para el admin o algo que deberia ver
-   el portal publico? Si es lo segundo, esto no es una notificacion, es un
-   componente de la portada.
+1. **Motor: PostgreSQL**, en los tres perfiles desde 028. El dedup es el indice
+   unico parcial de la seccion 1.
+2. **Despliegue: opcion C.** No se notifica el resultado de un despliegue. El
+   widget de 025 ya muestra el estado y la opcion A abriria una escritura de
+   `deploy` a `webcmp`, que es justo la frontera que 025 cerro. Si mas adelante
+   se quiere, es una fuente mas del modelo y no requiere cambios de esquema.
+3. **Destinatarios: todos los superusuarios** (dos admins). Sin
+   `NotificationPreference` por ahora.
+4. **`Warning` por vencer: solo el panel.** Es un recordatorio operativo para
+   quien administra el portal; la portada publica no cambia. Un aviso vigente
+   que esta por vencer sigue vigente, y anunciar su vencimiento antes de tiempo
+   desinforma al publico.
+
+Con esto la fase 0 de `tasks.md` queda cerrada y el alcance son **cuatro**
+fuentes de aviso: tarea Huey en `ERROR`, PDF de factura, correo de factura y
+`Warning` por vencer.

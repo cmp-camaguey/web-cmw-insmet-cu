@@ -42,8 +42,14 @@
 - [x] 4.2 `python manage.py test` (suite completa)
 - [x] 4.3 `bash -n deploy/autodeploy.sh` y `bash -n deploy/install.sh`
 - [x] 4.4 `djlint . --reformat --check` sobre el template nuevo
-- [ ] 4.5 Corrida de `install.sh --dry-run` en el contenedor (pendiente de
+- [x] 4.5 Corrida de `install.sh --dry-run` en el contenedor (pendiente de
       infraestructura)
+
+      Ejecutado el 2026-11-06 en el contenedor Ubuntu 26.04 de destino, con
+      `REPO_REF=dev PROXY_MODE=external`: el plan salio completo y sin abortar.
+      La instalacion real termino verde y `webcmp-deploy --check` cierra con
+      `Todo lo chequeado esta bien.` (exit 0), `webcmp` activo, `manage.py
+      check --deploy` sin issues.
 
 ## 5. Documentación
 
@@ -52,6 +58,6 @@
 
 ## Nota
 
-El punto 4.5 es el único que no se puede cerrar en desarrollo: `install.sh`
+El punto 4.5 era el único que no se podía cerrar en desarrollo: `install.sh`
 necesita systemd real y un usuario `deploy` que no existe en la estación de
 trabajo. Todo lo demás se verifica sin servidor.

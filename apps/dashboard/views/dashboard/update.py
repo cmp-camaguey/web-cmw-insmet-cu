@@ -327,6 +327,12 @@ def build_state(refresh=False, include_commits=True):
     ``include_commits`` existe para la peticion de despliegue: decide con los
     SHA, no con los mensajes, y no tiene por que esperar una segunda salida de
     red que ademas puede tardar el timeout entero.
+
+    El contador de avisos sin leer **no** viaja aqui. Este JSON lee archivos,
+    consulta el remoto y compara commits: es caro por diseno y por eso solo lo
+    pide el panel de administracion. El contador tiene su propio endpoint
+    (`notifications:unread`), que es lo unico que puede consultar la campana del
+    portal publico cuando lleguen los clientes (cambio 030).
     """
     deployed = deployed_sha()
     remote = remote_sha(refresh=refresh)

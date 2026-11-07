@@ -12,8 +12,11 @@
 #   sudo install -o root -g root -m 0755 deploy/deploy.sh /usr/local/sbin/webcmp-deploy
 #   sudo install -o root -g root -m 0600 deploy/deploy.env.example /etc/webcmp/deploy.env
 #
-# Publicar la clave publica como secret DEPLOY_SSH_KEY de GitHub:
-#   cat /home/deploy/.ssh/id_ed25519.pub
+# La clave PRIVADA es lo que se publica como secret DEPLOY_SSH_KEY de GitHub.
+# La publica ya queda en /home/deploy/.ssh/authorized_keys (la instala
+# deploy/install.sh); pegar la .pub en el secret es el error natural y falla con
+# "Permission denied (publickey)":
+#   sudo cat /etc/webcmp/deploy_key
 #
 # La ruta de /usr/local/sbin NO es arbitraria. Si el script viviera en
 # /srv/webcmp/deploy/deploy.sh, que es escribible por webcmp, este sudoers seria

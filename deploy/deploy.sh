@@ -297,7 +297,7 @@ if [ -n "${PIP:-}" ]; then
 else
     PIP_CMD=("$PYTHON" -m pip)
 fi
-: "${PUBLIC_HOSTNAME:=web.cmw.insmet.cu}"
+: "${PUBLIC_HOSTNAME:=www.meteocamaguey.cu}"
 # Modo de proxy declarado por el instalador. NO decide nada en este script: el
 # health check se despacha por las claves HEALTHCHECK_* de mas abajo. Se guarda
 # porque es el dato que hace falta para explicar un deploy bloqueado ("no hay
@@ -310,9 +310,10 @@ fi
 # "$PUBLIC_HOSTNAME:443:127.0.0.1", que es el default de siempre; con URL puesta
 # y esta vacia, el health check sale por DNS de verdad.
 : "${HEALTHCHECK_RESOLVE:=}"
-# `curl --unix-socket`. Con proxy externo (Nginx Proxy Manager) el upstream no
-# es un puerto TCP de la maquina: es el socket de Gunicorn. Es el unico modo de
-# probar el mismo camino que el proxy sin abrir un puerto que no hace falta.
+# `curl --unix-socket`. Ya no lo usa el instalador: con proxy externo el health
+# check atraviesa el Nginx local por HTTP y con nginx-local atraviesa TLS. La
+# clave se conserva porque deploy.env es un archivo que el operador puede editar
+# a mano, y una instalacion vieja que la tenga escrita sigue funcionando.
 : "${HEALTHCHECK_UNIX_SOCKET:=}"
 # Cabecera `Host:` explicita. Necesaria con socket unix: curl pone `localhost` y
 # Django responde DisallowedHost, que el health check leeria como un sitio caido.
@@ -358,11 +359,11 @@ validate_healthcheck_target() {
     [ -z "$HEALTHCHECK_URL" ] && return 0
     valid_url "$HEALTHCHECK_URL" || die "HEALTHCHECK_URL invalida: '$HEALTHCHECK_URL'.
   Tiene que empezar por http:// o https:// y traer un host no vacio, sin espacios.
-  Ejemplos validos:  https://web.cmw.insmet.cu/   o   http://localhost/
+  Ejemplos validos:  https://www.meteocamaguey.cu/   o   http://localhost/
   O borrar la variable y dejar el default (443 en 127.0.0.1 con SNI)."
     if [ -n "$HEALTHCHECK_RESOLVE" ] && ! valid_resolve "$HEALTHCHECK_RESOLVE"; then
         die "HEALTHCHECK_RESOLVE invalido: '$HEALTHCHECK_RESOLVE'.
-  Formato de curl --resolve: host:port:ip. Ejemplo: web.cmw.insmet.cu:443:127.0.0.1
+  Formato de curl --resolve: host:port:ip. Ejemplo: www.meteocamaguey.cu:443:127.0.0.1
   O la palabra 'none' para que el health check salga por DNS de verdad."
     fi
 }
@@ -393,13 +394,25 @@ configure_deploy_env() {
   Proxy local (Nginx en esta maquina, TLS aqui):
       HEALTHCHECK_URL=https://<host>/  y  HEALTHCHECK_RESOLVE=<host>:443:127.0.0.1
       Asi entra a 127.0.0.1:443 con el SNI correcto, sin salir del servidor.
-  Proxy externo (Nginx Proxy Manager, u otro):
-      HEALTHCHECK_URL=http://localhost/  HEALTHCHECK_UNIX_SOCKET=/run/webcmp/gunicorn.sock
-      HEALTHCHECK_HOST_HEADER=<host>
-      Asi prueba el socket de Gunicorn, que es lo que el proxy externo usa de verdad.
+  Proxy externo (Nginx Proxy Manager en otra maquina, TLS alla):
+      HEALTHCHECK_URL=http://<host>/  y  HEALTHCHECK_RESOLVE=<host>:80:127.0.0.1
+      Asi atraviesa el Nginx local por HTTP (que sirve /media/ y /static/ y hace
+      proxy al socket) y detecta un vhost roto, cosa que ir directo al socket
+      no detecta. El 443 de esta maquina no lo escucha nadie en esa topologia.
 EOF
-    cfg_hc_url=$(ask HEALTHCHECK_URL "${HEALTHCHECK_URL:-https://$PUBLIC_HOSTNAME/}" 'URL del health check (vacio = default: https://<PUBLIC_HOSTNAME>/ en 127.0.0.1:443)' valid_url) || die 'Valor invalido.'
-    cfg_hc_resolve=$(ask HEALTHCHECK_RESOLVE "${HEALTHCHECK_RESOLVE:-$PUBLIC_HOSTNAME:443:127.0.0.1}" 'curl --resolve host:port:ip (none = sin --resolve; vacio = el default)' valid_resolve) || die 'Valor invalido.'
+    # El default depende del modo. En `external` el 443 de esta maquina no lo
+    # escucha nadie: proponer https://...:443 obligaria al operador a corregir a
+    # mano cada vez, y en no-interactivo instalaria un health check que no puede
+    # pasar nunca.
+    if [ "$PROXY_MODE" = external ]; then
+        hc_default_url="http://${cfg_public_hostname:-$PUBLIC_HOSTNAME}/"
+        hc_default_resolve="${cfg_public_hostname:-$PUBLIC_HOSTNAME}:80:127.0.0.1"
+    else
+        hc_default_url="https://${cfg_public_hostname:-$PUBLIC_HOSTNAME}/"
+        hc_default_resolve="${cfg_public_hostname:-$PUBLIC_HOSTNAME}:443:127.0.0.1"
+    fi
+    cfg_hc_url=$(ask HEALTHCHECK_URL "${HEALTHCHECK_URL:-$hc_default_url}" "URL del health check (vacio = default: $hc_default_url)" valid_url) || die 'Valor invalido.'
+    cfg_hc_resolve=$(ask HEALTHCHECK_RESOLVE "${HEALTHCHECK_RESOLVE:-$hc_default_resolve}" "curl --resolve host:port:ip (none = sin --resolve; vacio = $hc_default_resolve)" valid_resolve) || die 'Valor invalido.'
     cfg_hc_socket=$(ask HEALTHCHECK_UNIX_SOCKET "$HEALTHCHECK_UNIX_SOCKET" 'Socket unix de Gunicorn (vacio = ninguno)' valid_socket_path) || die 'Valor invalido.'
     cfg_hc_host=$(ask HEALTHCHECK_HOST_HEADER "$HEALTHCHECK_HOST_HEADER" 'Cabecera Host: del health check (vacio = la de la URL)' valid_hostname) || die 'Valor invalido.'
 
@@ -503,7 +516,7 @@ check_units() {
     if [ -n "$PROXY_MODE" ]; then
         case "$PROXY_MODE" in
             nginx-local) check_ok "PROXY_MODE=$PROXY_MODE (Nginx local: el health check necesita 443 en 127.0.0.1)." ;;
-            external)    check_ok "PROXY_MODE=$PROXY_MODE (proxy externo: el health check deberia apuntar al socket o al upstream local)." ;;
+            external)    check_ok "PROXY_MODE=$PROXY_MODE (proxy externo: el health check deberia apuntar a http://<host>/ en 127.0.0.1:80, via el Nginx local)." ;;
             *)           check_fail "PROXY_MODE='$PROXY_MODE' no es un modo conocido (nginx-local | external)." ;;
         esac
     else
@@ -513,20 +526,56 @@ check_units() {
 
 check_sudoers() {
     log "Sudoers"
-    local sudoers=/etc/sudoers.d/webcmp-deploy
-    if [ -r "$sudoers" ]; then
-        if visudo -c -f "$sudoers" >/dev/null 2>&1; then
-            check_ok "$sudoers es valido."
-        else
-            check_fail "$sudoers no es valido (visudo -c -f)."
-        fi
-        if grep -qE "^[[:space:]]*${DEPLOY_USER}[[:space:]]+ALL=" "$sudoers"; then
-            check_ok "El sudoers concede sudo a '$DEPLOY_USER'."
-        else
-            check_fail "El sudoers no concede sudo a '$DEPLOY_USER'."
-        fi
-    else
+    local sudoers=/etc/sudoers.d/webcmp-deploy grantees grantee covered=0
+    if [ ! -r "$sudoers" ]; then
         check_fail "No existe $sudoers."
+        return
+    fi
+    if visudo -c -f "$sudoers" >/dev/null 2>&1; then
+        check_ok "$sudoers es valido."
+    else
+        check_fail "$sudoers no es valido (visudo -c -f)."
+        return
+    fi
+
+    # El usuario que concede el sudoers NO es $DEPLOY_USER, y compararlo contra
+    # el era el defecto. $DEPLOY_USER es el dueno del checkout (webcmp), que
+    # corre git y gunicorn con shell nologin; el sudoers concede a quien INVOCA
+    # webcmp-deploy (deploy), que es un usuario distinto y con shell. Comparado
+    # contra $DEPLOY_USER, este chequeo daba FALLA en una instalacion correcta y
+    # mandaba a buscar un problema que no existia.
+    #
+    # Se leen los concedidos del propio archivo en vez de fijar `deploy` a mano:
+    # asi el chequeo sigue valiendo si alguien cambia el usuario de despliegue, y
+    # un sudoers que no concede el comando a NADIE se reporta como lo que es.
+    grantees=$(awk '/^[[:space:]]*#/ { next } /\/usr\/local\/sbin\/webcmp-deploy/ { print $1 }' "$sudoers" | sort -u)
+    if [ -z "$grantees" ]; then
+        check_fail "$sudoers no concede /usr/local/sbin/webcmp-deploy a ningun usuario."
+        return
+    fi
+    check_ok "Concede /usr/local/sbin/webcmp-deploy a: $(printf '%s' "$grantees" | tr '\n' ' ' | sed 's/ $//')"
+
+    # Si el chequeo lo corre alguien por sudo, ese es justamente el usuario que
+    # despues invoca el deploy por SSH. Comprobarlo es la prueba que importa, y
+    # evita el falso verde de "el archivo nombra a alguien".
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+        while IFS= read -r grantee; do
+            [ -n "$grantee" ] || continue
+            case "$grantee" in
+            %*)
+                id -nG "$SUDO_USER" 2>/dev/null | tr ' ' '\n' |
+                    grep -qxF "${grantee#%}" && covered=1
+                ;;
+            *)
+                [ "$grantee" = "$SUDO_USER" ] && covered=1
+                ;;
+            esac
+        done <<<"$grantees"
+        if [ "$covered" -eq 1 ]; then
+            check_ok "'$SUDO_USER' esta cubierto: puede invocar webcmp-deploy."
+        else
+            check_fail "'$SUDO_USER' NO figura en $sudoers: el deploy por SSH desde ese usuario va a fallar con 'command not allowed'."
+        fi
     fi
 }
 
@@ -540,7 +589,13 @@ check_healthcheck() {
             check_fail "HEALTHCHECK_UNIX_SOCKET=$HEALTHCHECK_UNIX_SOCKET no es un socket. El servicio corre?"
         fi
     else
-        check_skip "Sin HEALTHCHECK_UNIX_SOCKET: el health check usa la red."
+        # `SIN DATOS` era enganoso. Con PROXY_MODE=external el instalador escribe
+        # HEALTHCHECK_URL + HEALTHCHECK_RESOLVE y NO un socket, a proposito: el
+        # transporte es HTTP contra el Nginx local, que es el unico que sirve
+        # /media/ y /staticfiles/ desde este filesystem. No falta nada, asi que
+        # reportarlo como dato faltante manda a buscar una clave que no debe
+        # existir, y en la unica topologia que hay hoy.
+        check_ok "Sin socket (correcto en esta topologia): el health check va por red."
     fi
     if [ -n "$HEALTHCHECK_URL" ]; then
         check_ok "Destino: $resolved"
@@ -704,8 +759,8 @@ rollback() {
 # systemd-run --pipe --wait crea una unidad transitoria con el EnvironmentFile de
 # la clave de descifrado y PRODUCTION=1, exactamente igual que webcmp.service. Sin
 # esto, un `manage.py` corrido a mano sin PRODUCTION cae en el perfil de DESARROLLO
-# (ver config/settings/__init__.py): migra contra sqlite3 y dice que todo bien,
-# mientras el sitio sigue en PostgreSQL.
+# (ver config/settings/__init__.py): migra con las credenciales del entorno en vez
+# de con las de produccion, y el deploy "pasa" contra la base equivocada.
 #
 # --uid webcmp: los archivos los escribe el usuario de servicio, que es el dueno
 # del venv, de media/ y de staticfiles/. Como root quedarian con dueno root y el
@@ -894,8 +949,8 @@ case "$code" in
         fi
         if [ -n "$HEALTHCHECK_UNIX_SOCKET" ]; then
             die "Sin respuesta de $hc_url por el socket $HEALTHCHECK_UNIX_SOCKET.
-Con PROXY_MODE=external el health check va al socket de Gunicorn: si contesta 000,
-el problema NO es el proxy externo. Mirá journalctl -u $GUNICORN_UNIT y que exista
+El health check configurado va directo a Gunicorn, no al sitio: si contesta 000,
+el problema esta en el servicio. Mira journalctl -u $GUNICORN_UNIT y que exista
 $HEALTHCHECK_UNIX_SOCKET con el servicio arriba."
         fi
         die "Sin respuesta de $hc_url.
@@ -903,8 +958,9 @@ Si el servidor tiene un certificado autofirmado, poné
 HEALTHCHECK_INSECURE=1 en $CONFIG para este servidor de prueba.
 NUNCA en produccion: --insecure deja de detectar un certificado vencido o de otro
 dominio, que es exactamente lo que el health check deberia estar mirando.
-Si el proxy es externo, corré $0 --configure: el destino por defecto (443 en
-127.0.0.1) no existe en esa topologia y el health check no puede pasar."
+Si el proxy es externo, revisá que el Nginx local de esta maquina este arriba
+(systemctl status nginx) y que HEALTHCHECK_RESOLVE apunte a 127.0.0.1 en el
+puerto HTTP del instalador, no al 443: el 443 de esta maquina no lo escucha nadie."
         ;;
     *) die "El sitio responde $code, se esperaba 2xx o 3xx." ;;
 esac

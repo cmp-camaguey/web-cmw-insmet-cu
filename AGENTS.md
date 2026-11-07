@@ -2,7 +2,7 @@
 
 ## Stack
 
-Django 5.2 + DRF + drf-spectacular (OpenAPI), Python 3.14 (CI y ruff apuntan a `py314`). Virtual env `.venv/`. UI: Tabler vía Django Templates; raíz `templates/` con `layouts/` e `includes/`, y páginas en `apps/<app>/templates/pages/`. DB: SQLite dev, PostgreSQL/MySQL prod. Apps dentro de `apps/`.
+Django 5.2 + DRF + drf-spectacular (OpenAPI), Python 3.14 (CI y ruff apuntan a `py314`). Virtual env `.venv/`. UI: Tabler vía Django Templates; raíz `templates/` con `layouts/` e `includes/`, y páginas en `apps/<app>/templates/pages/`. DB: **PostgreSQL en los tres perfiles** (dev, test y prod); SQLite está retirado y un `.env` con `DB_ENGINE=sqlite3` falla cerrado. Apps dentro de `apps/`.
 
 **Restricción de frontend:** JS 100% vanilla, **SIN Node.js, SIN bundlers ni paso de build**. Las librerías de terceros se vendorean como `*.min.js` y se sirven directo. Por legado, Tabler (CSS y JS) vive en `static/dist/css/` y `static/dist/js/` (ver `templates/includes/base/head.html` y `scripts.html`); el resto (Tempus Dominus, Popper, jQuery, DataTables, amcharts, highcharts, etc.) va en `static/dist/libs/`. No introducir npm, transpilación ni tooling JS en el proyecto.
 
@@ -22,6 +22,7 @@ Django 5.2 + DRF + drf-spectacular (OpenAPI), Python 3.14 (CI y ruff apuntan a `
 ## Comandos
 
 ```bash
+# Requiere PostgreSQL local: ver "PostgreSQL en desarrollo (obligatorio)" en README.md
 source .venv/bin/activate
 pip install -r requirements/base.txt && python manage.py makemigrations migrate
 python manage.py collectstatic --link --no-input
@@ -29,6 +30,7 @@ python manage.py add_stations_data createsuperuser
 python manage.py runserver                    # desarrollo
 python manage.py test apps.<app>              # testing selectivo (label completo, ej: apps.meteo)
 python manage.py test                         # full suite (antes de commit)
+make test-deploy                              # pruebas de los scripts de deploy (deploy/tests/)
 PRODUCTION=true python manage.py runserver    # producción local (usa DB real, SSL, etc.)
 ./run_huey.sh &                               # worker de correos/PDF (Huey)
 ```
@@ -262,14 +264,6 @@ Estos items NO los cubren los skills genéricos. Verificarlos siempre:
 - `tempus-init.js` define sus globals (`window.pickerDateToIso`, `window.formatPickerDate`, `window.formatPickerDateTime`) y `window.tempusDominus._instances` DENTRO de `DOMContentLoaded`; los scripts de plantilla corren antes → usan fallback local y difieren la suscripción al picker.
 - **Restricción conocida:** no hay observer para nodos agregados tras la carga. Si en el futuro se inyecta un `[data-tempus]` por JS (AJAX/htmx/fetch), inicializarlo con `initPicker(input)` (función en `tempus-init.js`) o añadir un `MutationObserver` que llame `initPicker` para cada nodo nuevo, **con guarda anti-doble-init** (`if (window.tempusDominus && window.tempusDominus._instances && window.tempusDominus._instances[input.id]) return;`). Ver comentario en `tempus-init.js`.
 
-## Roadmap / Backlog (snapshot histórico)
-
-> Tracking vivo en `openspec/changes/`. Esta lista es un snapshot de la constitución eliminada (commit `a66238d`); verificar vigencia antes de usarlo.
-
-**Activas (históricas):** 071 Performance queries (N+1, índices, cache) · 073 UI polish (toasts/spinners/tablas) · 074 Redis cache · 075 Monitoreo tareas Huey · 076 Auditoría de actividad · 077 Operaciones masivas · 078 Tema personalizado · 079 Exportar gráficos · 080 Debug Toolbar (dev).
-
-**Backlog / ideas:** CSP (django-csp) · 2FA/MFA para staff · validación de archivos subidos (magic bytes/tamaño) · health check `/health/` · búsqueda global en navbar · Auth API (JWT) · WebSockets/notificaciones en tiempo real · i18n EN del portal público.
-
 ## Verificación antes de commit
 
 **Gentle AI ya cubre los hooks (`pre-commit`) y la revisión del diff (RDD/4R). No los repitas acá**: no lances un subagente de revisión si la revisión nativa está activa, y no agregues pasos de hook — se configuran en `.githooks/pre-commit` y `Makefile`.
@@ -279,6 +273,7 @@ Lo que gentle-ai **no** cubre es la verificación funcional (`review validate --
 | Cambio | Verificación |
 |---|---|
 | Código Python (modelos, vistas, permisos) | `python manage.py test` |
+| Scripts shell (`deploy/`, `run_huey.sh`, hooks) | `make test-deploy` |
 | `requirements/` con **versiones cambiadas** | `python manage.py test` (el comportamiento puede cambiar) |
 | `requirements/` solo pines, sin cambio de versión | `pip install --dry-run -r requirements/<env>.txt` |
 | Solo workflows / Makefile / hooks | YAML parseable + `sh -n .githooks/pre-commit` + `make -n <target>` |

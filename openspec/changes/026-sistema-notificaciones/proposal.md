@@ -1,8 +1,9 @@
 # 026-sistema-notificaciones
 
-> **Estado: idea documentada, no aprobada.** No hay implementacion, ni rama, ni
-> tareas abiertas. Existe para que la idea no se pierda y para que, cuando se
-> retome, no se empiece copiando el diseno de otro proyecto sin entender por que.
+> **Estado: aprobada el 2026-11-06. Fase 0 cerrada**, con las cuatro decisiones
+> de `design.md` §10 resueltas. Todavia sin implementar: no hay rama ni tareas
+> marcadas. Existe para que la idea no se pierda y para que, cuando se retome,
+> no se empiece copiando el diseno de otro proyecto sin entender por que.
 
 ## Por que
 
@@ -72,8 +73,10 @@ Cada fuente existe hoy y ya produce el dato:
    `pdf_error`. Enlace a la factura.
 3. **Correo de factura fallido** — `Invoice.email_status == 'failed'`, con
    `email_error`.
-4. **Despliegue terminado** — `success` o `failed` leido de
-   `/var/lib/webcmp/deploy-status.json` al cerrar `autodeploy.sh`.
+4. **Despliegue terminado — descartado.** El widget de `update_navbar.html` ya
+   muestra el estado. Notificarlo exigiria que el usuario `deploy` escriba en
+   la base como `webcmp`, y eso reabre una frontera que 025 cerro a proposito:
+   `webcmp` tiene shell `/bin/false` y no tiene sudo.
 5. **Aviso meteorologico por vencer** — `Warning.valid_until` dentro de las
    proximas 24 h y sin reemplazo. Enlace al aviso.
 

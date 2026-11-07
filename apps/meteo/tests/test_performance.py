@@ -48,8 +48,17 @@ class WarningListViewQueryCountTests(TestCase):
         # If select_related('user') is dropped, each of the 25 rendered rows
         # would add a user query -> count would scale with row count.
         self.client.force_login(self.admin)
-        # 11 (was 13): the subscription badges in the context processor now come
-        # from a single conditional aggregate instead of one count per state.
+        # 11 (was 13): the context processor used to run three COUNT(*) over
+        # Warning (early / tropical / storm) to feed the navbar badges. It now
+        # reads the active warnings once and derives the three counts AND the
+        # emergency banner from that same SELECT: two constant queries fewer on
+        # every page.
+        # History: 13 -> 11 (subscription badges became one conditional
+        # aggregate) -> 13 (notification bell: unread COUNT + top-10 dropdown,
+        # change 026) -> 11 (single active-warning SELECT).
+        # Constant and indexed: neither the notification queries nor the warning
+        # one scale with the number of rows on this page, which is what this
+        # guard exists to catch.
         with self.assertNumQueries(11):
             response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)

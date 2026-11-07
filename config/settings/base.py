@@ -82,6 +82,39 @@ def build_caches(use_redis, redis_url):
 CACHES = build_caches(USE_REDIS_CACHE, REDIS_URL)
 
 
+# ---------------------------------------------------------------------------
+# Avisos operativos (cambio 026)
+# ---------------------------------------------------------------------------
+# Apagado: no se crean filas y el icono no se renderiza. La poda SIGUE
+# corriendo a propósito: limpiar datos viejos no es una función visible que
+# haya que apagar, y dejarla detenida solo hace crecer la tabla.
+NOTIFICATIONS_ENABLED = os.getenv('NOTIFICATIONS_ENABLED', 'True') == 'True'
+# Días que se conserva una notificación ya leída.
+NOTIFICATIONS_RETENTION_READ = int(os.getenv('NOTIFICATIONS_RETENTION_READ', '30'))
+# Días que se conserva una no leída. Un aviso de hace 90 días que nadie abrió
+# ya no es accionable y solo infla el badge.
+NOTIFICATIONS_RETENTION_UNREAD = int(os.getenv('NOTIFICATIONS_RETENTION_UNREAD', '90'))
+# Entradas del desplegable del navbar. La página de historial no depende de esto.
+NOTIFICATIONS_MAX_VISIBLE = int(os.getenv('NOTIFICATIONS_MAX_VISIBLE', '10'))
+# Horas de antelación con que se avisa que un `Warning` está por vencer. Un día
+# y medio alcanza para editar el aviso o preparar el siguiente sin sonar antes
+# de tiempo: el aviso sigue vigente, solo está por terminar.
+NOTIFICATIONS_WARNING_HORIZON_HOURS = int(os.getenv('NOTIFICATIONS_WARNING_HORIZON_HOURS', '48'))
+# Días que una factura puede llevar pendiente de pago antes del primer
+# recordatorio. El mismo valor se usa como cadencia: mientras siga sin cobrarse,
+# vuelve a avisar como mucho una vez por intervalo, no en cada corrida diaria.
+INVOICE_PENDING_REMINDER_DAYS = int(os.getenv('INVOICE_PENDING_REMINDER_DAYS', '7'))
+
+# ---------------------------------------------------------------------------
+# Franja de aviso meteorológico vigente (portal público)
+# ---------------------------------------------------------------------------
+# No es una notificación: se renderiza en el HTML servido, sin sesión y sin
+# JavaScript, porque tiene que alcanzar a un visitante anónimo en una emergencia.
+# Apagarla es una decisión de operación; el contenido publicado (página de
+# avisos y badges del menú) sigue intacto.
+EMERGENCY_BANNER_ENABLED = os.getenv('EMERGENCY_BANNER_ENABLED', 'True') == 'True'
+
+
 def decrypt_secret_key(encrypted_secret_key, encryption_key):
     if not encrypted_secret_key or not encryption_key:
         return None
@@ -246,30 +279,37 @@ TEMPLATES = [
 
 
 # Database
-def get_database_config(*, is_production=IS_PRODUCTION, prefer_sqlite=DEBUG):
-    """Construye el dict DATABASES a partir de las variables de entorno."""
+def get_database_config():
+    """Construye el dict DATABASES a partir de las variables de entorno.
+
+    El motor es obligatorio en los tres perfiles. No hay respaldo silencioso: un
+    perfil que no encuentre `DB_ENGINE` falla al arrancar, en vez de medir SQLite
+    mientras producción corre PostgreSQL.
+    """
     db_engine = os.getenv('DB_ENGINE', '').strip().lower()
 
-    if is_production and not db_engine:
+    if not db_engine:
         raise ImproperlyConfigured(
-            'Falta la configuración de la base de datos. Defina DB_ENGINE (y DB_NAME, '
-            'DB_USER, DB_HOST, DB_PASS) en el archivo .env. '
-            'Ejecute `python scripts/generate_env.py --production` para generarlo.'
+            'Falta DB_ENGINE. Este proyecto solo corre sobre PostgreSQL: defina '
+            'DB_ENGINE=postgresql y DB_NAME, DB_USER, DB_PASS y DB_HOST en el archivo '
+            '.env. Ejecute `python scripts/generate_env.py --development` (o '
+            '`--production`) para generarlo.'
         )
 
-    if prefer_sqlite or db_engine in {'', 'sqlite', 'sqlite3'}:
-        return {
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': BASE_DIR / 'db.sqlite3',
-            }
-        }
+    if db_engine in {'sqlite', 'sqlite3'}:
+        raise ImproperlyConfigured(
+            'SQLite ya no se soporta: este proyecto solo corre sobre PostgreSQL. Borre '
+            'DB_ENGINE=sqlite3 del archivo .env y defina DB_ENGINE=postgresql con '
+            'DB_NAME, DB_USER, DB_PASS y DB_HOST. Ejecute '
+            '`python scripts/generate_env.py --development` para regenerarlo. Los datos '
+            'de una base SQLite existente no se convierten solos: hay que volcarlos '
+            'aparte antes de borrar `db.sqlite3`.'
+        )
 
     if not all(os.getenv(k) for k in ('DB_NAME', 'DB_USER', 'DB_HOST', 'DB_PASS')):
         raise ImproperlyConfigured(
             f'El motor "{db_engine}" necesita DB_NAME, DB_USER, DB_HOST y DB_PASS, y al menos '
-            'uno falta o está vacío en el entorno. (sqlite3 no los necesita: para él, alcanzaba '
-            'con DB_ENGINE=sqlite3.) Defina las cuatro en el archivo .env.'
+            'uno falta o está vacío en el entorno. Defina las cuatro en el archivo .env.'
         )
 
     db_config = {
@@ -446,6 +486,20 @@ silent_email_backends = (
 insecure_email_backends = ('config.mail_backends.InsecureDevEmailBackend',)
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+# 465 es TLS implícito (SMTPS) y 587 es STARTTLS: son dos modos distintos, no dos
+# variantes del mismo. `deploy/install.sh` escribe esta variable desde siempre,
+# pero ningún settings la leía, así que elegir 465 dejaba a Django abriendo una
+# conexión en claro contra un puerto que espera el handshake en el primer byte.
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False') == 'True'
+
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured(
+        'EMAIL_USE_TLS y EMAIL_USE_SSL están activos a la vez, y Django los rechaza '
+        'porque son modos excluyentes de cifrar la misma conexión. El puerto 465 usa '
+        'TLS implícito (EMAIL_USE_SSL=True y EMAIL_USE_TLS=False); el 587 usa STARTTLS '
+        '(EMAIL_USE_TLS=True y EMAIL_USE_SSL=False). Corrija el archivo .env.'
+    )
+
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = os.getenv('EMAIL_PORT')
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')

@@ -14,7 +14,8 @@
 #   6. .env con scripts/generate_env.py y los valores preguntados, sin CHANGE_ME
 #   7. makemigrations, migrate, collectstatic, check --deploy
 #   8. unidades systemd renderizadas a APP_DIR/SERVICE_USER reales
-#   9. proxy: (A) Nginx local con TLS, o (B) reverse proxy externo
+#   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
+#      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
 #  10. /etc/webcmp/deploy.env con el destino del health check que corresponde
 #  11. andamiaje de deploy automatico (usuario, keypair, sudoers, webcmp-deploy)
 #  12. superusuario, por systemd-run con la ENCRYPTION_KEY
@@ -62,6 +63,10 @@ SERVICE_USER=${SERVICE_USER:-webcmp}
 SERVICE_GROUP=${SERVICE_GROUP:-$SERVICE_USER}
 SERVICE_SHELL=${SERVICE_SHELL:-/usr/sbin/nologin}
 DEPLOY_LOGIN_USER=${DEPLOY_LOGIN_USER:-deploy}
+# Home del usuario de despliegue. `useradd --create-home` lo pone en /home/<user>
+# y el authorized_keys tiene que ir ahi: sshd lo busca en el home real del
+# usuario, no en una ruta que el instalador elija a gusto.
+DEPLOY_HOME=${DEPLOY_HOME:-/home/$DEPLOY_LOGIN_USER}
 SCRIPT_PATH=${SCRIPT_PATH:-/usr/local/sbin/webcmp-deploy}
 # Ejecutor del boton "Actualizar" del panel (change 025-update-web-deploy).
 AUTODEPLOY_SCRIPT=${AUTODEPLOY_SCRIPT:-/usr/local/sbin/webcmp-autodeploy}
@@ -69,6 +74,18 @@ AUTODEPLOY_STATE_DIR=${AUTODEPLOY_STATE_DIR:-/var/lib/webcmp}
 CONFIG_DIR=${CONFIG_DIR:-/etc/webcmp}
 CONFIG_FILE=${CONFIG_FILE:-$CONFIG_DIR/deploy.env}
 ENCRYPTION_ENV=${ENCRYPTION_ENV:-$CONFIG_DIR/encryption.env}
+# Commit que quedo sirviendo, para el boton "Actualizar" del panel
+# (change 025-update-web-deploy). deploy.sh lo escribe al final de cada deploy y
+# el instalador lo escribe al terminar: si no, una instalacion nueva deja el
+# panel sin referencia y el primer deploy manual queda invisible.
+# Mismo archivo, mismo formato (un SHA de 40 hex) y mismos permisos que deploy.sh.
+DEPLOYED_STATE=${DEPLOYED_STATE:-$CONFIG_DIR/deployed}
+# Lock compartido con deploy.sh. Es el MISMO archivo (no una copia del
+# mecanismo): el instalador escribe el checkout, las migraciones y el .env, y un
+# deploy.sh que corra a la vez haria lo mismo sobre el mismo arbol. El lock no
+# coordina dos instaladores por si solo, coordina instalador y deploy, que es el
+# par que comparte estado.
+DEPLOY_LOCKFILE=${DEPLOY_LOCKFILE:-/var/lock/webcmp-deploy.lock}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-/var/cache/webcmp-pip}
 MPLCONFIGDIR=${MPLCONFIGDIR:-$APP_DIR/.cache/matplotlib}
 VENV_DIR=${VENV_DIR:-$APP_DIR/.venv}
@@ -81,8 +98,11 @@ NGINX_ERROR_ROOT=${NGINX_ERROR_ROOT:-/var/www/webcmp-errors}
 ACME_ROOT=${ACME_ROOT:-/var/www/letsencrypt}
 TLS_DIR=${TLS_DIR:-$CONFIG_DIR/tls}
 # El vhost NUNCA se copia tal cual: se renderiza desde el ejemplo del checkout
-# (ver render_vhost). La ruta se declara aca para que quien lea el bloque de
-# activacion vea de donde sale el archivo.
+# (ver render_vhost). Hay DOS ejemplos y cual se usa depende de PROXY_MODE, que
+# se pregunta mas abajo; por eso esta asignacion es solo el default y se vuelve
+# a fijar despues de la pregunta:
+#   nginx-local -> webcmp.conf.example       (Nginx hace TLS)
+#   external    -> webcmp-http.conf.example  (el TLS lo termina el proxy)
 vhost_src=$APP_DIR/deploy/nginx/webcmp.conf.example
 # El socket de Gunicorn sale de RuntimeDirectory=webcmp en el unit, o sea
 # /run/<GUNICORN_UNIT>/gunicorn.sock. Los tres tienen que decir lo mismo: el
@@ -485,7 +505,8 @@ Opciones:
 
 Variables de entorno que se respetan (las preguntas usan el mismo nombre):
   REPO_URL, REPO_REF, APP_DIR, SERVICE_USER, DEPLOY_LOGIN_USER, SCRIPT_PATH,
-  CONFIG_DIR, CONFIG_FILE, ENCRYPTION_ENV, DB_NAME, DB_USER,
+  CONFIG_DIR, CONFIG_FILE, ENCRYPTION_ENV, DEPLOYED_STATE, DEPLOY_LOCKFILE,
+  DB_NAME, DB_USER,
   DB_PASS, DB_HOST, DB_PORT, DB_SSL_MODE, EMAIL_HOST, EMAIL_PORT,
   EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, DEFAULT_FROM_EMAIL, PUBLIC_HOSTNAME,
   REDIS_URL, USE_REDIS_CACHE, LOG_LEVEL, SUPERUSER_USERNAME, SUPERUSER_EMAIL,
@@ -640,9 +661,9 @@ valid_choice() {
 
 # No hay validador de motor de base de datos, y es a proposito: el motor ya no
 # se pregunta, es constante (postgresql). `get_database_config()` de
-# config/settings/base.py sigue aceptando mysql y sqlite3, y el .env de
-# desarrollo (sqlite3) no cambia por esto; lo que cambia es que el instalador de
-# PRODUCCION solo maneja PostgreSQL.
+# config/settings/base.py exige DB_ENGINE en los tres perfiles y rechaza sqlite
+# de forma explicita, asi que el instalador de PRODUCCION solo maneja PostgreSQL
+# y un `.env` de desarrollo ya no puede colarse como respaldo silencioso.
 
 # El generador escribe DEBUG|INFO|WARNING|ERROR|CRITICAL y Django no valida este
 # valor: uno mal escrito no da error, solo desactiva el logging en un nivel y deja
@@ -709,8 +730,62 @@ recover_django_keys() {
 }
 
 recover_env_password() {
-    printf 'Queda escrita en %s. Para cambiarla se edita esa clave y se reinicia %s.\n' \
-        "$ENV_FILE" "$GUNICORN_UNIT"
+    # Este mensaje decia "queda escrita en el .env" y era falso: el instalador
+    # nunca escribe SUPERUSER_PASSWORD ahi. Un operador que pierde la contrasena
+    # con esa frase en la mano busca una clave que no existe, y la busca en el
+    # unico archivo donde no puede estar. Lo unico que queda es el hash en la
+    # base, asi que la unica salida es cambiarla.
+    printf 'No queda guardada en ningun archivo: solo el hash en la base.\n'
+    printf '  Para cambiarla:\n'
+    printf '    sudo systemd-run --quiet --pipe --wait --uid=%s \\\n' "$SERVICE_USER"
+    printf '      -p EnvironmentFile=%s -p Environment=PRODUCTION=1 \\\n' "$ENCRYPTION_ENV"
+    printf '      --working-directory=%s %s manage.py changepassword %s\n' \
+        "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME"
+}
+
+# --- Superusuario: consulta y reseteo ------------------------------------
+# Usan el mismo systemd-run que `manage()` pero con su propio
+# `-p Environment=`, cosa que `manage()` no puede agregar: por eso no se reusa.
+# Se ejecutan despues de `migrate`, asi que la tabla ya existe.
+superuser_exists() {
+    systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py shell -c \
+        "import sys
+from django.contrib.auth import get_user_model
+sys.exit(0 if get_user_model().objects.filter(username='$SUPERUSER_USERNAME').exists() else 1)"
+}
+
+reset_superuser_password() {
+    # La contrasena viaja por entorno y no por argv: en `ps` la veria cualquiera
+    # de la maquina. Es el mismo camino que usa `createsuperuser` mas abajo.
+    systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py shell -c \
+        "import os
+from django.contrib.auth import get_user_model
+u = get_user_model().objects.get(username='$SUPERUSER_USERNAME')
+u.set_password(os.environ['DJANGO_SUPERUSER_PASSWORD'])
+u.is_staff = True
+u.is_superuser = True
+u.is_active = True
+u.save()"
+}
+
+print_changepassword_hint() {
+    printf '  sudo systemd-run --quiet --pipe --wait --uid=%s \\\n' "$SERVICE_USER" >&2
+    printf '    -p EnvironmentFile=%s -p Environment=PRODUCTION=1 \\\n' "$ENCRYPTION_ENV" >&2
+    printf '    --working-directory=%s %s manage.py changepassword %s\n' \
+        "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME" >&2
 }
 
 # ¿Esta corrida tiene que preguntar? En dry-run no: preguntar por valores que
@@ -1123,9 +1198,9 @@ render_template() {
 #
 # Por que NO un `sudo -u webcmp manage.py`: sin PRODUCTION cae al perfil de
 # desarrollo (config/settings/__init__.py elige perfil por variable de entorno),
-# migra contra sqlite3 y dice que todo bien mientras el sitio va a PostgreSQL. Es
-# el modo de fallo mas caro de este proyecto: el instalador "pasa" y deja la base
-# equivocada.
+# y migra con las credenciales que encuentre en el entorno en vez de con las de
+# produccion. El instalador "pasa" y deja la base equivocada sin un solo error:
+# es el modo de fallo mas caro de este proyecto.
 #
 # OJO: systemd-run NO hereda el entorno de quien llama. Por eso las variables
 # extra van con -p Environment=NOMBRE=valor y nunca con un `VAR=x systemd-run`.
@@ -1235,7 +1310,9 @@ echo "  distro: $PRETTY_NAME ($DISTRO_ID)"
 
 command -v apt-get >/dev/null 2>&1 || die "apt-get no esta disponible."
 command -v openssl >/dev/null 2>&1 || warn "openssl no esta: se necesita para el certificado autofirmado."
-command -v curl >/dev/null 2>&1 || warn "curl no esta: se necesita para certbot y para el health check."
+# curl se instala con APT_PACKAGES (el health check de cada deploy depende de el),
+# asi que aca no se avisa: un aviso que dice "falta curl" y trescientas lineas
+# despues lo instala entrena al operador a ignorar los avisos.
 
 # Python >= MIN_PYTHON. El motivo concreto esta en el comment de MIN_PYTHON
 # arriba; aca solo se traduce a un error que lo dice.
@@ -1257,6 +1334,21 @@ echo "  python: $PYTHON_VERSION (minimo ${MIN_PYTHON[0]}.${MIN_PYTHON[1]})"
 
 require_systemd
 echo "  systemd-run disponible."
+
+# El lock de deploy.sh necesita flock(1). Se verifica en el Preflight, que es de
+# solo lectura, y no despues de empezar a mutar: si falta, el instalador tendria
+# que abortar con el checkout a medio escribir.
+command -v flock >/dev/null 2>&1 \
+    || die "flock no esta instalado (paquete util-linux). Sin el no se puede tomar el lock compartido con deploy.sh, y dos procesos mutando el mismo checkout a la vez no tienen vuelta atras."
+# Se comprueba en el Preflight y no se crea nada: un `exec 9>ruta` sobre un
+# directorio inexistente mata el shell con un error de bash que no dice cual es
+# el lock ni por que importa. /var/lock existe en cualquier systemd
+# (systemd-tmpfiles lo enlaza a /run/lock); solo falla si DEPLOY_LOCKFILE se
+# overridea a un path sin directorio.
+DEPLOY_LOCKDIR=$(dirname -- "$DEPLOY_LOCKFILE")
+[ -d "$DEPLOY_LOCKDIR" ] \
+    || die "El directorio del lock compartido no existe: $DEPLOY_LOCKDIR. Crearlo, o pasar DEPLOY_LOCKFILE a un path existente."
+echo "  flock disponible ($DEPLOY_LOCKFILE)."
 
 # Estado previo, SOLO de lectura. Se usa para armar los defaults de las
 # preguntas (el default es el valor vigente) y para avisar de re-corridas.
@@ -1306,15 +1398,27 @@ fi
 
 step 1 "Configuracion (todo tiene default; Enter para conservarlo)"
 
-EXTERNAL_HOSTNAME=$(ask PUBLIC_HOSTNAME "${PUBLIC_HOSTNAME:-meteocamaguey.cu}" \
+EXTERNAL_HOSTNAME=$(ask PUBLIC_HOSTNAME "${PUBLIC_HOSTNAME:-www.meteocamaguey.cu}" \
     'Dominio publico del sitio (EXTERNAL_HOSTNAME del .env, server_name de Nginx, SNI del health check)' \
     valid_hostname) || die 'Dominio invalido.'
 
-USE_WWW=$(ask_one_of USE_WWW si 'Sirve tambien en www?' \
-    'si: anade www.<dominio> al vhost, al ALLOWED_HOSTS y al certificado' \
-    'no: solo el dominio sin www') || die 'Opcion invalida.'
+# El alias se CALCULA, no se prefija. Con un canonico que ya es `www.x`,
+# `www.$EXTERNAL_HOSTNAME` daria `www.www.x`: un nombre que no existe en DNS y
+# que hace fallar la emision del certificado con un error de validacion de
+# dominio. En ese caso el alias es el dominio sin `www`, y el default es `no`
+# porque la URL publicada es la que lleva `www`.
+if [[ "$EXTERNAL_HOSTNAME" == www.* ]]; then
+    ALIAS_HOSTNAME=${EXTERNAL_HOSTNAME#www.}
+    ALIAS_DEFAULT=no
+else
+    ALIAS_HOSTNAME=www.$EXTERNAL_HOSTNAME
+    ALIAS_DEFAULT=si
+fi
+USE_WWW=$(ask_one_of USE_WWW "$ALIAS_DEFAULT" "Sirve tambien en $ALIAS_HOSTNAME?" \
+    "si: anade $ALIAS_HOSTNAME al vhost, al ALLOWED_HOSTS y al certificado" \
+    'no: solo el dominio publico') || die 'Opcion invalida.'
 if [ "$USE_WWW" = si ]; then
-    WWW_HOSTNAME=www.$EXTERNAL_HOSTNAME
+    WWW_HOSTNAME=$ALIAS_HOSTNAME
 else
     WWW_HOSTNAME=
 fi
@@ -1324,7 +1428,7 @@ HTTPS_PORT=$(ask HTTPS_PORT 443 'Puerto HTTPS' valid_port) || die 'Puerto invali
 
 PROXY_MODE=$(ask_one_of PROXY_MODE nginx-local 'Reverse proxy' \
     'nginx-local: Nginx instalado y configurado en esta maquina, con TLS' \
-    'external: hay un proxy externo (Nginx Proxy Manager). NO se instala Nginx' \
+    'external: el TLS lo termina un proxy externo (Nginx Proxy Manager) en otra maquina. Nginx SI se instala aca para servir /media/ y /static/' \
     ) || die 'Opcion invalida.'
 
 # TLS_MODE NO se pre-asigna a `none` antes de la pregunta. ask_one_of en modo no
@@ -1368,6 +1472,17 @@ else
     TLS_MODE=none
 fi
 
+# El vhost que se renderiza depende del modo, y se decide ACA y no en la
+# definicion de `vhost_src`: PROXY_MODE todavia no existia cuando se declaro esa
+# variable. Ambos vhosts hacen proxy al mismo socket y sirven los mismos
+# directorios; la diferencia es que `external` no hace TLS (lo termina el proxy)
+# y propaga el X-Forwarded-Proto que ese proxy manda en vez de reescribirlo.
+if [ "$PROXY_MODE" = external ]; then
+    vhost_src=$APP_DIR/deploy/nginx/webcmp-http.conf.example
+else
+    vhost_src=$APP_DIR/deploy/nginx/webcmp.conf.example
+fi
+
 # --- Base de datos -------------------------------------------------------
 
 # Constante, no pregunta: PostgreSQL es el unico motor de produccion. Asignacion
@@ -1378,8 +1493,9 @@ DB_ENGINE=postgresql
 cat >&2 <<EOF
 
   Base de datos: PostgreSQL.
-  El motor no se pregunta. Es el unico que trae driver en requirements/prod.txt
-  (psycopg[binary]), y el unico que el proyecto asume para produccion. MySQL
+  El motor no se pregunta. Es el unico que trae driver en requirements/base.txt
+  (psycopg[binary], que prod.txt incluye), y el unico que el proyecto asume para
+  produccion. MySQL
   exigiria instalar mysqlclient fuera de los pins, y SQLite no tiene
   concurrencia ni lee DB_*; ninguno de los dos corresponde a un sitio con
   usuarios entrando.
@@ -1427,19 +1543,25 @@ cat >&2 <<EOF
 EOF
 EMAIL_HOST=$(ask EMAIL_HOST "mx.caonao.cu" 'Servidor SMTP, SIN @ (vacio = todavia no hay correo)' valid_smtp_host) || die 'Host SMTP invalido. Es el servidor sin @ (ej. mx.caonao.cu); la direccion de correo va en "Usuario SMTP".'
 EMAIL_PORT=$(ask EMAIL_PORT 587 'Puerto SMTP' valid_port) || die 'Puerto SMTP invalido.'
-EMAIL_USE_TLS=si
-EMAIL_USE_SSL=no
+# OJO con el vocabulario. Las PREGUNTAS hablan si/no (es lo que se lee en
+# pantalla), pero los VALORES que van al .env son los que Django compara:
+# `os.getenv('EMAIL_USE_TLS', 'True') == 'True'`. Escribir `si` deja la
+# comparacion en False sin ningun error: el correo sale en claro por el 587 y
+# el unico sintoma es un SMTP que rechaza el AUTH o un mensaje que nunca llega.
+# Lo mismo vale para EMAIL_USE_SSL y USE_REDIS_CACHE.
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
 if [ "$EMAIL_PORT" = 465 ]; then
     # 465 es SMTPS implicito: TLS desde el principio de la conexion. Preguntar
     # STARTTLS ahi produce una combinacion que no existe (SSL y TLS los dos) y
     # Django falla al abrir el socket con un error que no menciona el puerto.
-    EMAIL_USE_TLS=no
-    EMAIL_USE_SSL=si
-    echo "  puerto 465: EMAIL_USE_SSL=si y EMAIL_USE_TLS=no (TLS implicito)."
+    EMAIL_USE_TLS=False
+    EMAIL_USE_SSL=True
+    echo "  puerto 465: EMAIL_USE_SSL=True y EMAIL_USE_TLS=False (TLS implicito)."
 elif ask_yes_no si 'STARTTLS en el SMTP? (EMAIL_USE_TLS)'; then
-    EMAIL_USE_TLS=si
+    EMAIL_USE_TLS=True
 else
-    EMAIL_USE_TLS=no
+    EMAIL_USE_TLS=False
 fi
 EMAIL_HOST_USER=$(ask EMAIL_HOST_USER "meteocamaguey" 'Usuario SMTP: login o correo completo (vacio = SMTP sin usuario)' valid_smtp_user) || die 'Usuario SMTP invalido.'
 EMAIL_HOST_PASSWORD=$(ask_optional_secret EMAIL_HOST_PASSWORD "" 'Contrasena SMTP (vacio = SMTP sin contrasena)') || die 'Contrasena SMTP invalida.'
@@ -1455,8 +1577,8 @@ else
     EMAIL_CONFIGURED=0
     # Si no se configura SMTP, dejar las claves vacias para que no quede CHANGE_ME
     EMAIL_PORT=587
-    EMAIL_USE_TLS=si
-    EMAIL_USE_SSL=no
+    EMAIL_USE_TLS=True
+    EMAIL_USE_SSL=False
     EMAIL_HOST_USER=
     EMAIL_HOST_PASSWORD=
     DEFAULT_FROM_EMAIL=
@@ -1497,14 +1619,20 @@ SUPERUSER_EMAIL=$(ask SUPERUSER_EMAIL "$SUPERUSER_EMAIL_DEFAULT" 'Correo del sup
 # pidieran.
 SUPERUSER_PASSWORD=$(ask_secret SUPERUSER_PASSWORD "${SUPERUSER_PASSWORD:-}" 'Contrasena del superusuario') || die 'Contrasena invalida.'
 # Mismo criterio que DB_PASS: en CI no hay nadie a quien avisarle.
-if secret_was_generated SUPERUSER_PASSWORD && [ "$INTERACTIVE" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
+# Pero aca hay una diferencia que costo una contrasena: DB_PASS queda en el .env
+# y se puede recuperar; esta NO se escribe en ningun archivo. Con la guarda
+# `INTERACTIVE -eq 1`, un `--non-interactive` sin SUPERUSER_PASSWORD generaba la
+# contrasena, la usaba para crear la cuenta y la tiraba: el resumen decia
+# "Superusuario admin creado" y no habia forma de entrar. Generada es generada,
+# haya TTY o no.
+if secret_was_generated SUPERUSER_PASSWORD && [ "$DRY_RUN" -eq 0 ]; then
     print_once_secret 'SUPERUSER_PASSWORD' "$SUPERUSER_PASSWORD" recover_env_password
 fi
 
 # --- Otros campos del .env ----------------------------------------------
 
-USE_REDIS_CACHE=no
-if ask_yes_no si 'Cache con Redis? (USE_REDIS_CACHE)'; then USE_REDIS_CACHE=si; fi
+USE_REDIS_CACHE=False
+if ask_yes_no si 'Cache con Redis? (USE_REDIS_CACHE)'; then USE_REDIS_CACHE=True; fi
 REDIS_URL=$(ask REDIS_URL redis://127.0.0.1:6379/1 'URL de Redis') || die 'URL de Redis invalida.'
 LOG_LEVEL=$(ask LOG_LEVEL INFO 'Nivel de log' valid_log_level) || die 'Nivel de log invalido.'
 FTP_OBS=no
@@ -1542,13 +1670,34 @@ cat <<EOF
   deploy.sh       $SCRIPT_PATH
   deploy.env      $CONFIG_FILE
   health check    $([ "$PROXY_MODE" = nginx-local ] \
-      && echo "https://$EXTERNAL_HOSTNAME/ en 127.0.0.1:$HTTPS_PORT con SNI" \
-      || echo "socket $GUNICORN_SOCKET con Host: $EXTERNAL_HOSTNAME")
+      && echo "https://$EXTERNAL_HOSTNAME/ en 127.0.0.1:$HTTPS_PORT con SNI (Nginx con TLS)" \
+      || echo "http://$EXTERNAL_HOSTNAME/ en 127.0.0.1:$HTTP_PORT (Nginx local, TLS en el proxy)")
 EOF
 if [ "$DRY_RUN" -eq 1 ]; then
     echo
     echo "dry-run: se imprime el plan y no se ejecuta nada."
 fi
+
+# --- Lock compartido con deploy.sh ---------------------------------------
+#
+# Se toma DESPUES del resumen y ANTES de C.1: de aca en adelante todo muta el
+# checkout, el venv, la base y el .env. El resumen no toca nada, asi que tomarlo
+# antes solo retrasaria la salida cuando alguien mira el plan.
+#
+# Mismo archivo que deploy.sh (`/var/lock/webcmp-deploy.lock`), no un lock
+# paralelo: si fueran dos, no se excluirian entre si y el problema seguiria
+# igual. Es no bloqueante (`-n`): esperar turno en silencio deja al operador sin
+# saber que hay un deploy corriendo y cuanto va a tardar. Mejor fallar y decirlo.
+#
+# Se salta en --dry-run, que por definicion no muta nada y no deberia quedar
+# bloqueado porque otro proceso este desplegando.
+# >>> TEST-BLOCK: deploy-lock
+if [ "$DRY_RUN" -eq 0 ]; then
+    exec 9>"$DEPLOY_LOCKFILE"
+    flock -n 9 || die "Ya hay un despliegue en curso (lock $DEPLOY_LOCKFILE). No se toca nada: correr el instalador cuando termine, o esperar a que deploy.sh libere el lock."
+    echo "  lock adquirido: $DEPLOY_LOCKFILE"
+fi
+# <<< TEST-BLOCK: deploy-lock
 
 # --- C.1 Prerrequisitos de sistema --------------------------------------
 
@@ -1563,6 +1712,12 @@ APT_PACKAGES=(
     git
     sudo
     ca-certificates
+    # curl NO es opcional ni decorativo: `webcmp-deploy` lo usa en el health
+    # check de CADA deploy, y sin el el deploy muere al final con un `000` que
+    # no dice "falta curl". Antes solo se avisaba en el preflight y se asumia
+    # que la imagen lo traia -- en un contenedor minimo no lo trae, y el
+    # instalador terminaba en verde con un deploy roto.
+    curl
     openssl
     python3
     python3-venv
@@ -1573,12 +1728,17 @@ APT_PACKAGES=(
     libpango1.0-dev
     redis-server
 )
-# Nginx SOLO con la opcion A. Con proxy externo, instalar Nginx seria dejar un
-# servicio escuchando en 80/443 que nadie pidio y que ademas choca con el proxy
-# de verdad si alguien abre el puerto por error.
-if [ "$PROXY_MODE" = nginx-local ]; then
-    APT_PACKAGES+=(nginx)
-fi
+# Nginx se instala en LOS DOS modos. La diferencia no es "con Nginx o sin
+# Nginx", es quien termina TLS:
+#   nginx-local -> Nginx hace TLS y hace de proxy.
+#   external    -> el TLS lo termina el proxy de afuera (Nginx Proxy Manager en
+#                  otra maquina), pero Nginx local SIGUE siendo necesario: es el
+#                  unico que puede servir /media/ y /static/ desde este
+#                  filesystem. Django no sirve media con DEBUG=False y WhiteNoise
+#                  solo sirve staticfiles, asi que sin este Nginx el logo y el
+#                  favicon de todas las paginas dan 404 junto con cada PDF
+#                  subido, y ningun health check lo detecta.
+APT_PACKAGES+=(nginx)
 # psycopg[binary] viene con su binario, asi que no hacen falta build-essential
 # ni headers de PostgreSQL para compilar el driver.
 
@@ -1609,7 +1769,16 @@ fi
 DB_SERVER_PACKAGE=postgresql
 if ! command -v psql >/dev/null 2>&1; then
     warn "No encontre el cliente de PostgreSQL (psql) en el servidor."
-    if ask_yes_no no "Instalar $DB_SERVER_PACKAGE con apt?"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+        # En --dry-run no hay a quien preguntar: `ask_yes_no` devuelve el
+        # default, que aca es `no`, y la rama del `else` mataba el dry-run con
+        # "Sin postgresql no se puede crear el rol y la base". Un dry-run que
+        # aborta en un contenedor limpio no sirve para nada, y el contenedor
+        # limpio es exactamente donde se corre. Se imprime el plan de la rama
+        # que el operador va a elegir en la corrida real.
+        printf '  [dry-run] apt-get install -y %s (si se responde "si" en la corrida real)\n' \
+            "$DB_SERVER_PACKAGE"
+    elif ask_yes_no no "Instalar $DB_SERVER_PACKAGE con apt?"; then
         if [ "$DRY_RUN" -eq 1 ]; then
             printf '  [dry-run] apt-get install -y %s\n' "$DB_SERVER_PACKAGE"
         else
@@ -2012,67 +2181,117 @@ step 1 "Archivo .env"
 ENV_GEN_ARGS=(--production --env-file "$ENV_FILE" --encryption-key-file "$ENCRYPTION_ENV")
 ENV_REGENERATED=0
 if [ "$ENV_FILE_EXISTS" -eq 1 ]; then
-    # Validar que el par ENCRYPTION_KEY/SECRET_KEY cifrada descifra correctamente.
-    # Si hay un .env de instalación anterior con otro encryption.env, Django fallará
-    # al cargar settings. En ese caso, regenerar con --force.
-    if [ "$DRY_RUN" -eq 0 ] && [ -x "$PYTHON_BIN" ]; then
-        if "$PYTHON_BIN" -c "
-# validate
+    # ¿El par SECRET_KEY/ENCRYPTION_KEY de esta instalación descifra?
+    #
+    # Si el .env es de una instalación anterior y el encryption.env es de otra,
+    # Django no arranca: load_secret_key() de config/settings/base.py lanza
+    # ImproperlyConfigured al primer import. Regenerar el par es la única salida,
+    # pero SOLO cuando el par está roto de verdad: regenerarlo de más invalida
+    # todas las sesiones y cookies firmadas del sitio.
+    #
+    # El código de salida distingue tres casos, y tratarlos igual es el bug que
+    # tenía este bloque (todo caía en el `except Exception` con código 2, y el
+    # `if` de abajo solo reaccionaba al 1):
+    #   0  el par descifra            -> se conserva
+    #   1  el par NO descifra, o falta una de las dos mitades -> se regenera
+    #   2  no se pudo verificar (sin cryptography, archivo ilegible, error
+    #      inesperado) -> NO se regenera a ciegas: se avisa y se conserva
+    #
+    # Corre con el Python del VENV, no con $PYTHON_BIN: `cryptography` la instala
+    # requirements/prod.txt en el venv y el Python del sistema puede no tenerla.
+    # Con el intérprete equivocado el import falla, el resultado sería 2 y la
+    # validación no verificaría nada en ningún servidor.
+    #
+    # Las rutas van por entorno y el cuerpo por heredoc COMILLADO: el bloque
+    # anterior interpolaba "$ENV_FILE" dentro de un `-c "..."`, así que un path
+    # con comillas o un `$` en el .env se interpretaban como código bash.
+    # >>> TEST-BLOCK: env-pair-validator
+    if [ "$DRY_RUN" -eq 0 ] && [ -x "$VENV_DIR/bin/python" ]; then
+        rc=0
+        ENV_FILE="$ENV_FILE" ENCRYPTION_ENV="$ENCRYPTION_ENV" \
+            "$VENV_DIR/bin/python" - <<'PY' || rc=$?
+import os
+import sys
+
 try:
     from cryptography.fernet import Fernet, InvalidToken
-    env='$ENV_FILE'; enc='$ENCRYPTION_ENV'
-    def rk(p):
-        try:
-            with open(p) as f:
-                for line in f:
-                    if line.startswith('ENCRYPTION_KEY='):
-                        k = line.split('=',1)[1].rstrip('\n\r')
-                        # trim spaces
-                        k = k.strip()
-                        return k
-        except Exception as e:
-            raise e
-        return None
-    ek=rk(enc)
-    if not ek:
-        raise RuntimeError('no encryption key')
-    f = Fernet(ek.encode())
-    # check encrypted secret
-    try:
-        with open(env) as fenv:
-            for line in fenv:
-                s=line.strip()
-                if s.startswith('SECRET_KEY=') and '\$' in s:
-                    v = s.split('=',1)[1].rstrip()
-                    try:
-                        f.decrypt(v.encode())
-                    except InvalidToken:
-                        raise InvalidToken('mismatch')
-    except InvalidToken:
-        raise InvalidToken('mismatch')
-    sys.exit(0)
-except InvalidToken:
+except ImportError:
+    # Sin la librería no hay forma de verificar; NO es un par roto.
+    sys.exit(2)
+
+
+def read_value(path, key):
+    """Valor de `key=` en un archivo KEY=VALUE, o None si la clave no está.
+
+    FileNotFoundError y OSError se dejan subir: el llamador distingue "falta
+    una mitad" (se regenera) de "no se pudo leer" (no se toca nada).
+    """
+    with open(path, encoding='utf-8') as handle:
+        for line in handle:
+            line = line.strip()
+            if line.startswith(f'{key}='):
+                return line.split('=', 1)[1].strip()
+    return None
+
+
+try:
+    encryption_key = read_value(os.environ['ENCRYPTION_ENV'], 'ENCRYPTION_KEY')
+    secret_key = read_value(os.environ['ENV_FILE'], 'SECRET_KEY')
+except FileNotFoundError:
+    sys.exit(1)
+except OSError:
+    sys.exit(2)
+
+if not encryption_key or not secret_key:
+    sys.exit(1)
+
+try:
+    Fernet(encryption_key.encode()).decrypt(secret_key.encode())
+except (InvalidToken, ValueError, TypeError):
     sys.exit(1)
 except Exception:
-    import sys
     sys.exit(2)
-"; then
-            :
-        else
-            rc=$?
-            if [ "$rc" -eq 1 ]; then
-                warn "Par ENCRYPTION_KEY/SECRET_KEY inválido en .env existente. Se regenerará con --force."
-                ENV_REGENERATED=1
-            fi
-        fi
+sys.exit(0)
+PY
+        case "$rc" in
+            0) : ;;
+            1)
+                warn "Par ENCRYPTION_KEY/SECRET_KEY inválido en $ENV_FILE: no descifra."
+                warn "Con ese par Django no arranca: config/settings/base.py lo rechaza al importar."
+                if can_prompt; then
+                    # Regenerar invalida todas las sesiones y cookies firmadas y
+                    # reescribe el .env desde la plantilla. Ya no es
+                    # irreversible (abajo se respalda como .bak.<fecha>), pero
+                    # sigue siendo una decision: la otra salida es recuperar la
+                    # mitad que falta. Por eso se pregunta.
+                    ask_yes_no si "Regenerar el par? (respalda .env y encryption.env como .bak.<fecha>, genera SECRET_KEY y ENCRYPTION_KEY nuevos e invalida las sesiones)" \
+                        || die "No se tocó nada. El par roto impide que Django arranque, así que el instalador no puede seguir con el .env como está: restaurá la mitad que falta (por ejemplo, el encryption.env de la instalación a la que pertenece ese .env) y volvé a correrlo, o aceptá la regeneración (queda un .bak de los dos archivos)."
+                    ENV_REGENERATED=1
+                else
+                    # Sin TTY no hay a quien preguntar. Se regenera avisando, y
+                    # el respaldo de abajo deja la salida manual abierta.
+                    warn "Sin terminal: se regenera el par con --force (las sesiones quedan invalidadas; queda un .bak de los dos archivos)."
+                    ENV_REGENERATED=1
+                fi
+                ;;
+            *)
+                warn "No se pudo verificar el par ENCRYPTION_KEY/SECRET_KEY de $ENV_FILE (código $rc)."
+                warn "Se conserva el archivo: regenerarlo sin estar seguro invalida todas las sesiones."
+                ;;
+        esac
     fi
+    # <<< TEST-BLOCK: env-pair-validator
+    # El validador no decidio nada: el par descifra (rc=0), no se pudo verificar
+    # (rc=2), o el bloque no corrio (sin venv o en --dry-run). En una re-corrida
+    # el .env puede estar afinado a mano, asi que se pregunta antes de
+    # reescribirlo, y el default es conservar.
     if [ "$ENV_REGENERATED" -eq 1 ]; then
-        : # ya decidido
-    elif ask_yes_no no "Regenerar $ENV_FILE con el generador (conserva SECRET_KEY y ENCRYPTION_KEY)?"; then
-        echo "  se conserva el .env existente."
-        ENV_REGENERATED=0
-    else
+        : # el validador ya decidio: par roto y regeneracion aceptada
+    elif ask_yes_no no "Reescribir $ENV_FILE desde la plantilla? (respalda el actual como .bak.<fecha> y genera SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
         ENV_REGENERATED=1
+    else
+        ENV_REGENERATED=0
+        echo "  se conserva el .env existente."
     fi
 else
     ENV_REGENERATED=1
@@ -2080,13 +2299,35 @@ fi
 
 if [ "$ENV_REGENERATED" -eq 1 ]; then
     ENV_GEN_ARGS+=(--force)
-    # Si el par es inválido o forzamos regeneración, partimos de cero para
-    # evitar que un .env+encryption.env incompatibles hagan fallar a Django.
+    # >>> TEST-BLOCK: env-backup
+    # Respaldo ANTES de borrar. `--force` reescribe el .env COMPLETO desde la
+    # plantilla (scripts/generate_env.py:build_env), asi que se lleva cualquier
+    # valor afinado a mano que el instalador no administra (FTP_OBS_*, LDAP_*,
+    # un DB_HOST distinto). El par roto justifica regenerar las claves, no
+    # perder el resto; y si el generador falla despues del `rm`, el .bak es lo
+    # unico que queda de la configuracion anterior.
+    env_backup_stamp=$(date +%Y%m%d-%H%M%S)
+    for env_backup_file in "$ENV_FILE" "$ENCRYPTION_ENV"; do
+        if [ -f "$env_backup_file" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                printf '  [dry-run] cp -p %s %s.bak.%s\n' \
+                    "$env_backup_file" "$env_backup_file" "$env_backup_stamp"
+            else
+                cp -p "$env_backup_file" "$env_backup_file.bak.$env_backup_stamp" \
+                    || die "No se pudo respaldar $env_backup_file: sin respaldo no se borra nada."
+            fi
+        fi
+    done
+    # Si el par es invalido o forzamos regeneracion, partimos de cero para que
+    # `--force` genere claves nuevas de verdad: con los archivos en su lugar,
+    # generate_env.py conserva el par que ya descifra y la promesa del prompt
+    # ("SECRET_KEY y ENCRYPTION_KEY nuevos") seria falsa.
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [dry-run] rm -f %s %s\n' "$ENV_FILE" "$ENCRYPTION_ENV"
     else
         rm -f "$ENV_FILE" "$ENCRYPTION_ENV"
     fi
+    # <<< TEST-BLOCK: env-backup
     # Se corre COMO ROOT y no como webcmp: el generador tiene que escribir
     # $ENCRYPTION_ENV, que es root:root 600. Corrido como webcmp aborta sin
     # escribir nada (falla cerrado, que esta bien) y el servidor queda igual.
@@ -2111,13 +2352,36 @@ fi
 # agrega, asi que funciona igual con un .env recien generado (todo commented-out
 # o con CHANGE_ME) y con uno afinado a mano (donde hay valores que hay que
 # RESPETAR y no pisar a ciegas).
+# Las claves secretas no pueden pasar por `run`: su rama de dry-run imprime el
+# comando completo, y ese dry-run se pega en tickets, issues y chats. El `mask`
+# de la linea siguiente llega tarde, porque el valor ya salio impreso arriba.
+# Con este runner, el dry-run muestra `<oculto>` y el valor real no toca la
+# salida. Aplica a DB_PASS, EMAIL_HOST_PASSWORD y FTP_OBS_PASS.
+run_env_set() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '  [dry-run] env_set %s %s %s\n' "$ENV_FILE" "$1" "$(mask "$1" "$2")"
+    else
+        local st=0
+        env_set "$ENV_FILE" "$1" "$2" || st=$?
+        [ "$st" -eq 0 ] && CHANGED=1
+        return "$st"
+    fi
+}
+
 apply_env_value() {
-    run env_set "$ENV_FILE" "$1" "$2"
+    run_env_set "$1" "$2"
     printf '  %s=%s\n' "$1" "$(mask "$1" "$2")"
 }
 
 step 1 "Sustituyendo los valores del .env"
 apply_env_value EXTERNAL_HOSTNAME "$EXTERNAL_HOSTNAME"
+# SITE_URL arma los enlaces absolutos de los correos (facturas, avisos, reportes)
+# y production.py aborta si falta. El generador la escribe con su hostname por
+# defecto, asi que si el operador elige otro dominio esa linea queda apuntando a
+# meteocamaguey.cu mientras ALLOWED_HOSTS ya apunta al nuevo: los correos salen
+# con un enlace a un sitio que no es el que atiende. Se escribe con la respuesta,
+# igual que las otras tres listas de abajo.
+apply_env_value SITE_URL "https://$EXTERNAL_HOSTNAME/"
 if [ -n "$WWW_HOSTNAME" ]; then
     ALLOWED_HOSTS="$EXTERNAL_HOSTNAME,$WWW_HOSTNAME"
     ORIGINS="https://$EXTERNAL_HOSTNAME,https://$WWW_HOSTNAME"
@@ -2294,30 +2558,42 @@ else
     # -p Environment=NOMBRE=valor. Es el bug documentado en deploy.sh:200-207 y
     # el que hace que este paso se escriba asi y no como un `export` de la
     # config de install.sh.
+    #
+    # Segunda corrida: `createsuperuser --noinput` con el usuario ya creado
+    # aborta con "That username is already taken", la contrasena que se acaba de
+    # imprimir no se aplica, y el warning mandaba a repetir justo el comando que
+    # falla. Se consulta primero y, si la cuenta existe, se le pone la
+    # contrasena respondida (la impresa) y se aseguran los flags. Sin eso, una
+    # re-instalacion deja un panel inaccesible con una clave recien generada en
+    # la mano.
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [dry-run] systemd-run ... createsuperuser --noinput --username %s\n' "$SUPERUSER_USERNAME"
-    else
-        if systemd-run --quiet --pipe --wait \
-            --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
-            -p "EnvironmentFile=$ENCRYPTION_ENV" \
-            -p Environment=PRODUCTION=1 \
-            -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
-            -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
-            --working-directory="$APP_DIR" \
-            "$VENV_DIR/bin/python" manage.py createsuperuser --noinput \
-            --username "$SUPERUSER_USERNAME" --email "$SUPERUSER_EMAIL"
-        then
+        printf '  [dry-run] si la cuenta existe: se le resetea la contrasena y se asegura is_superuser\n'
+    elif superuser_exists; then
+        if reset_superuser_password; then
             SUPERUSER_CREATED=1
-            echo "  superusuario listo."
+            echo "  superusuario $SUPERUSER_USERNAME ya existia: contrasena actualizada."
         else
-            warn "No se pudo crear el superusuario. Se deja el resto instalado."
-            warn "Crear a mano (mismo contexto que el sitio):"
-            printf '  sudo systemd-run --quiet --pipe --wait --uid=%s -p EnvironmentFile=%s \\\n' \
-                "$SERVICE_USER" "$ENCRYPTION_ENV" >&2
-            printf '    -p Environment=PRODUCTION=1 -p Environment=DJANGO_SUPERUSER_PASSWORD=<clave> \\\n' >&2
-            printf '    --working-directory=%s %s manage.py createsuperuser --noinput --username %s\n' \
-                "$APP_DIR" "$VENV_DIR/bin/python" "$SUPERUSER_USERNAME" >&2
+            warn "El superusuario $SUPERUSER_USERNAME existe y no se pudo actualizar la"
+            warn "contrasena. Cambiala a mano en el mismo contexto que corre el sitio:"
+            print_changepassword_hint
         fi
+    elif systemd-run --quiet --pipe --wait \
+        --uid="$SERVICE_USER" --gid="$SERVICE_USER" \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p "Environment=MPLCONFIGDIR=$MPLCONFIGDIR" \
+        -p "Environment=DJANGO_SUPERUSER_PASSWORD=$SUPERUSER_PASSWORD" \
+        --working-directory="$APP_DIR" \
+        "$VENV_DIR/bin/python" manage.py createsuperuser --noinput \
+        --username "$SUPERUSER_USERNAME" --email "$SUPERUSER_EMAIL"
+    then
+        SUPERUSER_CREATED=1
+        echo "  superusuario listo."
+    else
+        warn "No se pudo crear el superusuario. Se deja el resto instalado."
+        warn "Crear a mano (mismo contexto que el sitio):"
+        print_changepassword_hint
     fi
 fi
 
@@ -2354,20 +2630,18 @@ fi
 
 run systemctl daemon-reload
 
-# En nginx-local, www-data tiene que poder tocar el socket de Gunicorn (0770
-# webcmp:webcmp). Sin esto Nginx devuelve 502 en cada respuesta y el log dice
-# "connect() failed (13: Permission denied)", que parece un problema de permisos
-# que no lo es. Con proxy externo NO se toca: el Nginx que hace de proxy no es
-# este, asi que el grupo no le sirve de nada.
-if [ "$PROXY_MODE" = nginx-local ]; then
-    if id -nG www-data 2>/dev/null | tr ' ' '\n' | grep -qx "$SERVICE_GROUP"; then
-        echo "  www-data ya esta en el grupo $SERVICE_GROUP"
-    else
-        run usermod -aG "$SERVICE_GROUP" www-data
-        log "Reiniciando Nginx para que tome el grupo nuevo"
-        run systemctl restart nginx
-        echo "  www-data ahora puede tocar el socket"
-    fi
+# www-data tiene que poder tocar el socket de Gunicorn (0770 webcmp:webcmp). Sin
+# esto Nginx devuelve 502 en cada respuesta y el log dice "connect() failed (13:
+# Permission denied)", que parece un problema de permisos que no lo es.
+# Aplica a los DOS modos: en `external` el Nginx local sigue haciendo el proxy al
+# socket, aunque el TLS lo termine el proxy de afuera.
+if id -nG www-data 2>/dev/null | tr ' ' '\n' | grep -qx "$SERVICE_GROUP"; then
+    echo "  www-data ya esta en el grupo $SERVICE_GROUP"
+else
+    run usermod -aG "$SERVICE_GROUP" www-data
+    log "Reiniciando Nginx para que tome el grupo nuevo"
+    run systemctl restart nginx
+    echo "  www-data ahora puede tocar el socket"
 fi
 
 # --- C.9 Reverse proxy ---------------------------------------------------
@@ -2418,9 +2692,9 @@ render_vhost() {
         "/srv/webcmp<>$APP_DIR"
         "/run/webcmp/gunicorn.sock<>$GUNICORN_SOCKET"
         "/var/www/webcmp-errors<>$NGINX_ERROR_ROOT"
-        "/etc/nginx/certificate/web.cmw.insmet.cu.crt<>$TLS_CERT"
-        "/etc/nginx/certificate/web.cmw.insmet.cu.key<>$TLS_KEY"
-        "server_name web.cmw.insmet.cu;<>$SERVER_NAME_LINE"
+        "/etc/nginx/certificate/www.meteocamaguey.cu.crt<>$TLS_CERT"
+        "/etc/nginx/certificate/www.meteocamaguey.cu.key<>$TLS_KEY"
+        "server_name www.meteocamaguey.cu;<>$SERVER_NAME_LINE"
         "listen 80 default_server;<>listen $HTTP_PORT default_server;"
         "listen [::]:80 default_server;<>listen [::]:$HTTP_PORT default_server;"
         "listen 443 ssl default_server;<>listen $HTTPS_PORT ssl default_server;"
@@ -2479,16 +2753,20 @@ gen_self_signed() {
     fi
 }
 
-# install_vhost <certificado> <clave>
+# install_vhost [certificado] [clave]
 #
 # Renderiza el ejemplo, lo instala, lo habilita, verifica con `nginx -t` y
 # recarga. Se llama MAS DE UNA VEZ en la primera corrida con Let's Encrypt: el
 # challenge de ACME lo sirve el puerto 80 de este mismo vhost, asi que el vhost
 # tiene que estar de pie antes de certbot; y un vhost con `ssl` no pasa `nginx -t`
 # sin un certificado que cargar.
+#
+# Sin argumentos se usa el vhost SIN TLS (modo `external`): no hay certificado
+# que cargar ni rutas que sustituir, porque webcmp-http.conf.example no declara
+# `ssl_certificate`.
 install_vhost() {
-    TLS_CERT=$1
-    TLS_KEY=$2
+    TLS_CERT=${1:-}
+    TLS_KEY=${2:-}
     local tmp
 
     # --- Archivo y activacion ---
@@ -2631,7 +2909,13 @@ setup_nginx_local() {
     fi
 
     # --- Certificado ---
-    if [ "$TLS_MODE" = self-signed ]; then
+    if [ "$TLS_MODE" = none ]; then
+        # TLS externo: este vhost escucha HTTP y nada mas. No hay certificado
+        # que emitir ni que cargar, y certbot NO debe correr: el proxy de afuera
+        # es el que habla TLS con el navegador y el que renueva su certificado.
+        log "Sin TLS en esta maquina: lo termina el proxy externo"
+        install_vhost
+    elif [ "$TLS_MODE" = self-signed ]; then
         TLS_CERT=$TLS_DIR/$EXTERNAL_HOSTNAME.crt
         TLS_KEY=$TLS_DIR/$EXTERNAL_HOSTNAME.key
         if [ -f "$TLS_CERT" ] && [ -f "$TLS_KEY" ]; then
@@ -2703,6 +2987,11 @@ setup_nginx_local() {
             # durante la emision, en vez de estar caido.
             local boot_cert=$TLS_DIR/bootstrap-$EXTERNAL_HOSTNAME.crt
             local boot_key=$TLS_DIR/bootstrap-$EXTERNAL_HOSTNAME.key
+            # install_vhost escribe las globales TLS_CERT/TLS_KEY (render_vhost
+            # las lee). Sin estas copias, la llamada de abajo pisaba el par real
+            # de Let's Encrypt con el temporal, y el vhost definitivo quedaba
+            # apuntando al autofirmado: emision exitosa y certificado invalido.
+            local real_cert=$TLS_CERT real_key=$TLS_KEY
             if [ ! -f "$boot_cert" ] || [ ! -f "$boot_key" ]; then
                 ensure_dir "$TLS_DIR" 0755 root root
                 gen_self_signed "$boot_cert" "$boot_key"
@@ -2717,74 +3006,68 @@ setup_nginx_local() {
             # Con el certificado real en disco, el mismo render cambia de rutas y
             # `install_if_changed` reinstala. El autofirmado temporal queda en
             # $TLS_DIR, ya sin uso: se puede borrar a mano.
-            install_vhost "$TLS_CERT" "$TLS_KEY"
+            install_vhost "$real_cert" "$real_key"
         fi
     fi
 }
 
+# El Nginx local se instala y configura en LOS DOS modos. En `external` no hace
+# TLS, pero sigue siendo el unico que puede servir /media/ y /static/ desde este
+# filesystem, y el que evita exponer Gunicorn en la red.
+setup_nginx_local
+
 if [ "$PROXY_MODE" = external ]; then
-    log "Proxy externo (Nginx Proxy Manager): NO se instala ni se toca Nginx"
-    # El bloque de arriba es lo que el operador tiene que escribir en NPM. Se
-    # imprime entero y no resumido: el error clasico de esta topologia es poner
-    # el upstream bien y olvidar un header, y el sintoma (bucle de logout por
-    # cookies seguras que no viajan) no dice "te falta X-Forwarded-Proto".
+    log "Proxy externo (Nginx Proxy Manager): TLS afuera, Nginx local sirve los archivos"
+    # La IP con la que el LXC se hace visible para el NPM. `hostname -I` lista
+    # todas las direcciones y la primera es la de la interfaz principal. Si sale
+    # vacia no es fatal: se imprime el placeholder y el operador la completa.
+    LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     cat <<EOF
 
   Datos del upstream para Nginx Proxy Manager:
 
-    Domain Names        $EXTERNAL_HOSTNAME${WWW_HOSTNAME:+, $WWW_HOSTNAME}
-    Scheme              https
-    Forward Hostname    \$host
-    Forward Proto       \$scheme
-    Block Exploits      on
-    Websockets Support  on      (el vhost de Nginx local lo deja puesto tambien)
-    HTTP/2 Support      on
-    SSL                 el que termine el proxy. Esta maquina NO emite
-                        certificado en la opcion B: por eso el health check de
-                        deploy.sh va al socket y no a https://\$EXTERNAL_HOSTNAME.
+    Domain Names           $EXTERNAL_HOSTNAME${WWW_HOSTNAME:+, $WWW_HOSTNAME}
+    Scheme                 http     (NPM -> Nginx local; el TLS lo pone NPM)
+    Forward Hostname / IP  ${LAN_IP:-IP_DEL_LXC}
+    Forward Port           $HTTP_PORT
+    Block Common Exploits  on
+    Websockets Support     on       (el grafico de sounding las usa)
+    HTTP/2 Support         on
+    SSL                    el certificado lo emite NPM (Let's Encrypt). Para el
+                           challenge HTTP-01, el dominio tiene que resolver a la
+                           IP de NPM y el puerto 80 tiene que llegar ahi.
 
-    Advanced > Custom Locations:
-      /static/   ->  $APP_DIR/staticfiles/
-      /media/    ->  $APP_DIR/media/
+  Que hace el Nginx de esta maquina (NO es opcional):
+    - Sirve /static/ y /media/ desde $APP_DIR. Django no sirve media con
+      DEBUG=False y WhiteNoise solo sirve staticfiles: sin este Nginx, el logo,
+      el favicon y cada PDF subido dan 404.
+    - Hace proxy a Gunicorn por $GUNICORN_SOCKET, que NO se expone en la red.
+    - Propaga el X-Forwarded-Proto que manda NPM. Si lo reescribiera con
+      \$scheme, Django no veria la peticion como segura y el login entraria en
+      un bucle de logout.
 
-    Detalle del upstream:
-      Si NPM corre en el mismo host y con acceso al sistema de archivos:
-        Forward Hostname / IP  = 127.0.0.1
-        Forward Port            = <puerto TCP en el que Gunicorn escuche>
-        (el unit de systemd solo abre el socket unix $GUNICORN_SOCKET;
-         para un upstream TCP hay que agregar un --bind tcp:127.0.0.1:<puerto>
-         al ExecStart del unit y un daemon-reload)
+    No hace falta configurar Custom Locations. NPM manda X-Forwarded-Proto por
+    defecto; si personalizaste su configuracion avanzada, comprueba que ese
+    header siga ahi: es el que hace que Django vea la peticion como segura.
 
-      Si NPM corre en un contenedor: no puede ver $GUNICORN_SOCKET. Montar
-      /run/$GUNICORN_UNIT del host dentro del contenedor, o usar un bind TCP en
-      una IP de la LAN, no 127.0.0.1 (dentro del contenedor, 127.0.0.1 es el
-      propio contenedor).
+    Verificacion despues del deploy, desde el LXC:
+      curl -sSI http://127.0.0.1:$HTTP_PORT/ | head -1
+      curl -sSI http://127.0.0.1:$HTTP_PORT/static/dist/css/tabler.min.css | head -1
+      curl -sSI http://127.0.0.1:$HTTP_PORT/media/<archivo-subido> | head -1
 
-    Headers que tiene que mandar NPM (mismo criterio que el vhost de Nginx,
-    que los repite en \`location /\` porque no se heredan):
-      Host               = \$host
-      X-Forwarded-Proto  = \$scheme
-      X-Forwarded-For    = \$proxy_add_x_forwarded_for
-      X-Forwarded-Host   = \$host
+  Firewall (el instalador NO lo toca):
+    El puerto $HTTP_PORT queda alcanzable en la red. Limitarlo a la maquina del
+    NPM; nunca abrirlo a la LAN entera:
+      sudo ufw allow from <IP_DEL_NPM> to any port $HTTP_PORT proto tcp
+      sudo ufw deny $HTTP_PORT/tcp
 
-    Timeout / limites (copiados de deploy/nginx/webcmp.conf.example):
-      proxy_read_timeout    300s     (exportacion de graficos y PDFs)
-      proxy_connect_timeout 75s
-      client_max_body_size  20M      (adjuntos PDF de avisos y reportes)
-
-  Aviso importante sobre SSL y HSTS:
-    production.py tiene SECURE_PROXY_SSL_HEADER=('HTTP_X_FORWARDED_PROTO','https').
-    Sin X-Forwarded-Proto=https, request.is_secure() da False, las cookies de
-    sesion y CSRF SECURE no se envian y el usuario entra en un bucle de logout.
-    SECURE_HSTS_SECONDS=31536000 con IncludeSubDomains y Preload: si NPM emite
-    HSTS y despues se cae el TLS, el navegador se niega a volver en http://
-    durante un ano. Habilitarlo recien cuando https este estable.
+  Aviso sobre HSTS:
+    production.py tiene SECURE_HSTS_SECONDS=31536000 con IncludeSubDomains y
+    Preload. Si NPM emite HSTS y despues se cae el TLS, el navegador se niega a
+    volver por http:// durante un ano. Habilitarlo recien cuando https este
+    estable.
 
 EOF
-    log "Health check apuntando al upstream local"
-    echo "  socket: $GUNICORN_SOCKET con Host: $EXTERNAL_HOSTNAME (sin TLS: ese lo hace el proxy)"
-else
-    setup_nginx_local
 fi
 
 # --- C.10 /etc/webcmp/deploy.env -----------------------------------------
@@ -2801,11 +3084,16 @@ step 1 "Configuracion del deploy en $CONFIG_FILE"
 # default se aplique) hace que la config de un servidor nuevo sea invisible:
 # nadie puede ver de donde sale el host del health check.
 if [ "$CONFIG_FILE_EXISTS" -eq 1 ]; then
+    # Las ramas estaban INVERTIDAS: responder "si" a "Actualizar ..." dejaba
+    # CONFIG_WRITTEN=0 y avisaba "se conserva", asi que la unica forma de que el
+    # archivo se reescribiera era responder que NO. En una re-corrida donde se
+    # cambio PUBLIC_HOSTNAME, el health check seguia apuntando al host viejo y el
+    # deploy fallaba con el sitio perfecto.
     if ask_yes_no no "Actualizar $CONFIG_FILE con lo respondido?"; then
-        warn "$CONFIG_FILE se conserva. Si el health check falla, empeza por ese archivo."
-        CONFIG_WRITTEN=0
-    else
         CONFIG_WRITTEN=1
+    else
+        CONFIG_WRITTEN=0
+        warn "$CONFIG_FILE se conserva. Si el health check falla, empeza por ese archivo."
     fi
 else
     CONFIG_WRITTEN=1
@@ -2841,14 +3129,16 @@ PUBLIC_HOSTNAME=$EXTERNAL_HOSTNAME
 PROXY_MODE=$PROXY_MODE
 EOF
         if [ "$PROXY_MODE" = external ]; then
-            # El health check va al socket: es el mismo camino que usa el proxy
-            # externo, sin el TLS de por medio y sin depender de que el proxy
-            # este arriba. Con el default (443 en 127.0.0.1) este deploy falla
-            # por construccion en esta topologia.
+            # El health check atraviesa el Nginx local por HTTP: es el camino
+            # real de esta topologia, y detecta un vhost roto o un /media/ sin
+            # servir. Antes iba directo al socket de Gunicorn, que dejaba en
+            # verde un Nginx mal configurado.
+            #
+            # NO se define HEALTHCHECK_UNIX_SOCKET: deploy.sh le da prioridad
+            # sobre la URL y el --resolve, y volveriamos al camino de antes.
             cat <<EOF
-HEALTHCHECK_URL=http://localhost/
-HEALTHCHECK_UNIX_SOCKET=$GUNICORN_SOCKET
-HEALTHCHECK_HOST_HEADER=$EXTERNAL_HOSTNAME
+HEALTHCHECK_URL=http://$EXTERNAL_HOSTNAME/
+HEALTHCHECK_RESOLVE=$EXTERNAL_HOSTNAME:$HTTP_PORT:127.0.0.1
 EOF
         else
             cat <<EOF
@@ -2907,12 +3197,41 @@ setup_deploy_scaffold() {
     # La privada la lee ssh como el usuario de despliegue, asi que su dueno es ese
     # usuario y el modo 600. No se usa install_if_changed porque el origen y el
     # destino son el mismo archivo y `install` se niega ("are the same file").
-    if [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
+    # El `-f` no es defensivo: en dry-run `ssh-keygen` no corre y el archivo no
+    # existe, asi que `stat` fallaba con "cannot statx" en medio del plan. Un
+    # error real en el dry-run es ruido que tapa los de verdad.
+    if [ -f "$DEPLOY_SSH_KEY" ] \
+        && [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
         run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY"
         run chmod 0600 "$DEPLOY_SSH_KEY"
     fi
     run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY.pub" 2>/dev/null || true
     run chmod 0644 "$DEPLOY_SSH_KEY.pub" 2>/dev/null || true
+
+    # La clave publica tiene que quedar en el authorized_keys del usuario de
+    # despliegue. El par se genera ACA y no en la maquina de quien despliega, asi
+    # que si nadie instala el `.pub`, sshd no tiene contra que comparar y el
+    # workflow falla con "Permission denied (publickey)" aunque el secret tenga
+    # la clave correcta. El mensaje del final pedia pegar la PUBLICA en el
+    # secret, que es al reves: GitHub se autentica con la privada y el servidor
+    # compara con la publica.
+    if [ -f "$DEPLOY_SSH_KEY.pub" ]; then
+        local auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
+        ensure_dir "$DEPLOY_HOME/.ssh" 0700 "$DEPLOY_LOGIN_USER" "$DEPLOY_LOGIN_USER"
+        if [ ! -f "$auth_keys" ]; then
+            run install -o "$DEPLOY_LOGIN_USER" -g "$DEPLOY_LOGIN_USER" \
+                -m 0600 /dev/null "$auth_keys"
+        fi
+        # `grep -qxF` compara la linea entera: re-correr el instalador no puede
+        # dejar la misma clave repetida, y una clave que sea prefijo de otra no
+        # cuenta como presente.
+        if grep -qxF "$(cat "$DEPLOY_SSH_KEY.pub")" "$auth_keys" 2>/dev/null; then
+            echo "  la clave publica ya esta en $auth_keys."
+        else
+            run_sh "cat '$DEPLOY_SSH_KEY.pub' >> '$auth_keys'"
+            echo "  clave publica agregada a $auth_keys."
+        fi
+    fi
 
     # El script de deploy va a /usr/local/sbin, propiedad de root, y NO a
     # $APP_DIR/deploy/deploy.sh: el checkout lo escribe $SERVICE_USER, y un
@@ -2939,14 +3258,25 @@ setup_deploy_scaffold() {
         echo "  sudoers en $DEPLOY_SUDOERS, validado con visudo -c."
     fi
 
-    pubkey='(en un dry-run todavia no hay clave: se imprime cuando se genere de verdad)'
-    [ -f "$DEPLOY_SSH_KEY.pub" ] && pubkey=$(cat "$DEPLOY_SSH_KEY.pub")
+    if [ -f "$DEPLOY_SSH_KEY" ]; then
+        echo "  la clave PRIVADA esta en $DEPLOY_SSH_KEY (no se imprime: es el secret)."
+    fi
     cat <<EOF
 
-  Clave publica del usuario de despliegue. Copiarla al secret
-  DEPLOY_SSH_KEY de GitHub (Settings > Environments > production):
+  Clave PRIVADA del usuario de despliegue. Es lo que va al secret
+  DEPLOY_SSH_KEY de GitHub (Settings > Environments > production); la publica
+  ya quedo instalada en $DEPLOY_HOME/.ssh/authorized_keys de este servidor.
 
-$pubkey
+    sudo cat $DEPLOY_SSH_KEY
+
+  OJO: esa es la privada, no la publica. Pegar $DEPLOY_SSH_KEY.pub en el secret
+  es el error natural y falla con "Permission denied (publickey)", que no dice
+  cual de las dos claves esta mal. La privada no se imprime aca a proposito: el
+  scrollback de una sesion SSH es un lugar donde no conviene dejarla.
+
+  Para una instalacion real conviene generar el par en la maquina desde la que
+  se despliega y dejar aca solo la publica: una privada que nacio en el servidor
+  es una llave mas que hay que rotar si el servidor se ve comprometido.
 
   Si se pega con DEPLOY_HOST, DEPLOY_USER y DEPLOY_SSH_KNOWN_HOSTS, el workflow
   puede conectarse. Ver deploy/README-deploy.md.
@@ -3050,23 +3380,66 @@ if [ -n "$PENDING_CHANGES" ]; then
     warn "Cuando se completen los valores:"
     printf '  sudo systemctl enable --now %s %s\n' "$GUNICORN_UNIT" "$HUEY_UNIT" >&2
 else
-    run systemctl enable --now "$GUNICORN_UNIT"
-    run systemctl enable --now "$HUEY_UNIT"
+    run systemctl enable "$GUNICORN_UNIT"
+    run systemctl enable "$HUEY_UNIT"
+    # restart y no `enable --now`: en una re-corrida el unit ya esta activo y
+    # `enable --now` NO lo reinicia, asi que Gunicorn seguiria sirviendo el
+    # codigo viejo en memoria mientras el checkout ya tiene el nuevo, y C.12b
+    # registraria como desplegado un commit que no esta corriendo. deploy.sh usa
+    # restart por la misma razon: un reload de Gunicorn tampoco alcanza, porque
+    # los workers se re-forkean del master, que tiene el codigo viejo.
+    run systemctl restart "$GUNICORN_UNIT"
+    run systemctl restart "$HUEY_UNIT"
     sleep 2
-    # GUNICORN_ENABLED mide que el servicio quedo ACTIVO, no que se le dio enable:
-    # `enable --now` puede salir 0 y dejar el unit caido, y el resumen no tiene
-    # que afirmar "arrancado" cuando lo que paso fue que quedo inactivo.
+    # GUNICORN_ENABLED mide que el servicio quedo ACTIVO, no que se le dio
+    # enable: un `restart` puede salir 0 y el unit morir un segundo despues, y
+    # el resumen no tiene que afirmar "arrancado" cuando quedo inactivo.
     if run systemctl is-active --quiet "$GUNICORN_UNIT"; then
         GUNICORN_ENABLED=1
     else
         warn "$GUNICORN_UNIT quedo inactivo (journalctl -u $GUNICORN_UNIT)."
     fi
     run systemctl is-active --quiet "$HUEY_UNIT" || warn "$HUEY_UNIT quedo inactivo (journalctl -u $HUEY_UNIT)."
-    if [ "$PROXY_MODE" = nginx-local ]; then
-        run systemctl restart nginx
-        run systemctl is-active --quiet nginx || warn "nginx quedo inactivo (journalctl -u nginx)."
-    fi
+    # Nginx corre en los dos modos: tambien en `external`, donde sirve /media/,
+    # /static/ y hace proxy al socket.
+    run systemctl restart nginx
+    run systemctl is-active --quiet nginx || warn "nginx quedo inactivo (journalctl -u nginx)."
 fi
+
+# --- C.12b Commit que quedo sirviendo ------------------------------------
+
+# El panel compara $DEPLOYED_STATE contra el ultimo commit de main para decidir
+# si muestra "Actualizar" (apps/dashboard/views/dashboard/update.py). deploy.sh
+# lo escribe al final de cada deploy; el instalador tiene que escribir el mismo
+# archivo al terminar, o una instalacion nueva deja el panel sin referencia: sin
+# archivo no hay con que comparar y el primer deploy manual queda invisible.
+#
+# Se escribe SOLO cuando el sitio quedo sirviendo (misma condicion que C.12):
+# afirmar "este commit esta desplegado" con el unit caido es peor que no tener
+# el archivo, porque el panel diria que no hay nada que actualizar mientras el
+# sitio no responde.
+# >>> TEST-BLOCK: deployed-state
+if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  [dry-run] runuser -u %s -- git -C %s rev-parse HEAD > %s\n' \
+        "$SERVICE_USER" "$APP_DIR" "$DEPLOYED_STATE"
+elif [ "$GUNICORN_ENABLED" -eq 1 ]; then
+    # git corre como SERVICE_USER por la misma razon que el checkout: root sobre
+    # un repo de otro usuario se niega con "dubious ownership".
+    if deployed_sha=$(runuser -u "$SERVICE_USER" -- git -C "$APP_DIR" rev-parse HEAD 2>/dev/null); then
+        # Escritura atomica, igual que deploy.sh: el panel lee este archivo en
+        # cada visita al dashboard y un archivo a medio escribir haria parpadear
+        # el aviso sin motivo.
+        printf '%s\n' "$deployed_sha" > "$DEPLOYED_STATE.tmp"
+        chmod 0644 "$DEPLOYED_STATE.tmp"
+        mv -f "$DEPLOYED_STATE.tmp" "$DEPLOYED_STATE"
+        echo "  commit desplegado registrado en $DEPLOYED_STATE ($deployed_sha)."
+    else
+        warn "No se pudo leer el HEAD de $APP_DIR: $DEPLOYED_STATE no se actualizo."
+    fi
+else
+    echo "  $DEPLOYED_STATE no se escribe: el sitio no quedo sirviendo."
+fi
+# <<< TEST-BLOCK: deployed-state
 
 # --- C.13 Resumen --------------------------------------------------------
 
@@ -3107,7 +3480,7 @@ elif [ "$PROXY_MODE" = external ]; then
     PROTOCOL_SCHEME=${PROTOCOL_SCHEME:-https}
 fi
 if [ "$DRY_RUN" -eq 0 ]; then
-    printf '       %s://%s/\n\n' "${PROTOCOL_SCHEME:-http}" "${PUBLIC_HOSTNAME:-meteocamaguey.cu}"
+    printf '       %s://%s/\n\n' "${PROTOCOL_SCHEME:-http}" "${PUBLIC_HOSTNAME:-www.meteocamaguey.cu}"
 fi
 
 if [ "$DRY_RUN" -eq 0 ] && [ "$INTERACTIVE" -eq 1 ] && [ "${#ANSWER_SOURCES[@]}" -gt 0 ]; then
@@ -3130,7 +3503,8 @@ cat <<EOF
 
        DEPLOY_HOST              IP o hostname de este servidor
        DEPLOY_USER              $DEPLOY_LOGIN_USER
-       DEPLOY_SSH_KEY           contenido de $DEPLOY_SSH_KEY.pub
+       DEPLOY_SSH_KEY           contenido de $DEPLOY_SSH_KEY (la privada; la
+                                publica ya esta en $DEPLOY_HOME/.ssh/authorized_keys)
        DEPLOY_SSH_KNOWN_HOSTS   una linea, con el puerto si no es 22:
 
            ssh-keyscan -p 22 -H <host> 2>/dev/null | sed 's/^/|1 h=|/' > known_hosts

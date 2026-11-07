@@ -1,11 +1,47 @@
 import logging
 
+from django.conf import settings
 from django.utils import timezone
 
 from apps.core.models import SiteConfiguration
 from apps.meteo.models import Warning
 
 logger = logging.getLogger(__name__)
+
+# Orden de gravedad para la franja de emergencia. Un ciclón tapa una alerta
+# temprana aunque la alerta temprana sea más reciente: la franja solo tiene un
+# renglón y debe llevar el hecho más grave, no el último que alguien publicó.
+_EMERGENCY_PRIORITY = {'tropical_cyclone': 0, 'storm': 1, 'early': 2}
+
+# Nombre de URL de la lista de cada tipo. Vive acá y no en el modelo porque es
+# una ruta del portal público: `apps.meteo` no tiene por qué saber que `home`
+# publica los avisos.
+_EMERGENCY_URL_NAMES = {
+    'tropical_cyclone': 'home:warnings_tropical',
+    'storm': 'home:warnings_storm',
+    'early': 'home:warnings_early',
+}
+
+
+def _build_emergency_banner(active_warnings):
+    """Datos de la franja, o `None` si no hay nada vigente que anunciar.
+
+    Elige el aviso más grave y, entre varios de la misma gravedad, el más
+    reciente. Devuelve también el total para que el enlace diga "ver los N
+    avisos" en vez de esconder que hay más.
+    """
+    if not active_warnings or not getattr(settings, 'EMERGENCY_BANNER_ENABLED', True):
+        return None
+
+    newest_first = sorted(active_warnings, key=lambda warning: warning.date, reverse=True)
+    top = min(newest_first, key=lambda warning: _EMERGENCY_PRIORITY.get(warning.warning_type, 9))
+
+    return {
+        'warning': top,
+        'url_name': _EMERGENCY_URL_NAMES.get(top.warning_type, 'home:warnings_early'),
+        'total': len(active_warnings),
+        'extra': len(active_warnings) - 1,
+    }
 
 
 def site_branding(request):
@@ -21,21 +57,26 @@ def menu_notifications(request):
     context = {}
     now = timezone.now()
 
+    # Una sola consulta para los cuatro datos que salen de `Warning`: tres
+    # conteos y el aviso que encabeza la franja de emergencia. Antes eran tres
+    # `COUNT(*)` en cada página; trayendo las filas vigentes (unas pocas) el
+    # coste es el mismo o menor y la franja sale gratis.
     try:
-        context['early_warning_count'] = Warning.objects.filter(
-            warning_type='early', valid_until__gte=now
-        ).count()
-        context['tropical_cyclone_count'] = Warning.objects.filter(
-            warning_type='tropical_cyclone', valid_until__gte=now
-        ).count()
-        context['storm_warning_count'] = Warning.objects.filter(
-            warning_type='storm', valid_until__gte=now
-        ).count()
+        active_warnings = list(Warning.objects.filter(valid_until__gte=now))
     except Exception as e:
         logger.warning('Context processor query failed: %s', e)
         context['early_warning_count'] = 0
         context['tropical_cyclone_count'] = 0
         context['storm_warning_count'] = 0
+        context['emergency_banner'] = None
+    else:
+        counts = {'early': 0, 'storm': 0, 'tropical_cyclone': 0}
+        for warning in active_warnings:
+            counts[warning.warning_type] = counts.get(warning.warning_type, 0) + 1
+        context['early_warning_count'] = counts['early']
+        context['tropical_cyclone_count'] = counts['tropical_cyclone']
+        context['storm_warning_count'] = counts['storm']
+        context['emergency_banner'] = _build_emergency_banner(active_warnings)
 
     # `request.user` no siempre existe: lo pone AuthenticationMiddleware, que va
     # DESPUES de SecurityMiddleware y CommonMiddleware. Si cualquiera de esos dos

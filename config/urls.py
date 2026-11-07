@@ -28,6 +28,7 @@ urlpatterns = [
     path('commercial/', include('apps.commercial.urls')),
     path('meteo/', include('apps.meteo.urls')),
     path('config/', include('apps.core.urls')),
+    path('notificaciones/', include('apps.core.urls_notifications')),
     path('accounts/', include('apps.user_auth.urls')),
     path('dashboard/', include('apps.dashboard.urls')),
     path('publications/', include('apps.publications.urls')),
