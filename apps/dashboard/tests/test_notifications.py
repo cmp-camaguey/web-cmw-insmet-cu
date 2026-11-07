@@ -157,6 +157,22 @@ class NotificationListTests(TestCase):
 
         self.assertContains(response, 'Eliminar todas')
 
+    def test_el_borrado_se_confirma_en_un_modal(self):
+        aviso = _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertContains(response, 'id="notification-delete-modal"')
+        self.assertContains(
+            response,
+            f'data-delete-url="{reverse("dashboard:notification_delete", args=[aviso.uuid])}"',
+        )
+        self.assertContains(
+            response,
+            f'data-delete-url="{reverse("dashboard:notifications_delete_all")}"',
+        )
+        self.assertNotContains(response, 'return confirm(')
+
 
 class NotificationMarkReadTests(TestCase):
     def setUp(self):

@@ -18,16 +18,15 @@
           </form>
         {% endif %}
         {% if page_obj.paginator.count %}
-          <form method="post"
-                action="{% url 'dashboard:notifications_delete_all' %}"
-                onsubmit="return confirm('¿Eliminar todas las notificaciones? Esta acción no se puede deshacer.');">
-            {% csrf_token %}
-            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-            <button type="submit" class="btn btn-outline-danger">
-              <i class="icon ti ti-trash"></i>
-              Eliminar todas
-            </button>
-          </form>
+          <button type="button"
+                  class="btn btn-outline-danger"
+                  data-bs-toggle="modal"
+                  data-bs-target="#notification-delete-modal"
+                  data-delete-url="{% url 'dashboard:notifications_delete_all' %}"
+                  data-delete-message="¿Eliminar todas las notificaciones?">
+            <i class="icon ti ti-trash"></i>
+            Eliminar todas
+          </button>
         {% endif %}
       </div>
     </div>
@@ -69,18 +68,16 @@
                 <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar leída</button>
               </form>
             {% endif %}
-            <form method="post"
-                  action="{% url 'dashboard:notification_delete' notification.uuid %}"
-                  onsubmit="return confirm('¿Eliminar esta notificación?');">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <button type="submit"
-                      class="btn btn-icon btn-outline-danger btn-sm"
-                      title="Eliminar"
-                      aria-label="Eliminar notificación">
-                <i class="icon ti ti-trash"></i>
-              </button>
-            </form>
+            <button type="button"
+                    class="btn btn-icon btn-outline-danger btn-sm"
+                    title="Eliminar"
+                    aria-label="Eliminar notificación"
+                    data-bs-toggle="modal"
+                    data-bs-target="#notification-delete-modal"
+                    data-delete-url="{% url 'dashboard:notification_delete' notification.uuid %}"
+                    data-delete-message="¿Eliminar «{{ notification.title }}»?">
+              <i class="icon ti ti-trash"></i>
+            </button>
           </div>
         </div>
       {% empty %}
@@ -88,5 +85,43 @@
       {% endfor %}
     </div>
     {% include 'includes/pagination.html' with page_obj=page_obj param_name='page' %}
+  </div>
+{% endblock %}
+{% block modal %}
+  {% comment %}
+    Un solo modal para todos los botones de borrado: cada uno trae su accion y
+    su mensaje en `data-*`, y `static/dist/js/notifications.js` los copia al
+    abrirlo. Diez modales por pagina serian diez copias del mismo bloque.
+  {% endcomment %}
+  <div class="modal fade"
+       id="notification-delete-modal"
+       tabindex="-1"
+       aria-labelledby="notification-delete-title"
+       aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title" id="notification-delete-title">
+            <i class="icon me-2 ti ti-alert-triangle"></i>
+            Eliminar notificación
+          </h5>
+          <button type="button"
+                  class="btn-close btn-close-white"
+                  data-bs-dismiss="modal"
+                  aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p id="notification-delete-text" class="mb-1">¿Eliminar esta notificación?</p>
+          <p class="text-danger mb-0">Esta acción no se puede deshacer.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <form method="post" id="notification-delete-form" action="">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Eliminar</button>
+          </form>
+        </div>
+      </div>
+    </div>
   </div>
 {% endblock %}

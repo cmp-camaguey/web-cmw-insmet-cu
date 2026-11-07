@@ -152,7 +152,8 @@ en `templates/includes/dashboard/update_navbar.html`. Mismas reglas de espaciado
 - Pagina completa en `apps/dashboard/` para historial con paginacion
   (`paginate_by = 10`, convencion del proyecto; **sin** DataTables, que solo se
   usa cuando se cargan todos los registros). El historial muestra leidas y no
-  leidas, y permite marcarlas, eliminar una o eliminarlas todas.
+  leidas, y permite marcarlas, eliminar una o eliminarlas todas; el borrado se
+  confirma en un modal compartido, con el mismo estilo que el resto del sitio.
 
 **[Decidido: el desplegable no mezcla leidas.]** Listar las 10 ultimas sin mirar
 `read_at` hacia que el badge contara una cosa y la lista mostrara otra, y que una
