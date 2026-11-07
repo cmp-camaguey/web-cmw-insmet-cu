@@ -3507,7 +3507,10 @@ cat <<EOF
                                 publica ya esta en $DEPLOY_HOME/.ssh/authorized_keys)
        DEPLOY_SSH_KNOWN_HOSTS   una linea, con el puerto si no es 22:
 
-           ssh-keyscan -p 22 -H <host> 2>/dev/null | sed 's/^/|1 h=|/' > known_hosts
+           ssh-keyscan -p 22 -H <host> 2>/dev/null > known_hosts
+
+     <host> tiene que ser exactamente el valor de DEPLOY_HOST: con -H el nombre
+     queda hasheado y, si no coincide, la verificacion falla.
 
      A mano, DESPUES de un deploy de prueba:
 

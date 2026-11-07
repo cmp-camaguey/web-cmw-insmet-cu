@@ -60,3 +60,16 @@ else
     assert_eq 'deploy.sh sin root sale 1' 1 "$deploy_noroot_rc"
     assert_contains 'deploy.sh sin root lo explica' 'necesita root' "$deploy_noroot_out"
 fi
+
+# El bloque "QUE FALTA" imprime el comando con el que el operador arma
+# DEPLOY_SSH_KNOWN_HOSTS. Tenia un `sed 's/^/|1 h=|/'` de mas que prefijaba cada
+# linea: ssh no parsea ese archivo y el deploy falla con "Host key verification
+# failed", un error que no dice "el secret esta mal formado".
+#
+# No se ejecuta ssh-keyscan: la suite no puede depender de que el puerto 22 de un
+# host externo responda. Se fija la forma del comando, que es lo que se rompio.
+known_hosts_line=$(grep -F 'ssh-keyscan -p 22 -H <host>' "$INSTALL_SH")
+assert_contains 'install.sh imprime el ssh-keyscan de DEPLOY_SSH_KNOWN_HOSTS' \
+    '2>/dev/null > known_hosts' "$known_hosts_line"
+assert_not_contains 'install.sh no prefija el known_hosts con el sed roto' \
+    '|1 h=|' "$known_hosts_line"
