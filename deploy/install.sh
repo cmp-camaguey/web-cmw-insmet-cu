@@ -2132,68 +2132,113 @@ step 1 "Archivo .env"
 ENV_GEN_ARGS=(--production --env-file "$ENV_FILE" --encryption-key-file "$ENCRYPTION_ENV")
 ENV_REGENERATED=0
 if [ "$ENV_FILE_EXISTS" -eq 1 ]; then
-    # Validar que el par ENCRYPTION_KEY/SECRET_KEY cifrada descifra correctamente.
-    # Si hay un .env de instalación anterior con otro encryption.env, Django fallará
-    # al cargar settings. En ese caso, regenerar con --force.
-    if [ "$DRY_RUN" -eq 0 ] && [ -x "$PYTHON_BIN" ]; then
-        if "$PYTHON_BIN" -c "
-# validate
+    # ¿El par SECRET_KEY/ENCRYPTION_KEY de esta instalación descifra?
+    #
+    # Si el .env es de una instalación anterior y el encryption.env es de otra,
+    # Django no arranca: load_secret_key() de config/settings/base.py lanza
+    # ImproperlyConfigured al primer import. Regenerar el par es la única salida,
+    # pero SOLO cuando el par está roto de verdad: regenerarlo de más invalida
+    # todas las sesiones y cookies firmadas del sitio.
+    #
+    # El código de salida distingue tres casos, y tratarlos igual es el bug que
+    # tenía este bloque (todo caía en el `except Exception` con código 2, y el
+    # `if` de abajo solo reaccionaba al 1):
+    #   0  el par descifra            -> se conserva
+    #   1  el par NO descifra, o falta una de las dos mitades -> se regenera
+    #   2  no se pudo verificar (sin cryptography, archivo ilegible, error
+    #      inesperado) -> NO se regenera a ciegas: se avisa y se conserva
+    #
+    # Corre con el Python del VENV, no con $PYTHON_BIN: `cryptography` la instala
+    # requirements/prod.txt en el venv y el Python del sistema puede no tenerla.
+    # Con el intérprete equivocado el import falla, el resultado sería 2 y la
+    # validación no verificaría nada en ningún servidor.
+    #
+    # Las rutas van por entorno y el cuerpo por heredoc COMILLADO: el bloque
+    # anterior interpolaba "$ENV_FILE" dentro de un `-c "..."`, así que un path
+    # con comillas o un `$` en el .env se interpretaban como código bash.
+    # >>> TEST-BLOCK: env-pair-validator
+    if [ "$DRY_RUN" -eq 0 ] && [ -x "$VENV_DIR/bin/python" ]; then
+        rc=0
+        ENV_FILE="$ENV_FILE" ENCRYPTION_ENV="$ENCRYPTION_ENV" \
+            "$VENV_DIR/bin/python" - <<'PY' || rc=$?
+import os
+import sys
+
 try:
     from cryptography.fernet import Fernet, InvalidToken
-    env='$ENV_FILE'; enc='$ENCRYPTION_ENV'
-    def rk(p):
-        try:
-            with open(p) as f:
-                for line in f:
-                    if line.startswith('ENCRYPTION_KEY='):
-                        k = line.split('=',1)[1].rstrip('\n\r')
-                        # trim spaces
-                        k = k.strip()
-                        return k
-        except Exception as e:
-            raise e
-        return None
-    ek=rk(enc)
-    if not ek:
-        raise RuntimeError('no encryption key')
-    f = Fernet(ek.encode())
-    # check encrypted secret
-    try:
-        with open(env) as fenv:
-            for line in fenv:
-                s=line.strip()
-                if s.startswith('SECRET_KEY=') and '\$' in s:
-                    v = s.split('=',1)[1].rstrip()
-                    try:
-                        f.decrypt(v.encode())
-                    except InvalidToken:
-                        raise InvalidToken('mismatch')
-    except InvalidToken:
-        raise InvalidToken('mismatch')
-    sys.exit(0)
-except InvalidToken:
+except ImportError:
+    # Sin la librería no hay forma de verificar; NO es un par roto.
+    sys.exit(2)
+
+
+def read_value(path, key):
+    """Valor de `key=` en un archivo KEY=VALUE, o None si la clave no está.
+
+    FileNotFoundError y OSError se dejan subir: el llamador distingue "falta
+    una mitad" (se regenera) de "no se pudo leer" (no se toca nada).
+    """
+    with open(path, encoding='utf-8') as handle:
+        for line in handle:
+            line = line.strip()
+            if line.startswith(f'{key}='):
+                return line.split('=', 1)[1].strip()
+    return None
+
+
+try:
+    encryption_key = read_value(os.environ['ENCRYPTION_ENV'], 'ENCRYPTION_KEY')
+    secret_key = read_value(os.environ['ENV_FILE'], 'SECRET_KEY')
+except FileNotFoundError:
+    sys.exit(1)
+except OSError:
+    sys.exit(2)
+
+if not encryption_key or not secret_key:
+    sys.exit(1)
+
+try:
+    Fernet(encryption_key.encode()).decrypt(secret_key.encode())
+except (InvalidToken, ValueError, TypeError):
     sys.exit(1)
 except Exception:
-    import sys
     sys.exit(2)
-"; then
-            :
-        else
-            rc=$?
-            if [ "$rc" -eq 1 ]; then
-                warn "Par ENCRYPTION_KEY/SECRET_KEY inválido en .env existente. Se regenerará con --force."
-                ENV_REGENERATED=1
-            fi
-        fi
+sys.exit(0)
+PY
+        case "$rc" in
+            0) : ;;
+            1)
+                warn "Par ENCRYPTION_KEY/SECRET_KEY inválido en $ENV_FILE: no descifra."
+                warn "Con ese par Django no arranca: config/settings/base.py lo rechaza al importar."
+                if can_prompt; then
+                    # Regenerar invalida todas las sesiones y cookies firmadas y
+                    # reescribe el .env desde la plantilla. Ya no es
+                    # irreversible (abajo se respalda como .bak.<fecha>), pero
+                    # sigue siendo una decision: la otra salida es recuperar la
+                    # mitad que falta. Por eso se pregunta.
+                    ask_yes_no si "Regenerar el par? (respalda .env y encryption.env como .bak.<fecha>, genera SECRET_KEY y ENCRYPTION_KEY nuevos e invalida las sesiones)" \
+                        || die "No se tocó nada. El par roto impide que Django arranque, así que el instalador no puede seguir con el .env como está: restaurá la mitad que falta (por ejemplo, el encryption.env de la instalación a la que pertenece ese .env) y volvé a correrlo, o aceptá la regeneración (queda un .bak de los dos archivos)."
+                    ENV_REGENERATED=1
+                else
+                    # Sin TTY no hay a quien preguntar. Se regenera avisando, y
+                    # el respaldo de abajo deja la salida manual abierta.
+                    warn "Sin terminal: se regenera el par con --force (las sesiones quedan invalidadas; queda un .bak de los dos archivos)."
+                    ENV_REGENERATED=1
+                fi
+                ;;
+            *)
+                warn "No se pudo verificar el par ENCRYPTION_KEY/SECRET_KEY de $ENV_FILE (código $rc)."
+                warn "Se conserva el archivo: regenerarlo sin estar seguro invalida todas las sesiones."
+                ;;
+        esac
     fi
+    # <<< TEST-BLOCK: env-pair-validator
+    # El validador no decidio nada: el par descifra (rc=0), no se pudo verificar
+    # (rc=2), o el bloque no corrio (sin venv o en --dry-run). En una re-corrida
+    # el .env puede estar afinado a mano, asi que se pregunta antes de
+    # reescribirlo, y el default es conservar.
     if [ "$ENV_REGENERATED" -eq 1 ]; then
-        : # ya decidido
-    elif ask_yes_no no "Regenerar $ENV_FILE? (borra .env y encryption.env: SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
-        # Misma inversion que en el bloque de deploy.env: responder "si" a
-        # "Regenerar" conservaba el archivo y avisaba "se conserva", asi que la
-        # unica forma de regenerar era responder que NO. El texto prometia ademas
-        # que se conservaban SECRET_KEY y ENCRYPTION_KEY, y no es cierto: mas
-        # abajo se borran los dos archivos antes de correr el generador.
+        : # el validador ya decidio: par roto y regeneracion aceptada
+    elif ask_yes_no no "Reescribir $ENV_FILE desde la plantilla? (respalda el actual como .bak.<fecha> y genera SECRET_KEY y ENCRYPTION_KEY nuevos)"; then
         ENV_REGENERATED=1
     else
         ENV_REGENERATED=0
@@ -2205,13 +2250,35 @@ fi
 
 if [ "$ENV_REGENERATED" -eq 1 ]; then
     ENV_GEN_ARGS+=(--force)
-    # Si el par es inválido o forzamos regeneración, partimos de cero para
-    # evitar que un .env+encryption.env incompatibles hagan fallar a Django.
+    # >>> TEST-BLOCK: env-backup
+    # Respaldo ANTES de borrar. `--force` reescribe el .env COMPLETO desde la
+    # plantilla (scripts/generate_env.py:build_env), asi que se lleva cualquier
+    # valor afinado a mano que el instalador no administra (FTP_OBS_*, LDAP_*,
+    # un DB_HOST distinto). El par roto justifica regenerar las claves, no
+    # perder el resto; y si el generador falla despues del `rm`, el .bak es lo
+    # unico que queda de la configuracion anterior.
+    env_backup_stamp=$(date +%Y%m%d-%H%M%S)
+    for env_backup_file in "$ENV_FILE" "$ENCRYPTION_ENV"; do
+        if [ -f "$env_backup_file" ]; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                printf '  [dry-run] cp -p %s %s.bak.%s\n' \
+                    "$env_backup_file" "$env_backup_file" "$env_backup_stamp"
+            else
+                cp -p "$env_backup_file" "$env_backup_file.bak.$env_backup_stamp" \
+                    || die "No se pudo respaldar $env_backup_file: sin respaldo no se borra nada."
+            fi
+        fi
+    done
+    # Si el par es invalido o forzamos regeneracion, partimos de cero para que
+    # `--force` genere claves nuevas de verdad: con los archivos en su lugar,
+    # generate_env.py conserva el par que ya descifra y la promesa del prompt
+    # ("SECRET_KEY y ENCRYPTION_KEY nuevos") seria falsa.
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [dry-run] rm -f %s %s\n' "$ENV_FILE" "$ENCRYPTION_ENV"
     else
         rm -f "$ENV_FILE" "$ENCRYPTION_ENV"
     fi
+    # <<< TEST-BLOCK: env-backup
     # Se corre COMO ROOT y no como webcmp: el generador tiene que escribir
     # $ENCRYPTION_ENV, que es root:root 600. Corrido como webcmp aborta sin
     # escribir nada (falla cerrado, que esta bien) y el servidor queda igual.
