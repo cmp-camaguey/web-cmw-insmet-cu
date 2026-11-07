@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Despliegue de web-cmw-insmet-cu en el servidor de produccion.
+# Despliegue de webcmp en el servidor de produccion.
 #
 # Se ejecuta EN el servidor, como root, y es la fuente unica de verdad del
 # procedimiento. El workflow .github/workflows/deploy-production.yml lo invoca

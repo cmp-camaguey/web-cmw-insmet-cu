@@ -17,7 +17,7 @@
 #
 set -Eeuo pipefail
 
-readonly REPO_URL=${REPO_URL:-https://github.com/cmp-camaguey/web-cmw-insmet-cu.git}
+readonly REPO_URL=${REPO_URL:-https://github.com/cmp-camaguey/webcmp.git}
 readonly BRANCH_REF=${BRANCH_REF:-refs/heads/main}
 readonly STATUS_FILE=${STATUS_FILE:-/var/lib/webcmp/deploy-status.json}
 readonly REQUEST_FILE=${REQUEST_FILE:-/var/lib/webcmp/deploy-request}

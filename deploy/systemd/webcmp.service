@@ -21,7 +21,7 @@
 
 [Unit]
 Description=CMP Camaguey - aplicacion web (Gunicorn)
-Documentation=https://github.com/orl92/web-cmw-insmet-cu
+Documentation=https://github.com/cmp-camaguey/webcmp
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
 

@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  Project: web-cmw-insmet-cu (Centro Meteorológico Provincial Camagüey)
+  Project: webcmp (Centro Meteorológico Provincial Camagüey)
   Stack: Django 5.2.17 (pinned in requirements/base.txt; legacy tech-stack.md removed
          in fresh-start — single source of truth is requirements/base.txt + AGENTS.md),
          DRF 3.17, drf-spectacular + sidecar, Python 3.14.

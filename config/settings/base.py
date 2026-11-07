@@ -541,7 +541,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # El chequeo lee el repo publico con `git ls-remote` sobre HTTPS: sin
 # credenciales y sin escribir nada en el checkout del servidor.
 UPDATE_REPO_URL = os.getenv(
-    'UPDATE_REPO_URL', 'https://github.com/cmp-camaguey/web-cmw-insmet-cu.git'
+    'UPDATE_REPO_URL', 'https://github.com/cmp-camaguey/webcmp.git'
 )
 UPDATE_BRANCH_REF = os.getenv('UPDATE_BRANCH_REF', 'refs/heads/main')
 # `deploy.sh` escribe aca el commit que quedo sirviendo (una linea, 0644).
@@ -568,5 +568,5 @@ UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '15'))
 # (ver `pending_commits`). 60 peticiones por hora sin autenticar: con 5 minutos
 # de cache, un panel abierto todo el dia gasta 12.
 UPDATE_REPO_API = os.getenv(
-    'UPDATE_REPO_API', 'https://api.github.com/repos/cmp-camaguey/web-cmw-insmet-cu'
+    'UPDATE_REPO_API', 'https://api.github.com/repos/cmp-camaguey/webcmp'
 )

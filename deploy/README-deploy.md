@@ -370,7 +370,7 @@ migraciones, estaticos, las dos unidades systemd, el vhost de Nginx y el
 Primero, ver que va a hacer, sin tocar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
     | sudo bash -s -- --dry-run
 ```
 
@@ -379,7 +379,7 @@ adivina en un pipe escribe el `.env` equivocado y nadie lo ve hasta que el sitio
 responde `DisallowedHost`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
     | sudo bash -s
 ```
 
