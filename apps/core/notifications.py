@@ -36,7 +36,7 @@ def make_dedupe_key(*parts):
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
-def notify(
+def _notify_or_get(
     recipient,
     *,
     source,
@@ -49,8 +49,10 @@ def notify(
 ):
     """Crea el aviso si no existe uno sin leer con la misma clave.
 
-    Devuelve la `Notification` (la existente si la había, o `None` cuando el
-    sistema está apagado).
+    Devuelve `(notification, created)`. Existe separado de `notify` porque quien
+    *cuenta* lo notificado necesita distinguir una fila nueva de una que ya
+    estaba: si no, un llamador que corre a diario reporta cada día el mismo
+    recordatorio aunque no haya creado nada.
 
     El dedup real lo hace el índice único parcial de la base, no un `exists()`
     previo: dos workers de Gunicorn pueden ver el mismo fallo a la vez y un
@@ -63,7 +65,7 @@ def notify(
     from apps.core.models import Notification
 
     if not getattr(settings, 'NOTIFICATIONS_ENABLED', True):
-        return None
+        return None, False
 
     if severity not in Notification.Severity.values:
         raise ValueError(
@@ -83,11 +85,40 @@ def notify(
 
     try:
         with transaction.atomic():
-            obj, _created = Notification.objects.get_or_create(**lookup, defaults=defaults)
-        return obj
+            obj, created = Notification.objects.get_or_create(**lookup, defaults=defaults)
+        return obj, created
     except IntegrityError:
         # Otro proceso la creó entre el SELECT y el INSERT. La suya es la buena.
-        return Notification.objects.filter(**lookup).first()
+        return Notification.objects.filter(**lookup).first(), False
+
+
+def notify(
+    recipient,
+    *,
+    source,
+    severity,
+    title,
+    body='',
+    url='',
+    dedupe_key,
+    expires_at=None,
+):
+    """Devuelve la `Notification` creada o la que ya existía sin leer.
+
+    `None` cuando el sistema está apagado. Para saber si la fila es nueva, usar
+    `_notify_or_get`; el resto de llamadores solo necesita el objeto.
+    """
+    obj, _created = _notify_or_get(
+        recipient,
+        source=source,
+        severity=severity,
+        title=title,
+        body=body,
+        url=url,
+        dedupe_key=dedupe_key,
+        expires_at=expires_at,
+    )
+    return obj
 
 
 def notify_superusers(
@@ -100,17 +131,19 @@ def notify_superusers(
     dedupe_key,
     expires_at=None,
 ):
-    """Notifica a todos los superusuarios activos y devuelve las creadas.
+    """Notifica a todos los superusuarios activos y devuelve las recién creadas.
 
-    El conjunto de destinatarios es fijo a propósito (dos admins en el repo):
-    una tabla de preferencias por usuario sería complejidad sin uso. Si algún
-    día entra un rol que deba ver solo una parte, esa es la señal para agregarla.
+    "Creadas" no es "destinatarios": si un aviso ya existía sin leer, esta
+    corrida no hizo nada por ese admin y no debe contarlo. El conjunto de
+    destinatarios es fijo a propósito (dos admins en el repo): una tabla de
+    preferencias por usuario sería complejidad sin uso. Si algún día entra un rol
+    que deba ver solo una parte, esa es la señal para agregarla.
     """
     from django.contrib.auth import get_user_model
 
     created = []
     for user in get_user_model().objects.filter(is_superuser=True, is_active=True):
-        obj = notify(
+        obj, was_created = _notify_or_get(
             user,
             source=source,
             severity=severity,
@@ -120,7 +153,7 @@ def notify_superusers(
             dedupe_key=dedupe_key,
             expires_at=expires_at,
         )
-        if obj is not None:
+        if was_created:
             created.append(obj)
     return created
 
