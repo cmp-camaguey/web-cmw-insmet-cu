@@ -6,8 +6,6 @@
 *.pot
 *.pyc
 __pycache__/
-**/migrations/*
-!**/migrations/__init__.py
 */logs/*
 staticfiles/*
 db.sqlite3

@@ -19,32 +19,29 @@ El orden no es estetico, es la garantia:
 | 2 | Aborta si hay cambios sin commitear | `git checkout --force` los perderia |
 | 3 | `git checkout` del SHA exacto | Desplegar un SHA, no una rama: la rama se movio entre el CI y el deploy |
 | 4 | `pip install -r requirements/prod.txt` | Antes de los gates, que importan las deps |
-| 5 | `makemigrations` | Genera las migraciones desde los modelos. Ver la nota de abajo: **este proyecto no versiona las migraciones** |
+| 5 | `makemigrations --check --dry-run` | Falla si un cambio de modelo no trae su migracion. Ver la nota de abajo |
 | 6 | Gate: `check --deploy` con la config real | Ver la nota de abajo |
 | 7 | `migrate` y `migrate --check` | Antes de que el codigo nuevo atienda un request. El `--check` confirma que no queda nada sin aplicar |
 | 8 | `collectstatic` | Antes de que el codigo nuevo emita HTML que los referencia |
 | 9 | `systemctl restart` de ambos units | `reload` NO alcanza, ver la nota de abajo |
 | 10 | Health check contra Nginx local | Atraviesa Nginx, TLS y el socket: el camino completo |
 
-### Por que `makemigrations` y no `makemigrations --check`
+### Por que `makemigrations --check` y no `makemigrations`
 
-El proyecto **no versiona las migraciones**: el `.gitignore` tiene
-`**/migrations/*` con la unica excepcion de `__init__.py`. Un clone limpio llega
-sin migraciones y el esquema se deriva de los modelos, que es exactamente lo que
-hace el job del CI (`makemigrations` y despues `migrate`).
+El proyecto **versiona las migraciones**: los `0001_initial` de cada app estan
+en el repositorio y viajan en el clone. El esquema no se deriva de los modelos
+en el servidor.
 
-Por eso el gate que se suele poner en este lugar, `makemigrations --check
---dry-run` ("el modelo cambio y nadie escribio la migracion"), no sirve: falla en
-todo clone limpio, porque las migraciones todavia no existen y `--check` lee "no
-hay migraciones para este modelo" como "falta la migracion". El script corre
-`makemigrations` a secas y despues `migrate`.
+Con las migraciones en el arbol, `makemigrations --check --dry-run` pasa a ser
+un gate util: si un cambio de modelo llega sin su migracion, el comando sale
+distinto de 0 y el deploy aborta **antes** de tocar la base. El CI corre el
+mismo gate antes de `migrate`.
 
-Lo que eso implica, y conviene no perder de vista: **la migracion se genera y se
-aplica en el mismo deploy, sin revision**. Si un cambio de modelo llega con un
-`ALTER` destructivo, se aplica contra produccion sin que nadie lo mire, y el
-rollback del codigo no deshace el esquema. Versionar las migraciones es lo unico
-que vuelve eso revisable; mientras no se haga, el deploy es el unico lugar donde
-el schema se decide.
+Versionar las migraciones es lo que vuelve revisable un cambio de esquema: un
+`ALTER` destructivo se ve en el diff del PR, no en el log del deploy. Sigue
+siendo cierto que **el rollback del codigo no deshace el esquema**: Django no
+genera migraciones inversas, y una migracion destructiva ya aplicada deja la
+base con el esquema nuevo.
 
 ### Por que el `check --deploy` del servidor y no solo el del CI
 
@@ -373,7 +370,7 @@ migraciones, estaticos, las dos unidades systemd, el vhost de Nginx y el
 Primero, ver que va a hacer, sin tocar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
     | sudo bash -s -- --dry-run
 ```
 
@@ -382,7 +379,7 @@ adivina en un pipe escribe el `.env` equivocado y nadie lo ve hasta que el sitio
 responde `DisallowedHost`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
     | sudo bash -s
 ```
 
@@ -887,7 +884,7 @@ Todos se reprodujeron en el servidor de prueba.
 | El sitio se cae cada 60 s y vuelve solo | `WatchdogSec=60` en el unit, pero Gunicorn solo manda `READY=1`, nunca `WATCHDOG=1`. systemd esperaba un ping que no llega y mandaba `SIGABRT` |
 | `collectstatic` falla con `Post-processing 'x.js' failed!` | El `.min.js` termina en `//# sourceMappingURL=x.js.map` y el `.map` no esta en el repo. El storage de manifest tiene que resolver cada referencia |
 | `[ERROR] Control server error: Permission denied: '/home/webcmp'` en cada arranque | El control socket de Gunicorn 26 cae a `$HOME/.gunicorn/`, y `webcmp` no tiene home con `ProtectHome=true` |
-| `NodeNotFoundError` al correr `migrate` | Habia una migracion versionada (`commercial/0006`) que dependia de un padre nunca commiteado. Se elimino |
+| `NodeNotFoundError` al correr `migrate` | Habia una migracion versionada (`commercial/0006`) que dependia de un padre nunca commiteado. Se elimino; desde el cambio 031 el gate `makemigrations --check --dry-run` del CI detecta esa cadena rota antes del merge |
 | `the cache has been disabled` en cada deploy | `sudo` aplica `env_reset` y descarta `PIP_CACHE_DIR` del entorno del llamador. Hay que pasarla con `sudo -u user env PIP_CACHE_DIR=... cmd` |
 
 Dos de estos se detectan antes de tocar produccion y conviene que sigan asi:

@@ -41,8 +41,8 @@ para correos y PDFs. Interfaz y configuración en español (`es-mx`, `America/Ha
 Requiere **Python 3.14** (el CI la fija y ruff apunta a `py314`).
 
 ```bash
-git clone https://github.com/cmp-camaguey/web-cmw-insmet-cu.git
-cd web-cmw-insmet-cu
+git clone https://github.com/cmp-camaguey/webcmp.git
+cd webcmp
 
 # Dependencias del sistema para PDFs (wkhtmltopdf) y MySQL (libmysqlclient)
 sudo apt install libcairo2-dev pkg-config python3-dev wkhtmltopdf
@@ -64,8 +64,7 @@ make setup
 `.env` con un par de claves usable y activa los hooks de git. Faltan dos pasos:
 
 ```bash
-python manage.py makemigrations      # las migraciones NO se versionan
-python manage.py migrate
+python manage.py migrate             # las migraciones ya vienen versionadas
 python manage.py add_stations_data   # Stations, Towns, Provinces
 python manage.py createsuperuser
 python manage.py runserver
@@ -246,9 +245,10 @@ frontend es Django Templates + Tabler + JavaScript vanilla ya vendoreado. Por
 legado, Tabler (CSS y JS) está en `static/dist/css/` y `static/dist/js/`; el resto
 de librerías en `static/dist/libs/`. Un PR que agregue npm no se merges.
 
-**Las migraciones no se versionan** (`.gitignore` las excluye). Cada quien corre
-`makemigrations` en su máquina. Si tu cambio altera el schema, el proyecto tiene que
-saberlo por el diff de modelos, no por un archivo de migración.
+**Las migraciones se versionan.** Si cambias un modelo, corres `makemigrations` y
+commiteas el archivo generado en el mismo PR. El diff de la migración es donde se
+revisa un `ALTER` destructivo; CI y deploy fallan con
+`makemigrations --check --dry-run` si el cambio de modelo llega sin su migración.
 
 **Los permisos no son los de Django.** Los modelos de negocio usan
 `default_permissions = ()` y definen cuatro permisos custom (`view_*`, `add_*`,
@@ -500,7 +500,7 @@ sudo systemctl restart webcmp
 ### 3. Código, venv y `.env`
 
 ```bash
-sudo -u webcmp git clone https://github.com/cmp-camaguey/web-cmw-insmet-cu.git /srv/webcmp
+sudo -u webcmp git clone https://github.com/cmp-camaguey/webcmp.git /srv/webcmp
 cd /srv/webcmp
 sudo -u webcmp python3.14 -m venv .venv
 sudo -u webcmp .venv/bin/pip install -r requirements/prod.txt
@@ -511,16 +511,14 @@ sudo -u webcmp .venv/bin/pip install -r requirements/prod.txt
 sudo install -d -m 0755 -o root -g root /etc/webcmp
 sudo .venv/bin/python scripts/generate_env.py --production
 
-# Las migraciones NO se versionan (ver .gitignore), asi que en un clone limpio no
-# existen: `migrate` solo no alcanza, hay que generarlas antes desde los modelos.
-sudo -u webcmp .venv/bin/python manage.py makemigrations
+# Las migraciones vienen versionadas en el clone, asi que `migrate` es suficiente.
 sudo -u webcmp .venv/bin/python manage.py migrate
 sudo -u webcmp .venv/bin/python manage.py collectstatic --no-input
 ```
 
 > **Los `manage.py` de este bloque son un caso especial.** Corren a secas, sin el
-> `systemd-run` que sí usan los pasos 6 y 7, y funcionan solo porque los tres
-> comandos de acá (`makemigrations`, `migrate`, `collectstatic`) no necesitan la
+> `systemd-run` que sí usan los pasos 6 y 7, y funcionan solo porque los dos
+> comandos de acá (`migrate`, `collectstatic`) no necesitan la
 > `ENCRYPTION_KEY`: leen el `.env` como webcmp y el perfil de desarrollo les sirve.
 >
 > El día que quieras correr **otro** `manage.py` a mano, ese no es el camino. Sin el
@@ -799,7 +797,7 @@ Qué hace, y por qué en ese orden:
 | 4 | Rol y base de datos en PostgreSQL, con las credenciales que se preguntaron |
 | 5 | `venv` + `requirements/prod.txt` |
 | 6 | `.env` con `scripts/generate_env.py` y los valores preguntados, sin `CHANGE_ME` |
-| 7 | `makemigrations`, `migrate`, `collectstatic`, `check --deploy` |
+| 7 | gate de migraciones, `migrate`, `collectstatic`, `check --deploy` |
 | 8 | Unidades systemd renderizadas a `APP_DIR` y al usuario reales |
 | 9 | Nginx en las dos topologías, y el vhost que corresponde a `PROXY_MODE` |
 | 10 | `/etc/webcmp/deploy.env` con el destino del health check que corresponde |
@@ -920,7 +918,7 @@ En orden, y todo en `deploy/deploy.sh`:
 
 ```text
 flock → aborted si hay cambios sin commitear → checkout del SHA → pip install
-      → makemigrations → check --deploy → migrate → collectstatic
+      → makemigrations --check → check --deploy → migrate → collectstatic
       → restart → health check
 ```
 
@@ -930,9 +928,11 @@ deploy con la configuración rota no llegue a tocar el esquema.
 
 Dos cosas que parecen raras y no lo son:
 
-**`makemigrations` y no `makemigrations --check`.** El proyecto no versiona las
-migraciones (están en `.gitignore`), así que en un clone limpio no existen. El
-deploy las genera desde los modelos y las aplica; un `--check` fallaría siempre.
+**`makemigrations --check` y no `makemigrations`.** El proyecto versiona las
+migraciones, así que en un clone limpio ya existen. El deploy verifica con
+`--check` que el árbol cubre los modelos y aborta antes de tocar la base si falta
+una migración; `makemigrations` a secas generaría el archivo en el servidor y lo
+aplicaría sin revisión.
 
 **`check --deploy` contra la configuración real del servidor**, no el del CI. El del
 CI corre sin `ENCRYPTION_KEY` ni con el par de testing, y pasa sobre cosas que en

@@ -2,7 +2,7 @@
 # Instalador del portal del CMP Camaguey. Auto-contenido: no lee NADA del
 # checkout antes de clonarlo, asi que se puede ejecutar como archivo suelto.
 #
-#   curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
+#   curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
 #       | sudo bash -s -- --help
 #
 # Que instala, en este orden (el orden es una dependencia, no una preferencia):
@@ -12,7 +12,7 @@
 #   4. rol y base de datos, con las credenciales que se preguntaron
 #   5. venv + requirements/prod.txt
 #   6. .env con scripts/generate_env.py y los valores preguntados, sin CHANGE_ME
-#   7. makemigrations, migrate, collectstatic, check --deploy
+#   7. gate de migraciones, migrate, collectstatic, check --deploy
 #   8. unidades systemd renderizadas a APP_DIR/SERVICE_USER reales
 #   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
 #      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
@@ -56,7 +56,7 @@ set -Eeuo pipefail
 # El repo se clona con `git clone` (no con curl|tar) porque el deploy depende de
 # un checkout real: deploy.sh hace `git fetch`/`checkout` en produccion y
 # aborta si el directorio no es un repo.
-REPO_URL=${REPO_URL:-https://github.com/cmp-camaguey/web-cmw-insmet-cu.git}
+REPO_URL=${REPO_URL:-https://github.com/cmp-camaguey/webcmp.git}
 REPO_REF=${REPO_REF:-main}
 APP_DIR=${APP_DIR:-/srv/webcmp}
 SERVICE_USER=${SERVICE_USER:-webcmp}
@@ -81,7 +81,7 @@ ENCRYPTION_ENV=${ENCRYPTION_ENV:-$CONFIG_DIR/encryption.env}
 # Mismo archivo, mismo formato (un SHA de 40 hex) y mismos permisos que deploy.sh.
 DEPLOYED_STATE=${DEPLOYED_STATE:-$CONFIG_DIR/deployed}
 # Lock compartido con deploy.sh. Es el MISMO archivo (no una copia del
-# mecanismo): el instalador escribe el checkout, las migraciones y el .env, y un
+# mecanismo): el instalador escribe el checkout y el .env, y un
 # deploy.sh que corra a la vez haria lo mismo sobre el mismo arbol. El lock no
 # coordina dos instaladores por si solo, coordina instalador y deploy, que es el
 # par que comparte estado.
@@ -479,9 +479,9 @@ ensure_dir() {
 
 usage() {
     cat <<'EOF'
-Instalador de web-cmw-insmet-cu. Un solo archivo, sin checkout previo:
+Instalador de webcmp. Un solo archivo, sin checkout previo:
 
-  curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/web-cmw-insmet-cu/main/deploy/install.sh \
+  curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
       | sudo bash -s -- --help
 
 Uso:
@@ -1206,7 +1206,7 @@ render_template() {
 # extra van con -p Environment=NOMBRE=valor y nunca con un `VAR=x systemd-run`.
 manage() {
     if [ "$DRY_RUN" -eq 1 ]; then
-        # Se imprime la invocacion COMPLETA y no un "manage.py makemigrations"
+        # Se imprime la invocacion COMPLETA y no un "manage.py migrate"
         # de adorno: lo que hay que poder comparar contra el estado real del
         # servidor es si PRODUCTION=1 y el EnvironmentFile van a ir o no.
         printf '  [dry-run] systemd-run --quiet --pipe --wait --uid=%s --gid=%s \\\n' \
@@ -2501,7 +2501,7 @@ if [ "$HAS_BLOCKING_CRITICAL" -eq 1 ]; then
     # Con CHANGE_ME criticos NO se migra. Las migraciones abren conexion a la base
     # y un CHANGE_ME en DB_PASS las hace fallar con un error de autenticacion que
     # no dice "falta completar el .env".
-    warn "No se corre makemigrations ni migrate: el .env tiene CHANGE_ME CRITICOS."
+    warn "No se corre el gate de migraciones ni migrate: el .env tiene CHANGE_ME CRITICOS."
     warn "collectstatic y check --deploy si se corren: no tocan la base y sus"
     warn "resultados sirven igual para diagnosticar."
     warn "La migracion queda pendiente: hay que volver a correr este instalador"
@@ -2517,8 +2517,8 @@ else
     # run_live), que es lo que permite que run_live capture el exit code en
     # vez de morir a mitad del pipe.
     LIVE_MANAGE=1
-    run manage makemigrations \
-        || die "makemigrations fallo. El log de arriba dice por que. Sin el, migrate no se corre."
+    run manage makemigrations --check --dry-run \
+        || die "El gate de migraciones fallo: falta una migracion para un cambio de modelo. El log de arriba dice cual. Sin esa migracion, migrate no se corre."
     LIVE_MANAGE=0
     run manage migrate --noinput \
         || die "migrate --noinput fallo. El log de arriba dice por que; la base queda sin aplicar."

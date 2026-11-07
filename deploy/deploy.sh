@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Despliegue de web-cmw-insmet-cu en el servidor de produccion.
+# Despliegue de webcmp en el servidor de produccion.
 #
 # Se ejecuta EN el servidor, como root, y es la fuente unica de verdad del
 # procedimiento. El workflow .github/workflows/deploy-production.yml lo invoca
@@ -824,25 +824,21 @@ log "Instalando requirements/prod.txt"
 sudo -u "$DEPLOY_USER" env "PIP_CACHE_DIR=$PIP_CACHE_DIR" \
     "${PIP_CMD[@]}" install --quiet --disable-pip-version-check -r "$APP_DIR/requirements/prod.txt"
 
-# 3. Generar migraciones desde los modelos
+# 3. Gate: las migraciones versionadas cubren los modelos
 #
-# OJO con el flujo de este proyecto: NO versiona las migraciones. El .gitignore
-# tiene `**/migrations/*` con la unica excepcion de `__init__.py`, asi que un
-# clone limpio llega SIN migraciones y el esquema se deriva de los modelos.
+# Las migraciones SI se versionan. Un clone limpio trae los `0001_initial` de
+# cada app y el esquema no se deriva de los modelos en el servidor.
 #
-# Por eso el gate que se suele poner aca, `makemigrations --check --dry-run`
-# ("el modelo cambio y nadie escribio la migracion"), NO sirve: en un clone
-# limpio falla siempre, porque las migraciones todavia no existen y `--check`
-# interpreta "no hay migraciones para el modelo" como "falta la migracion".
-# El CI no lo sufre porque su job corre `makemigrations` antes de `migrate`.
+# `--check --dry-run` es el gate que esto habilita: si un cambio de modelo llega
+# sin su migracion, el deploy aborta ACA, antes de tocar la base. Antes ese
+# comando no servia porque el clone llegaba sin migraciones y `--check` leia
+# "no hay migraciones para el modelo" como "falta la migracion".
 #
-# Consecuencia que hay que tener presente: una migracion se genera y se aplica en
-# el mismo deploy, sin revision. Si un cambio de modelo llega con un ALTER
-# destructivo, se aplica contra produccion sin que nadie lo mire. Versionar las
-# migraciones es la unica forma de que eso sea revisable; mientras no se haga, el
-# deploy es el unico lugar donde el schema se decide.
-log "Generando migraciones desde los modelos"
-manage makemigrations
+# La migracion se revisa en el PR. El rollback del codigo no revierte el
+# esquema, y sigue siendo cierto: una migracion destructiva ya aplicada deja la
+# base con el esquema nuevo.
+log "Gate: las migraciones versionadas cubren los modelos"
+manage makemigrations --check --dry-run
 
 # 4. Gate: la configuracion REAL de produccion
 #

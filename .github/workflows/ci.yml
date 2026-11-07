@@ -112,9 +112,9 @@ jobs:
       - name: Django system check
         run: python manage.py check
 
-      - name: Generate and apply migrations
+      - name: Verify and apply migrations
         run: |
-          python manage.py makemigrations
+          python manage.py makemigrations --check --dry-run
           python manage.py migrate
 
       - name: Run affected app tests (PR)
@@ -236,9 +236,9 @@ jobs:
           pip-audit -r requirements/base.txt --ignore-vuln PYSEC-2026-2860
           pip-audit -r requirements/prod.txt --ignore-vuln PYSEC-2026-2860
 
-      - name: Generate and apply migrations
+      - name: Verify and apply migrations
         run: |
-          python manage.py makemigrations
+          python manage.py makemigrations --check --dry-run
           python manage.py migrate
 
   templates:
