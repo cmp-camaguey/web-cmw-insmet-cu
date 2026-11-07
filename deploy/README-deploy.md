@@ -791,9 +791,10 @@ atendio el POST, dejando a los otros dos sirviendo un numero viejo.
 
 ## La franja de aviso meteorologico
 
-El portal publico pinta una franja oscura arriba de todo cuando hay un `Warning`
-vigente (`valid_until >= ahora`). **No es una notificacion**: se sirve en el HTML,
-sin sesion y sin JavaScript, porque tiene que alcanzar a un visitante anonimo.
+El portal publico pinta una franja arriba de todo cuando hay un `Warning` vigente
+(`valid_until >= ahora`). **No es una notificacion**: se sirve en el HTML, sin
+sesion y sin JavaScript, porque tiene que alcanzar a un visitante anonimo. Sigue
+el tema del visitante (claro u oscuro); no impone fondo oscuro.
 
 Sale de `apps.core.context_processors.menu_notifications`, que ya recorria
 `Warning` para los badges del menu. La misma consulta alimenta las tres cuentas y
@@ -807,9 +808,12 @@ Decisiones que no se cambian sin pensar:
   queremos facilitar.
 - **El color no es la unica senal**: el tipo va escrito al lado del punto, asi que
   sirve igual para quien no distingue rojo de naranja.
-- **No aparece en el landing.** La portada de marketing omite el contenido vivo a
-  proposito (`apps/home/tests/test_landing.py`). Si se decide lo contrario, hay
-  que actualizar ese test.
+- **En el landing solo entran los avisos graves.** La portada de marketing omite
+  el contenido vivo a proposito (`apps/home/tests/test_landing.py`), con una
+  excepcion: ciclon tropical y tormenta. Es la raiz del dominio, y esos dos no se
+  esconden detras de un clic a "Tiempo". Un `early` no se pinta ahi: es rutina y
+  acostumbraria al visitante a ignorar la franja. La excepcion vive en
+  `templates/layouts/landing.html` (`severe_only=True`), no en Python.
 
 ### Apagarla
 

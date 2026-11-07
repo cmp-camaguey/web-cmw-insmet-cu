@@ -10,6 +10,12 @@
     {% endblock %}
   </header>
   <div class="page-wrapper">
+    {% comment %}
+      Solo avisos graves: el landing es la raíz del dominio y no replica el
+      contenido vivo del home (ver apps/home/tests/test_landing.py), pero un
+      ciclón tropical o una tormenta no se esconden a un clic de distancia.
+    {% endcomment %}
+    {% include 'includes/home/emergency_banner.html' with severe_only=True %}
     <!-- Hero -->
     {% block hero %}
       <header class="hero pb-0">
