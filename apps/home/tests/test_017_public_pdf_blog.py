@@ -14,6 +14,7 @@ Covers the public blog-style PDF cards and the dashboard detail sweep:
   raw `<a target="_blank">Ver PDF</a>`.
 """
 
+import re
 from datetime import date, timedelta
 
 from django.contrib.auth.models import User
@@ -66,7 +67,13 @@ class AvisosBlogCardTests(TestCase):
 
     def test_hardcoded_title_string_is_gone(self):
         self._create_warning()
-        self.assertNotContains(self._get_page(), 'Aviso meteorológico')
+        html = self._get_page().content.decode()
+        # La cadena vive ahora en el `aria-label` de la franja de emergencia, que
+        # es markup del layout. Esta prueba mide la tarjeta, no el layout, asi
+        # que la asercion se acota al bloque que renderiza `document_card.html`.
+        card = re.search(r'<article class="card">.*?</article>', html, re.S)
+        self.assertIsNotNone(card, 'la pagina no renderizo ninguna tarjeta de documento')
+        self.assertNotIn('Aviso meteorológico', card.group(0))
 
     def test_grid_wrapper_present(self):
         self._create_warning()

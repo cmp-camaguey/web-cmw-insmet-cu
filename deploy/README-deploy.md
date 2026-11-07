@@ -762,6 +762,38 @@ contador. Una notificacion vencida no se muestra aunque la poda todavia no la
 haya borrado, y eso es a proposito: `expires_at` es la fecha del hecho, la poda
 es solo mantenimiento.
 
+## La franja de aviso meteorologico
+
+El portal publico pinta una franja oscura arriba de todo cuando hay un `Warning`
+vigente (`valid_until >= ahora`). **No es una notificacion**: se sirve en el HTML,
+sin sesion y sin JavaScript, porque tiene que alcanzar a un visitante anonimo.
+
+Sale de `apps.core.context_processors.menu_notifications`, que ya recorria
+`Warning` para los badges del menu. La misma consulta alimenta las tres cuentas y
+el aviso que encabeza la franja, asi que agregarla no costo una consulta extra.
+
+Decisiones que no se cambian sin pensar:
+
+- **Manda la gravedad, no la fecha.** Ciclon > tormenta > alerta temprana. Entre
+  dos del mismo tipo gana el mas reciente.
+- **No se puede cerrar.** Cerrar una alerta de ciclon es la unica accion que no
+  queremos facilitar.
+- **El color no es la unica senal**: el tipo va escrito al lado del punto, asi que
+  sirve igual para quien no distingue rojo de naranja.
+- **No aparece en el landing.** La portada de marketing omite el contenido vivo a
+  proposito (`apps/home/tests/test_landing.py`). Si se decide lo contrario, hay
+  que actualizar ese test.
+
+### Apagarla
+
+```bash
+# en el .env del servidor
+EMERGENCY_BANNER_ENABLED=False
+```
+
+Apagarla no toca el contenido publicado: las paginas de avisos y los badges del
+menu siguen igual.
+
 
 ## Lo que el workflow NO puede hacer
 
