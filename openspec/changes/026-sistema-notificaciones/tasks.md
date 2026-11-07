@@ -2,7 +2,8 @@
 
 > **Aprobada el 2026-11-06.** Las cuatro preguntas de `design.md` §10 estan
 > cerradas (fase 0) y el alcance bajo a **cuatro** fuentes: la de despliegue se
-> descarto. Todavia sin implementar — la rama se abre cuando se retome.
+> descarto. Las cuatro fases estan implementadas: fases 1 y 2 en `dev` desde el
+> PR #147, fases 3 y 4 en el PR siguiente.
 
 ## Fase 0 — Decisiones
 
@@ -35,19 +36,19 @@
 
 ## Fase 3 — UI
 
-- [ ] Icono con badge en el navbar, junto al de actualizacion de 025, respetando `gap-2`.
-- [ ] Desplegable con las 10 mas recientes, "Ver todas" y "Marcar todas como leidas".
-- [ ] Pagina de historial con `paginate_by = 10`, sin DataTables.
-- [ ] Contador server-rendered de entrada y refresco en el polling existente de `dashboard-update.js`.
-- [ ] Marcado de lectura individual y masivo, con su prueba de permisos (403 a no-superusuario).
+- [x] Icono con badge en el navbar, junto al de actualizacion de 025, respetando `gap-2`.
+- [x] Desplegable con las 10 mas recientes, "Ver todas" y "Marcar todas como leidas".
+- [x] Pagina de historial con `paginate_by = 10`, sin DataTables.
+- [x] Contador server-rendered de entrada y refresco en el polling existente de `dashboard-update.js`.
+- [x] Marcado de lectura individual y masivo, con su prueba de permisos (403 a no-superusuario).
 
 ## Fase 4 — Operacion
 
-- [ ] `notificar_podar` idempotente con las dos ventanas de retencion.
-- [ ] `periodic_task` de Huey diaria para la poda.
-- [ ] Ajustes `NOTIFICATIONS_*` en `config/settings/base.py` con sus valores por defecto.
-- [ ] `NOTIFICATIONS_ENABLED=False` verificado: cero filas nuevas, icono oculto, sin errores.
-- [ ] Documentar el flag y la poda en `deploy/README-deploy.md`.
+- [x] `notificar_podar` idempotente con las dos ventanas de retencion.
+- [x] `periodic_task` de Huey diaria para la poda.
+- [x] Ajustes `NOTIFICATIONS_*` en `config/settings/base.py` con sus valores por defecto.
+- [x] `NOTIFICATIONS_ENABLED=False` verificado: cero filas nuevas, icono oculto, sin errores.
+- [x] Documentar el flag y la poda en `deploy/README-deploy.md`.
 
 ## Fuera de alcance
 

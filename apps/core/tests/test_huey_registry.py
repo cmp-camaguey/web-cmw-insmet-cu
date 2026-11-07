@@ -37,6 +37,9 @@ EXPECTED_TASKS = {
     # 026: recordatorio diario de avisos por vencer. Se registra por
     # `MeteoConfig.ready()`, así que también tiene que estar en el consumer.
     'apps.meteo.tasks.notificar_avisos_por_vencer',
+    # 026 fase 4: poda diaria de avisos. Se registra por `CoreConfig.ready()`,
+    # que ya importa `apps/core/tasks.py`.
+    'apps.core.tasks.podar_notificaciones',
 }
 
 # Lo que hace `huey_consumer config.huey_consumer_entry.huey`, reducido a lo que

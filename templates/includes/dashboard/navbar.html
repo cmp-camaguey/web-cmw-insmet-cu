@@ -1,4 +1,5 @@
 {% load static %}
+{% load notification_tags %}
 <header class="navbar navbar-expand-md d-none d-lg-flex d-print-none">
   <div class="container-xl">
     <button class="navbar-toggler"
@@ -11,6 +12,7 @@
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="navbar-nav flex-row order-md-last gap-2">
+      {% notifications_navbar %}
       {% include 'includes/dashboard/update_navbar.html' %}
       <!-- Tema Claro|Oscuro -->
       <div class="nav-item d-none d-md-flex">

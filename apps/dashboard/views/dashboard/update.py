@@ -321,12 +321,17 @@ def last_run():
     }
 
 
-def build_state(refresh=False, include_commits=True):
+def build_state(refresh=False, include_commits=True, user=None):
     """Estado que consume el panel. Una sola forma, la use quien la use.
 
     ``include_commits`` existe para la peticion de despliegue: decide con los
     SHA, no con los mensajes, y no tiene por que esperar una segunda salida de
     red que ademas puede tardar el timeout entero.
+
+    ``user`` es opcional y solo lo pasa la vista de estado: con el se agrega el
+    contador de avisos sin leer. Viaja en este mismo JSON a proposito —el
+    polling de 025 ya corre en todas las paginas del panel— para no crear un
+    endpoint ni un segundo temporizador solo para un numero.
     """
     deployed = deployed_sha()
     remote = remote_sha(refresh=refresh)
@@ -373,7 +378,26 @@ def build_state(refresh=False, include_commits=True):
         'check_error': remote['error'],
         'last_run': run,
         'commits': commits,
+        'notifications': _notifications_state(user),
     }
+
+
+def _notifications_state(user):
+    """Contador de avisos sin leer, o `None` cuando no aplica.
+
+    `None` en tres casos —sin usuario, sistema apagado, o usuario que no es
+    superusuario— y el JS los trata igual: no toca el badge. El cliente no
+    decide quien ve avisos; solo pinta lo que el servidor ya conto.
+    """
+    if user is None or not user.is_superuser:
+        return None
+
+    from apps.core.notifications import unread_count
+
+    unread = unread_count(user)
+    if unread is None:
+        return None
+    return {'unread': unread}
 
 
 class UpdateStatusView(LoginRequiredMixin, UserPassesTestMixin, View):
@@ -391,7 +415,7 @@ class UpdateStatusView(LoginRequiredMixin, UserPassesTestMixin, View):
         return self.request.user.is_superuser
 
     def get(self, request, *args, **kwargs):
-        return JsonResponse(build_state())
+        return JsonResponse(build_state(user=request.user))
 
 
 class UpdateRequestView(LoginRequiredMixin, UserPassesTestMixin, View):

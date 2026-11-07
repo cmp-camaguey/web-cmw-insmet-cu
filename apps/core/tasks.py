@@ -2,6 +2,7 @@ import logging
 import os
 
 from django.core.mail import EmailMessage
+from huey import crontab
 
 from config.huey import huey
 
@@ -98,3 +99,28 @@ def send_email_task(
         email.attach(attachment_name, attachment_content, attachment_mime)
     email.send()
     logger.info(f'Correo enviado: {subject}')
+
+
+@huey.periodic_task(crontab(minute=0, hour=4), name='podar_notificaciones')
+def podar_notificaciones():
+    """Poda diaria de avisos (cambio 026, fase 4).
+
+    Huey corre con `utc=True`, asi que las 4 UTC son la medianoche en
+    `America/Havana`: la poda no compite con nadie y no toca el badge de un
+    admin que este mirando el panel a media manana.
+
+    Corre con el sistema apagado tambien (`NOTIFICATIONS_ENABLED=False`): limpiar
+    datos viejos no es una funcion visible que haya que apagar, y dejarla
+    detenida solo hace crecer la tabla.
+    """
+    from apps.core.notifications import prune_notifications
+
+    deleted = prune_notifications()
+    if any(deleted.values()):
+        logger.info(
+            'Poda de notificaciones: %s vencidas, %s leidas, %s no leidas',
+            deleted['expired'],
+            deleted['read'],
+            deleted['unread'],
+        )
+    return deleted

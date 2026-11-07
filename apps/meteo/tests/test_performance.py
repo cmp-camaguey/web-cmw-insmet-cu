@@ -50,7 +50,12 @@ class WarningListViewQueryCountTests(TestCase):
         self.client.force_login(self.admin)
         # 11 (was 13): the subscription badges in the context processor now come
         # from a single conditional aggregate instead of one count per state.
-        with self.assertNumQueries(11):
+        # 13 (was 11): the navbar renders the notification bell (change 026),
+        # and that costs a constant 2 queries -- the unread COUNT and the top-10
+        # dropdown -- on every dashboard page. Constant, indexed by
+        # (recipient, read_at): neither scales with the number of rows on this
+        # page, which is what this guard exists to catch.
+        with self.assertNumQueries(13):
             response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
 
