@@ -486,7 +486,11 @@ Instalador de webcmp. Un solo archivo, sin checkout previo:
 
 Uso:
   sudo bash install.sh [opciones]
-  curl -fsSL <raw-url>/deploy/install.sh | sudo bash -s -- [opciones]
+  curl -fsSL -o install.sh <raw-url>/deploy/install.sh && sudo bash install.sh [opciones]
+
+El pipe (`curl ... | sudo bash -s`) solo sirve para `--help` y para
+`--non-interactive`: en la corrida interactiva el stdin del script es la
+tuberia, no hay TTY, y el instalador aborta antes de tocar nada.
 
 Opciones:
   --non-interactive   No preguntar nada: cada valor sale de la variable de
@@ -872,7 +876,15 @@ ask_secret() {
         else
             answer=$(gen_secret)
             [ -n "$ASK_GENERATED_FILE" ] && printf '%s\n' "$key" >>"$ASK_GENERATED_FILE"
-            printf '  [dry-run] %s=<generada, escrita en el .env, no impresa>\n' "$key" >&2
+            # El destino cambia por clave y el mensaje lo dice: DB_PASS termina
+            # en el .env, pero SUPERUSER_PASSWORD no se escribe en NINGUN
+            # archivo (solo queda el hash en la base, ver `recover_env_password`).
+            # Un mensaje unico para las dos afirmaba algo falso para la segunda.
+            if [ "$key" = SUPERUSER_PASSWORD ]; then
+                printf '  [dry-run] %s=<generada, no impresa, no se guarda en ningun archivo>\n' "$key" >&2
+            else
+                printf '  [dry-run] %s=<generada, escrita en el .env, no impresa>\n' "$key" >&2
+            fi
             printf '%s' "$answer"
             return 0
         fi

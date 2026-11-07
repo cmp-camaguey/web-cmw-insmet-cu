@@ -73,3 +73,51 @@ assert_contains 'install.sh imprime el ssh-keyscan de DEPLOY_SSH_KNOWN_HOSTS' \
     '2>/dev/null > known_hosts' "$known_hosts_line"
 assert_not_contains 'install.sh no prefija el known_hosts con el sed roto' \
     '|1 h=|' "$known_hosts_line"
+
+# El README documentaba la corrida interactiva como `curl ... | sudo bash -s`,
+# que el propio instalador rechaza: en el pipe el stdin del script es la
+# tuberia, no hay TTY, y el guard de `-t 0` aborta ANTES de tocar nada. La
+# instruccion contradecia al codigo y el operador lo descubria corriendo.
+#
+# Solo dos caminos sobreviven al pipe: `--help` (sale antes del guard) y
+# `--non-interactive` (no hay preguntas que responder). Cualquier otro bloque
+# ```bash del README que mande la corrida por pipe es el bug de vuelta.
+README_DEPLOY=$REPO_ROOT/deploy/README-deploy.md
+readme_pipe=$(awk '
+    /^```bash/ { inside = 1; next }
+    /^```/ { inside = 0; next }
+    inside && /bash -s/ { print }
+' "$README_DEPLOY")
+bad_pipe=''
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+        *--help*|*--non-interactive*) ;;
+        *) bad_pipe=$line ;;
+    esac
+done <<<"$readme_pipe"
+assert_eq 'README-deploy no manda la corrida interactiva por pipe' '' "$bad_pipe"
+assert_contains 'README-deploy descarga el instalador antes de ejecutarlo' \
+    'curl -fsSL -o /tmp/install.sh' "$(cat "$README_DEPLOY")"
+
+# La sinopsis de `--help` ofrecia el pipe para CUALQUIER opcion, incluida la
+# corrida interactiva que ese mismo pipe rompe.
+help_out=$(bash "$INSTALL_SH" --help 2>&1)
+assert_not_contains 'install.sh --help no ofrece el pipe para toda opcion' \
+    '| sudo bash -s -- [opciones]' "$help_out"
+assert_contains 'install.sh --help muestra la descarga antes de ejecutar' \
+    'sudo bash install.sh [opciones]' "$help_out"
+
+# El aviso de `--dry-run` decia "<generada, escrita en el .env, no impresa>"
+# para TODA clave generada. Es verdad para DB_PASS y mentira para
+# SUPERUSER_PASSWORD, que no se escribe en ningun archivo (solo queda el hash en
+# la base). Es el mismo defecto que ya se corrigio en `recover_env_password` y
+# que dejo a un operador buscando una clave en el unico lugar donde no puede
+# estar. Dos mensajes distintos, uno por destino.
+generated_msgs=$(grep -c '\[dry-run\] %s=<generada' "$INSTALL_SH")
+assert_eq 'install.sh distingue el destino de cada secreto generado' 2 "$generated_msgs"
+install_src=$(cat "$INSTALL_SH")
+assert_contains 'install.sh condiciona el aviso a la clave generada' \
+    'if [ "$key" = SUPERUSER_PASSWORD ]' "$install_src"
+assert_contains 'install.sh aclara que la clave del superusuario no se guarda' \
+    'no se guarda en ningun archivo' "$install_src"

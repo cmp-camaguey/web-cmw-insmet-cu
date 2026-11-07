@@ -370,17 +370,22 @@ migraciones, estaticos, las dos unidades systemd, el vhost de Nginx y el
 Primero, ver que va a hacer, sin tocar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
-    | sudo bash -s -- --dry-run
+curl -fsSL -o /tmp/install.sh https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
+    && sudo bash /tmp/install.sh --dry-run
 ```
 
-Despues, la corrida real. **Sin terminal el script aborta**: un instalador que
-adivina en un pipe escribe el `.env` equivocado y nadie lo ve hasta que el sitio
-responde `DisallowedHost`.
+Despues, la corrida real. **Necesita una terminal**: el script aborta si el
+`stdin` no es un TTY, porque un instalador que adivina en un pipe escribe el
+`.env` equivocado y nadie lo ve hasta que el sitio responde `DisallowedHost`.
+
+Por eso se descarga y se ejecuta en vez de encadenar `curl ... | sudo bash -s`:
+en el pipe el `stdin` del script es la tuberia, y el guard de `-t 0` lo rechaza
+antes de tocar nada. El pipe queda reservado para `--help` (sale antes del
+guard) y para `--non-interactive`, donde no hay preguntas que responder.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
-    | sudo bash -s
+curl -fsSL -o /tmp/install.sh https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
+    && sudo bash /tmp/install.sh
 ```
 
 Opciones que importan:
