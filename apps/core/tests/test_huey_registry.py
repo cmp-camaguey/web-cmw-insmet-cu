@@ -40,6 +40,9 @@ EXPECTED_TASKS = {
     # 026 fase 4: poda diaria de avisos. Se registra por `CoreConfig.ready()`,
     # que ya importa `apps/core/tasks.py`.
     'apps.core.tasks.podar_notificaciones',
+    # 026 (huecos): recordatorio de facturas pendientes. Se registra por
+    # `CommercialConfig.ready()`.
+    'apps.commercial.tasks.recordar_facturas_pendientes',
 }
 
 # Lo que hace `huey_consumer config.huey_consumer_entry.huey`, reducido a lo que

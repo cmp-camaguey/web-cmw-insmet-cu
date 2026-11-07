@@ -46,6 +46,7 @@ def _notify_or_get(
     url='',
     dedupe_key,
     expires_at=None,
+    repeat_after=None,
 ):
     """Crea el aviso si no existe uno sin leer con la misma clave.
 
@@ -53,6 +54,12 @@ def _notify_or_get(
     *cuenta* lo notificado necesita distinguir una fila nueva de una que ya
     estaba: si no, un llamador que corre a diario reporta cada día el mismo
     recordatorio aunque no haya creado nada.
+
+    `repeat_after` es para los recordatorios que sí deben volver: el índice
+    único parcial solo impide duplicados mientras el aviso está sin leer, así
+    que sin este límite un hecho que sigue pendiente después de leerlo
+    reaparecería en cada corrida diaria. Con él, el hecho vuelve a avisar como
+    mucho una vez por intervalo. `None` conserva el comportamiento de 026.
 
     El dedup real lo hace el índice único parcial de la base, no un `exists()`
     previo: dos workers de Gunicorn pueden ver el mismo fallo a la vez y un
@@ -72,6 +79,17 @@ def _notify_or_get(
             f"severity='{severity}' no es una severidad válida "
             f'({", ".join(Notification.Severity.values)}).'
         )
+
+    if repeat_after is not None:
+        from django.utils import timezone
+
+        last = (
+            Notification.objects.filter(recipient=recipient, dedupe_key=dedupe_key)
+            .order_by('-created_at')
+            .first()
+        )
+        if last is not None and last.created_at > timezone.now() - repeat_after:
+            return last, False
 
     lookup = {'recipient': recipient, 'dedupe_key': dedupe_key, 'read_at__isnull': True}
     defaults = {
@@ -130,6 +148,7 @@ def notify_superusers(
     url='',
     dedupe_key,
     expires_at=None,
+    repeat_after=None,
 ):
     """Notifica a todos los superusuarios activos y devuelve las recién creadas.
 
@@ -138,6 +157,9 @@ def notify_superusers(
     destinatarios es fijo a propósito (dos admins en el repo): una tabla de
     preferencias por usuario sería complejidad sin uso. Si algún día entra un rol
     que deba ver solo una parte, esa es la señal para agregarla.
+
+    `repeat_after` se reenvía tal cual a `_notify_or_get`: lo usan los
+    recordatorios que deben reaparecer si el hecho sigue pendiente.
     """
     from django.contrib.auth import get_user_model
 
@@ -152,6 +174,7 @@ def notify_superusers(
             url=url,
             dedupe_key=dedupe_key,
             expires_at=expires_at,
+            repeat_after=repeat_after,
         )
         if was_created:
             created.append(obj)

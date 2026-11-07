@@ -100,6 +100,10 @@ NOTIFICATIONS_MAX_VISIBLE = int(os.getenv('NOTIFICATIONS_MAX_VISIBLE', '10'))
 # y medio alcanza para editar el aviso o preparar el siguiente sin sonar antes
 # de tiempo: el aviso sigue vigente, solo está por terminar.
 NOTIFICATIONS_WARNING_HORIZON_HOURS = int(os.getenv('NOTIFICATIONS_WARNING_HORIZON_HOURS', '48'))
+# Días que una factura puede llevar pendiente de pago antes del primer
+# recordatorio. El mismo valor se usa como cadencia: mientras siga sin cobrarse,
+# vuelve a avisar como mucho una vez por intervalo, no en cada corrida diaria.
+INVOICE_PENDING_REMINDER_DAYS = int(os.getenv('INVOICE_PENDING_REMINDER_DAYS', '7'))
 
 
 def decrypt_secret_key(encrypted_secret_key, encryption_key):

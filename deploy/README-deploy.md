@@ -687,9 +687,17 @@ leer. Las notificaciones las escribe el propio sistema en `Notification`
 | `huey` | una tarea de Huey termino en `ERROR` **y no le quedan reintentos** (solo `send_email_task`) |
 | `invoice` | fallo el PDF o el correo de una factura (la clave incluye cual de los dos) |
 | `warning` | un `Warning` vence dentro del horizonte configurado |
+| `subscription` | un cliente solicita un servicio desde el portal |
+| `invoice_pending` | una factura lleva `INVOICE_PENDING_REMINDER_DAYS` dias sin pagarse |
 
 Los destinatarios son **todos los superusuarios activos**, y el queryset se
 filtra ademas por `recipient`: un administrador no ve la notificacion de otro.
+
+El recordatorio de facturas corre en la tarea periodica
+`apps.commercial.tasks.recordar_facturas_pendientes` (`crontab(minute=0,
+hour=13)`, las **09:00 en `America/Havana`**). Mientras la factura siga sin
+cobrarse vuelve cada `INVOICE_PENDING_REMINDER_DAYS` dias, no en cada corrida
+diaria: leer el aviso no lo hace reaparecer al dia siguiente.
 
 El desplegable lista **solo las no leidas**; abrir una la marca leida y navega
 al objeto. Las leidas quedan en "Ver todas", donde tambien se pueden eliminar
@@ -706,6 +714,7 @@ Todo por variables de entorno, con default en `config/settings/base.py`:
 | `NOTIFICATIONS_RETENTION_UNREAD` | `90` | Dias que se conserva una notificacion **sin leer** |
 | `NOTIFICATIONS_MAX_VISIBLE` | `10` | Notificaciones sin leer que caben en el desplegable |
 | `NOTIFICATIONS_WARNING_HORIZON_HOURS` | `48` | Antelacion con que se recuerda un aviso por vencer |
+| `INVOICE_PENDING_REMINDER_DAYS` | `7` | Dias sin cobrar que disparan el recordatorio, y cadencia con que se repite |
 
 ### Apagarlos
 

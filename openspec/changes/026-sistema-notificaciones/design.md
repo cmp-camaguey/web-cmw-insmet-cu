@@ -73,11 +73,22 @@ el momento**.
 | Correo de factura | `invoice`, `uuid` de la factura, `email` |
 | Despliegue | `deploy`, `sha` desplegado, estado final |
 | Aviso por vencer | `warning`, `uuid` del aviso |
+| Solicitud de servicio | `subscription`, `uuid` de la suscripción, `requested` |
+| Factura pendiente de pago | `invoice_pending`, `uuid` de la factura |
 
 Sin el `created_at` en la clave, tres reintentos de la misma tarea producen una
 fila. Si el admin la lee y el fallo se repite, el indice parcial ya no aplica y
 aparece una fila nueva: eso es lo deseado, porque un fallo repetido despues de
 haberlo visto **es** informacion nueva.
+
+### 2.1 Recordatorios que deben repetirse
+
+El indice parcial solo impide duplicados **sin leer**. Un recordatorio cuya
+condicion sigue siendo cierta —una factura que sigue sin pagarse— reapareceria
+en cada corrida diaria despues de que el admin lo lea, que es la forma mas
+rapida de que deje de mirar el icono. `_notify_or_get` acepta `repeat_after`:
+con el, el mismo hecho vuelve a avisar como mucho una vez por intervalo.
+`None` conserva el comportamiento de 026.
 
 ## 3. Creacion: explicita, no por señal
 
