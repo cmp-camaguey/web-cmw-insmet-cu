@@ -1,3 +1,5 @@
+from datetime import datetime, time, timedelta
+
 from django.utils import timezone
 from django.views.generic import DetailView
 
@@ -29,9 +31,20 @@ class WeatherReportDetailView(DetailView):
         return name_map[self.get_report_type()]
 
     def get_object(self):
+        # El dia local se resuelve en Python, no con `date__date`. Ese lookup
+        # resuelve `America/Havana` DENTRO de PostgreSQL, con el tzdata del
+        # servidor de base; si ese tzdata y el de Python no coinciden (pasa: el
+        # paquete `tzdata` de PyPI y el de la imagen de PostgreSQL se mueven a
+        # distinto ritmo), los dos lados discrepan una vez al anio y las cuatro
+        # paginas del tiempo responden "Nada que mostrar" durante horas.
+        # Con una ventana de instantes la base solo compara `timestamptz` y no
+        # resuelve ninguna zona: la unica fuente de verdad es Python.
+        dia = timezone.localdate()
+        inicio = timezone.make_aware(datetime.combine(dia, time.min))
+        fin = timezone.make_aware(datetime.combine(dia + timedelta(days=1), time.min))
         return (
             WeatherReport.objects.filter(
-                report_type=self.get_report_type(), date__date=timezone.localdate()
+                report_type=self.get_report_type(), date__gte=inicio, date__lt=fin
             )
             .select_related('user')
             .first()
