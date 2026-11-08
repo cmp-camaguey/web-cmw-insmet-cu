@@ -69,7 +69,9 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
       commit. `notificar_cliente_desactivado` en `apps/commercial/notifications.py`
       con `source='commercial'` (fuente interna, no `'subscription'`). Pruebas:
       `ClienteDesactivadoTests` (5).
-- [ ] **T5** S5 · correo al cliente por anulación · inline
+- [x] **T5** S5 · correo al cliente por anulación · inline · este commit.
+      `apps/commercial/emails.py` + `templates/emails/suscripcion_anulada.html`.
+      Pruebas: `SubscriptionCancelEmailTests` (3).
 - [ ] **T6** S6 · aviso de contratos por vencer · inline
 - [ ] **T7** Verificación: `manage.py check`, `makemigrations --check --dry-run`,
       pruebas de las apps tocadas y suite completa · inline
@@ -100,3 +102,8 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   se omite cuando no queda ninguna viva: un aviso que dice «0» es el eco que la
   S4 no quiere. La fuente es `commercial`, no `subscription`, porque es
   información de facturación para el admin y no un mensaje al cliente.
+- **L5** (2026-11-08) T5 cerrada. El correo sale solo cuando la anulación se
+  aplicó: una anulación rechazada por factura emitida o pago aprobado no avisa de
+  nada, porque no hubo hecho. El encolado va dentro de `try/except` en la vista
+  —la fila ya cambió y un 500 no la devuelve— y la plantilla reusa la cabecera y
+  el pie comunes de `templates/emails/includes/`.
