@@ -409,7 +409,7 @@ certificados, y eso se edita en el servidor.
 | `deploy/README-deploy.md` | Los porqués del diseño, el rollback y los errores que solo salen en producción |
 
 La separación es deliberada: **toda la lógica del deploy vive en
-`deploy/deploy.sh`** y el workflow es un cliente SSH delgado que lo invoca. Un
+`deploy/deploy.sh`** y el panel es un cliente delgado que lo invoca. Un
 deploy que se puede correr a mano desde el servidor es un deploy que se puede
 depurar; uno que solo existe como YAML de GitHub no.
 
@@ -777,16 +777,16 @@ Hasta acá el servidor sirve, pero cada cambio hay que desplegarlo a mano. A par
 de acá se actualiza solo cuando alguien aprieta el botón "Actualizar" del panel.
 
 La dirección importa: **nada entra al contenedor**. No hay ningún workflow de
-GitHub conectándose por SSH al servidor; el servidor resuelve `refs/heads/main`
-contra GitHub por HTTPS y aplica el commit localmente. Por eso un proveedor que
-prohíbe SSH entrante no rompe las actualizaciones.
+GitHub conectándose al servidor; el servidor resuelve `refs/heads/main` contra
+GitHub por HTTPS y aplica el commit localmente. Por eso el despliegue no necesita
+ningún puerto entrante.
 
 #### 8.1 Instalar el andamiaje en el servidor (una vez)
 
 El andamiaje no es autocontenido: la primera vez hay que dejar el servidor armado
 —usuario de despliegue, el script, la config, el sudoers y las unidades de
-systemd—. **No se genera ninguna clave SSH**: el instalador ya no crea keypair de
-despliegue.
+systemd—. **No se genera ninguna credencial de despliegue**: el instalador no crea
+keypair.
 
 ```bash
 sudo ./deploy/install.sh --dry-run   # muestra qué haría, sin tocar nada
@@ -816,10 +816,9 @@ regenera una clave o pisa una config editada a mano convierte un reintento en un
 incidente.
 
 A propósito **no** hace: tocar el firewall (imprime los comandos de `ufw`),
-configurar el proxy externo (imprime los datos para NPM), apagar `sshd` (puede
-estar corriendo sobre esa misma sesión), ni tomar snapshots. Son decisiones que
-dependen de la red real del sitio, y automatizarlas a ciegas deja más basura de la
-que recoge.
+configurar el proxy externo (imprime los datos para NPM), ni tomar snapshots. Son
+decisiones que dependen de la red real del sitio, y automatizarlas a ciegas deja
+más basura de la que recoge.
 
 > **Por qué el script vive en `/usr/local/sbin` y no en `/srv/webcmp/deploy/`.** El
 > deploy corre como root y el checkout es escribible por `webcmp`. Con el sudoers
@@ -885,18 +884,10 @@ Si eso devuelve un SHA, el botón "Actualizar" va a funcionar. Si no:
 | timeout / `Connection refused` | Sin salida al 443. Pedirla al proveedor |
 | `Authentication failed` | El repo no es legible sin credenciales: el ejecutor no tiene token |
 
-Con un proveedor que prohíbe SSH se puede apagar `sshd`, pero **no desde el
-instalador**: puede estar corriendo sobre esa misma sesión. Se hace a mano, y solo
-cuando la consola del proveedor (Proxmox, `pct enter`) ya está probada:
-
-```bash
-sudo systemctl disable --now ssh
-```
-
 > **`.github/workflows/deploy-production.yml` ya no se usa.** Era el deploy por
-> push con `DEPLOY_SSH_KEY`, y quedó apagado con `if: vars.DEPLOY_ENABLED ==
-> 'true'` (variable que no existe). La actualización es pull; ese archivo es una
-> alternativa histórica, no el camino vigente.
+> push, y quedó apagado con `if: vars.DEPLOY_ENABLED == 'true'` (variable que no
+> existe). La actualización es pull; ese archivo es una alternativa histórica, no
+> el camino vigente.
 
 #### 8.3 Qué dispara la actualización
 
