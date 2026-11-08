@@ -21,9 +21,10 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   **reenvía una sola vez** la confirmación a quien sigue pendiente y cuyo último
   envío tiene más de `NEWSLETTER_REMINDER_HOURS` (48 h), y **borra** los
   pendientes (`confirmed_at IS NULL`) creados hace más de
-  `NEWSLETTER_PENDING_RETENTION_DAYS` (7 días). Un suscriptor confirmado no se
-  borra nunca; uno pendiente no consintió nada, así que no hay rastro que
-  conservar.
+  `NEWSLETTER_PENDING_RETENTION_DAYS` (7 días), **salvo los que se dieron de baja
+  antes de confirmar**: una fila inactiva es un «no» registrado, no un alta
+  olvidada. Un suscriptor confirmado no se borra nunca; uno pendiente no
+  consintió nada, así que no hay rastro que conservar.
 - **S4.** Desactivar un cliente (`Customer`, baja lógica) que todavía tiene
   suscripciones activas deja un aviso **WARNING** a los admins con el cliente y
   cuántas quedan vivas. No es un eco de la acción: la pantalla no muestra que se
@@ -60,7 +61,10 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
       `mail.outbox` vea lo encolado.
 - [x] **T2** S2 · aviso de publicación enviada · inline · este commit. Pruebas:
       `MailSendSuccessNotificationTests` en `apps.core.tests.test_audiences`.
-- [ ] **T3** S3 · `reminder_sent_at` + migración + tarea Huey · inline
+- [x] **T3** S3 · `reminder_sent_at` + migración + tarea Huey · inline · este
+      commit. `core.0005` solo añade una columna nullable, sin reescritura de
+      tabla en producción. Pruebas: `PendingSubscriberMaintenanceTests` (9) y la
+      tarea añadida a `EXPECTED_TASKS` de `test_huey_registry`.
 - [ ] **T4** S4 · aviso al desactivar cliente con servicios vivos · inline
 - [ ] **T5** S5 · correo al cliente por anulación · inline
 - [ ] **T6** S6 · aviso de contratos por vencer · inline
@@ -81,3 +85,10 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   darse de baja sería el defecto más visible de ese correo. En T2 la
   clave de deduplicación lleva el `pk` del objeto y `sent`, así que reenviar el
   mismo objeto sin leer no duplica el aviso.
+- **L3** (2026-11-08) T3 cerrada. El recordatorio reusa el token vigente y solo
+  lo reemite si ya venció: invalidar el enlace del correo original a las 48 h
+  habría dejado «enlace no válido» a quien lo abriera después del recordatorio.
+  La limpieza filtra `active=True` además de `confirmed_at IS NULL`; una fila
+  inactiva sin confirmar es una baja pedida antes de confirmar, y borrarla
+  contradiría la razón por la que `unsubscribe` no borra. La tarea corre a las
+  4:30 UTC —medianoche en La Habana— y limpia antes de recordar.

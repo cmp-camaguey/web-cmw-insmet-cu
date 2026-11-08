@@ -4,6 +4,7 @@ Ver `openspec/changes/030-boletin-y-notificaciones-de-clientes/design.md` §3 y
 `odd/tasks/030-boletin-y-suscripcion.md` S5–S10.
 """
 
+import uuid
 from datetime import timedelta
 
 from django.contrib.auth.models import User
@@ -20,10 +21,13 @@ from apps.core.subscriptions import (
     CONFIRM_OK,
     confirm,
     move_subscription,
+    purge_stale_pending,
+    remind_pending_subscribers,
     set_consent,
     subscribe,
     unsubscribe,
 )
+from apps.core.tasks import mantener_suscriptores_pendientes
 from apps.core.tests.base import get_default_list
 from config.huey import huey
 
@@ -340,3 +344,126 @@ class MoveSubscriptionTests(NewsletterFixtureMixin, TestCase):
         from apps.core.subscriptions import confirmation_ttl
 
         self.assertEqual(confirmation_ttl(), timedelta(hours=1))
+
+
+class PendingSubscriberMaintenanceTests(NewsletterFixtureMixin, TestCase):
+    """Recordatorio único a las 48 h y limpieza a los 7 días (S3).
+
+    Las dos tareas existen porque un alta sin confirmar es invisible: la persona
+    no recibe nada más y la fila se queda ahí. El recordatorio le da una segunda
+    oportunidad; la limpieza evita que la tabla crezca con gente que nunca entró
+    en la lista.
+    """
+
+    def setUp(self):
+        # `send_confirmation` encola por Huey: sin `immediate` la tarea queda en
+        # la cola y `mail.outbox` no ve nada.
+        self._old_immediate = huey.immediate
+        huey.immediate = True
+        mail.outbox = []
+
+    def tearDown(self):
+        huey.immediate = self._old_immediate
+
+    def _pending(self, email, *, hours_ago=0, days_ago=0):
+        """Suscriptor sin confirmar, con su antigüedad fijada a mano.
+
+        `created_at` es `auto_now_add`, así que se corrige con `update()`: el
+        `save()` lo volvería a poner en «ahora» y el test no probaría nada.
+        """
+        subscriber = Subscriber.objects.create(email=email, source=Subscriber.Source.LANDING)
+        Subscription.objects.create(
+            subscriber=subscriber,
+            recipient_list=self.default_list,
+            source=Subscriber.Source.LANDING,
+        )
+        sent_at = timezone.now() - timedelta(hours=hours_ago, days=days_ago)
+        Subscriber.objects.filter(pk=subscriber.pk).update(
+            confirmation_token=uuid.uuid4(),
+            confirmation_sent_at=sent_at,
+            created_at=sent_at,
+        )
+        subscriber.refresh_from_db()
+        return subscriber
+
+    def test_el_pendiente_de_dos_dias_recibe_un_recordatorio(self):
+        subscriber = self._pending('tarde@ejemplo.cu', hours_ago=49)
+
+        sent = remind_pending_subscribers()
+
+        self.assertEqual(sent, 1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['tarde@ejemplo.cu'])
+        self.assertIn('suscripcion/confirmar/', mail.outbox[0].body)
+        subscriber.refresh_from_db()
+        self.assertIsNotNone(subscriber.reminder_sent_at)
+
+    def test_el_recordatorio_no_se_repite(self):
+        self._pending('insistente@ejemplo.cu', hours_ago=49)
+        remind_pending_subscribers()
+
+        sent = remind_pending_subscribers()
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_el_pendiente_reciente_no_recibe_recordatorio(self):
+        self._pending('recien@ejemplo.cu', hours_ago=10)
+
+        self.assertEqual(remind_pending_subscribers(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_un_confirmado_nunca_recibe_recordatorio(self):
+        subscriber = self._pending('ya-confirmo@ejemplo.cu', hours_ago=49)
+        Subscriber.objects.filter(pk=subscriber.pk).update(confirmed_at=timezone.now())
+
+        self.assertEqual(remind_pending_subscribers(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_el_recordatorio_conserva_el_token_todavia_vigente(self):
+        """Invalidar el enlace del correo original a las 48 h sería un defecto."""
+        subscriber = self._pending('vigente@ejemplo.cu', hours_ago=49)
+        token = subscriber.confirmation_token
+
+        remind_pending_subscribers()
+
+        subscriber.refresh_from_db()
+        self.assertEqual(subscriber.confirmation_token, token)
+        self.assertIn(str(token), mail.outbox[0].body)
+
+    def test_el_pendiente_de_ocho_dias_se_borra(self):
+        subscriber = self._pending('perdido@ejemplo.cu', days_ago=8)
+
+        deleted = purge_stale_pending()
+
+        self.assertEqual(deleted, 1)
+        self.assertFalse(Subscriber.objects.filter(pk=subscriber.pk).exists())
+        self.assertFalse(Subscription.objects.filter(subscriber_id=subscriber.pk).exists())
+
+    def test_un_confirmado_viejo_no_se_borra(self):
+        subscriber = self._pending('antiguo@ejemplo.cu', days_ago=30)
+        Subscriber.objects.filter(pk=subscriber.pk).update(confirmed_at=timezone.now())
+
+        self.assertEqual(purge_stale_pending(), 0)
+        self.assertTrue(Subscriber.objects.filter(pk=subscriber.pk).exists())
+
+    def test_una_baja_sin_confirmar_no_se_borra_por_antigua(self):
+        """Quien pidió la baja no es un alta olvidada: se conserva el rastro."""
+        subscriber = self._pending('se-fue@ejemplo.cu', days_ago=30)
+        Subscriber.objects.filter(pk=subscriber.pk).update(active=False)
+
+        self.assertEqual(purge_stale_pending(), 0)
+        self.assertTrue(Subscriber.objects.filter(pk=subscriber.pk).exists())
+
+    def test_la_tarea_limpia_antes_de_recordar(self):
+        """Al que se borra no se le manda un enlace que ya no existe."""
+        borrado = self._pending('borrado@ejemplo.cu', days_ago=8)
+        self._pending('recordado@ejemplo.cu', hours_ago=49)
+
+        # `huey.immediate` hace que la tarea corra en el acto, pero devuelve un
+        # `Result` y no el valor de retorno: lo que se comprueba son los efectos.
+        mantener_suscriptores_pendientes()
+
+        self.assertFalse(Subscriber.objects.filter(pk=borrado.pk).exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['recordado@ejemplo.cu'])

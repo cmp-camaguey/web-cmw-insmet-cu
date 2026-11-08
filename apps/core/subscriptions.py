@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIRMATION_TTL_HOURS = 72
 
+# Espera antes del único recordatorio, y vida de un alta que nunca se confirmó.
+# El recordatorio es uno solo a propósito: quien no confirmó en tres días no va a
+# confirmar por insistencia, y cada reenvío es correo no solicitado.
+DEFAULT_REMINDER_HOURS = 48
+DEFAULT_PENDING_RETENTION_DAYS = 7
+
 CONFIRM_OK = 'ok'
 CONFIRM_INVALID = 'invalid'
 CONFIRM_EXPIRED = 'expired'
@@ -33,6 +39,16 @@ def normalize_email(email):
 def confirmation_ttl():
     hours = getattr(settings, 'NEWSLETTER_CONFIRMATION_TTL_HOURS', DEFAULT_CONFIRMATION_TTL_HOURS)
     return timedelta(hours=hours)
+
+
+def reminder_delay():
+    hours = getattr(settings, 'NEWSLETTER_REMINDER_HOURS', DEFAULT_REMINDER_HOURS)
+    return timedelta(hours=hours)
+
+
+def pending_retention():
+    days = getattr(settings, 'NEWSLETTER_PENDING_RETENTION_DAYS', DEFAULT_PENDING_RETENTION_DAYS)
+    return timedelta(days=days)
 
 
 def _issue_confirmation_token(subscriber):
@@ -366,3 +382,77 @@ def send_confirmation(subscriber):
         settings.DEFAULT_FROM_EMAIL,
         [subscriber.email],
     )
+
+
+def _refresh_confirmation_token_if_expired(subscriber, now):
+    """Reemite el token solo cuando el que tiene ya no sirve.
+
+    Reemitirlo siempre sería más simple y peor: invalidaría el enlace del correo
+    original, que a las 48 h todavía es válido, y quien lo abriera después del
+    recordatorio vería «enlace no válido» con el correo de confirmación delante.
+    """
+    sent_at = subscriber.confirmation_sent_at
+    if sent_at is None or now - sent_at > confirmation_ttl():
+        _issue_confirmation_token(subscriber)
+
+
+def remind_pending_subscribers(now=None):
+    """Reenvía una sola vez la confirmación a quien sigue sin confirmar.
+
+    Devuelve cuántos correos se encolaron. El filtro usa `reminder_sent_at` y no
+    «sigue pendiente», porque «sigue pendiente» es cierto para siempre y la tarea
+    corre a diario: sin esa marca, cada noche saldría otro correo.
+
+    Solo mira a suscriptores `active=True`. Una fila inactiva con
+    `confirmed_at` nulo es una baja pedida antes de confirmar, no un alta
+    olvidada: recordarle la confirmación a quien ya pidió no recibir nada sería
+    lo contrario de lo que pidió.
+    """
+    now = now or timezone.now()
+    cutoff = now - reminder_delay()
+
+    due = Subscriber.objects.filter(
+        active=True,
+        confirmed_at__isnull=True,
+        reminder_sent_at__isnull=True,
+        confirmation_sent_at__isnull=False,
+        confirmation_sent_at__lt=cutoff,
+    )
+
+    sent = 0
+    for subscriber in due:
+        _refresh_confirmation_token_if_expired(subscriber, now)
+        try:
+            send_confirmation(subscriber)
+        except Exception:
+            # Si el encolado falla, `reminder_sent_at` se queda nulo y la tarea
+            # de mañana lo reintenta. Marcarlo igual perdería el recordatorio
+            # para siempre por un fallo pasajero de la cola.
+            logger.exception('No se pudo encolar el recordatorio de %s', subscriber.pk)
+            continue
+        Subscriber.objects.filter(pk=subscriber.pk).update(reminder_sent_at=now)
+        sent += 1
+
+    return sent
+
+
+def purge_stale_pending(now=None):
+    """Borra las altas que nunca se confirmaron y ya no van a hacerlo.
+
+    Devuelve cuántas filas se borraron. Un pendiente no consintió nada —no hay
+    consentimiento que conservar ni historial de a quién se le escribió— y
+    dejarlo crecer solo engorda la tabla de una gente que nunca entró en la
+    lista.
+
+    Un suscriptor confirmado no se borra nunca, ni siquiera dado de baja: ahí sí
+    hay un historial de consentimiento y de baja que la baja lógica existe para
+    conservar.
+    """
+    now = now or timezone.now()
+    cutoff = now - pending_retention()
+
+    stale = Subscriber.objects.filter(active=True, confirmed_at__isnull=True, created_at__lt=cutoff)
+    count = stale.count()
+    if count:
+        stale.delete()
+    return count

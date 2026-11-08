@@ -359,6 +359,12 @@ class Subscriber(models.Model):
     confirmation_sent_at = models.DateTimeField(
         null=True, blank=True, verbose_name='Confirmación enviada'
     )
+    # Marca del único recordatorio que se manda a quien no confirmó. Existe para
+    # que la tarea diaria no reenvíe el mismo correo cada noche: sin esta columna
+    # el filtro sería «sigue pendiente», y eso es cierto para siempre.
+    reminder_sent_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='Recordatorio enviado'
+    )
     unsubscribe_token = models.UUIDField(
         default=uuid4, unique=True, editable=False, verbose_name='Token de baja'
     )

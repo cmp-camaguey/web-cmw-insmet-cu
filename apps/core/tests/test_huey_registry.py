@@ -40,6 +40,8 @@ EXPECTED_TASKS = {
     # 026 fase 4: poda diaria de avisos. Se registra por `CoreConfig.ready()`,
     # que ya importa `apps/core/tasks.py`.
     'apps.core.tasks.podar_notificaciones',
+    # 030: recordatorio único y limpieza de las altas sin confirmar.
+    'apps.core.tasks.mantener_suscriptores_pendientes',
     # 026 (huecos): recordatorio de facturas pendientes. Se registra por
     # `CommercialConfig.ready()`.
     'apps.commercial.tasks.recordar_facturas_pendientes',
