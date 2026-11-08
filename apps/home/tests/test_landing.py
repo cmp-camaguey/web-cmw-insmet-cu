@@ -306,29 +306,35 @@ class LandingSevereWarningStripTests(TestCase):
             valid_until=timezone.now() + timezone.timedelta(days=1),
         )
 
+    # Se busca `data-emergency-banner`, el atributo del `<aside>` de la franja, y
+    # no la cadena `emergency-banner`: `scripts.html` carga
+    # `emergency-banner.js` en todas las páginas, así que esa cadena aparece en
+    # el HTML aunque no haya ningún aviso vigente.
+    BANNER_MARKER = 'data-emergency-banner'
+
     def test_tropical_cyclone_warning_renders_strip_on_landing(self):
         self._create_warning('tropical_cyclone', 'Huracán acercándose a la provincia')
         html = self.client.get('/').content.decode()
-        self.assertIn('emergency-banner', html)
+        self.assertIn(self.BANNER_MARKER, html)
         self.assertIn('Huracán acercándose a la provincia', html)
 
     def test_storm_warning_renders_strip_on_landing(self):
         self._create_warning('storm', 'Tormenta eléctrica severa')
         html = self.client.get('/').content.decode()
-        self.assertIn('emergency-banner', html)
+        self.assertIn(self.BANNER_MARKER, html)
         self.assertIn('Tormenta eléctrica severa', html)
 
     def test_early_warning_does_not_render_strip_on_landing(self):
         self._create_warning('early', 'Alerta por lluvias intensas')
         html = self.client.get('/').content.decode()
-        self.assertNotIn('emergency-banner', html)
+        self.assertNotIn(self.BANNER_MARKER, html)
         self.assertNotIn('Alerta por lluvias intensas', html)
 
     def test_early_warning_still_renders_on_home(self):
         """El home conserva la franja para cualquier aviso vigente."""
         self._create_warning('early', 'Alerta por lluvias intensas')
         html = self.client.get(reverse('home:index')).content.decode()
-        self.assertIn('emergency-banner', html)
+        self.assertIn(self.BANNER_MARKER, html)
         self.assertIn('Alerta por lluvias intensas', html)
 
 
