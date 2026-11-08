@@ -173,6 +173,22 @@ class NotificationListTests(TestCase):
         )
         self.assertNotContains(response, 'return confirm(')
 
+    def test_el_submit_del_modal_nace_deshabilitado(self):
+        """Sin accion el formulario heredaria la URL del historial y daria 405.
+
+        El modal se renderiza despues del script que lo configura: si el script
+        no llegara a engancharse, el boton deshabilitado es lo unico que impide
+        que el navegador haga POST a esta misma pagina, que solo acepta GET.
+        """
+        _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        html = response.content.decode()
+        form_start = html.index('id="notification-delete-form"')
+        submit = html.index('type="submit"', form_start)
+        self.assertIn('disabled', html[submit : submit + 200])
+
 
 class NotificationMarkReadTests(TestCase):
     def setUp(self):
