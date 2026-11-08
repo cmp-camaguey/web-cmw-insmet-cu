@@ -4,11 +4,18 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.commercial.models import Invoice, InvoiceItem, Service, ServiceSubscription
+from apps.commercial.models import (
+    Customer,
+    Invoice,
+    InvoiceItem,
+    Service,
+    ServiceSubscription,
+)
 from apps.commercial.notifications import notificar_solicitud_suscripcion
 from apps.commercial.tasks import facturas_pendientes
 from apps.commercial.tests.factories import natural_customer
@@ -258,3 +265,102 @@ class FacturasPendientesTests(TestCase):
         created = facturas_pendientes()
 
         self.assertEqual(len(created), 1)
+
+
+class ClienteDesactivadoTests(TestCase):
+    """Desactivar un cliente con servicios vivos deja de cobrar sin decirlo."""
+
+    @classmethod
+    def setUpTestData(cls):
+        _disable_maintenance_mode()
+        cls.admin = _superuser('admin-baja')
+        cls.other_admin = _superuser('admin-baja-2')
+        cls.staff = User.objects.create_user(
+            'staff-baja',
+            'staff-baja@example.com',
+            'pass',
+            is_staff=True,
+            first_name='Es',
+            last_name='Taff',
+        )
+        ct = ContentType.objects.get_for_model(Customer)
+        # El operador real tiene los dos permisos: sin `view_customer` el
+        # redirect posterior al listado devuelve 403 y el test mediría eso en
+        # vez de la baja.
+        cls.staff.user_permissions.add(
+            ct.permission_set.get(codename='delete_customer'),
+            ct.permission_set.get(codename='view_customer'),
+        )
+        cls.customer = natural_customer(username='cliente-baja')
+        cls.service = Service.objects.create(
+            user=cls.staff,
+            title='Servicio vigente',
+            summary='Resumen',
+            service_type=Service.COMMERCIAL,
+            service_category='pronostico',
+            price=Decimal('50.00'),
+            code='NOTIF-003',
+        )
+
+    def _dar_de_baja(self):
+        self.client.force_login(self.staff)
+        return self.client.post(
+            reverse('commercial:cliente_delete', args=[self.customer.uuid]), follow=True
+        )
+
+    def _suscripcion(self, *, status='paid', record_active=True):
+        subscription = ServiceSubscription.objects.create(
+            customer=self.customer,
+            service=self.service,
+            start_date=timezone.now(),
+            payment_status=status,
+        )
+        if not record_active:
+            # `SoftDeleteModel.delete()` es la baja lógica que usa el panel.
+            subscription.delete()
+        return subscription
+
+    def test_la_baja_con_servicio_vivo_avisa_a_los_admins(self):
+        self._suscripcion()
+
+        response = self._dar_de_baja()
+
+        self.assertEqual(response.status_code, 200)
+        self.customer.refresh_from_db()
+        self.assertFalse(self.customer.record_active)
+        notification = Notification.objects.get(source='commercial', recipient=self.admin)
+        self.assertEqual(notification.severity, Notification.Severity.WARNING)
+        self.assertIn(self.customer.display_name, notification.body)
+        self.assertIn('su suscripción activa sigue en pie', notification.body)
+        self.assertEqual(notification.url, '/commercial/suscripciones/')
+
+    def test_la_baja_sin_servicios_vivos_no_avisa_de_nada(self):
+        self._dar_de_baja()
+
+        self.assertEqual(Notification.objects.filter(source='commercial').count(), 0)
+
+    def test_una_suscripcion_ya_anulada_no_cuenta_como_viva(self):
+        self._suscripcion(record_active=False)
+
+        self._dar_de_baja()
+
+        self.assertEqual(Notification.objects.filter(source='commercial').count(), 0)
+
+    def test_el_aviso_cuenta_todas_las_suscripciones_vivas(self):
+        self._suscripcion()
+        self._suscripcion(status='pending')
+
+        self._dar_de_baja()
+
+        notification = Notification.objects.get(source='commercial', recipient=self.admin)
+        self.assertIn('sus 2 suscripciones activas siguen en pie', notification.body)
+
+    def test_repetir_la_baja_no_duplica_el_aviso(self):
+        self._suscripcion()
+        self._dar_de_baja()
+
+        self._dar_de_baja()
+
+        self.assertEqual(
+            Notification.objects.filter(source='commercial', recipient=self.admin).count(), 1
+        )

@@ -17,7 +17,8 @@ from apps.commercial.forms.customer import (
     CustomerForUserForm,
     CustomerUpdateForm,
 )
-from apps.commercial.models import Customer
+from apps.commercial.models import Customer, ServiceSubscription
+from apps.commercial.notifications import notificar_cliente_desactivado
 from apps.core.utils import log_action
 from apps.user_auth.models import Profile
 
@@ -133,6 +134,9 @@ class CustomerDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
         if not customer.record_active:
             messages.warning(request, 'El cliente ya estaba desactivado.')
             return redirect('commercial:cliente_list')
+        # La baja del cliente no toca sus suscripciones: lo que se cuenta acá es
+        # justo lo que va a seguir vivo después, y es lo que nadie ve en pantalla.
+        vivas = ServiceSubscription.objects.filter(customer=customer, record_active=True).count()
         customer.delete()
         log_action(
             user=self.request.user,
@@ -140,6 +144,8 @@ class CustomerDeleteView(LoginRequiredMixin, PermissionRequiredMixin, View):
             action_flag=DELETION,
             message=f'Cliente desactivado: {customer.display_name}.',
         )
+        if vivas:
+            notificar_cliente_desactivado(customer, vivas)
         messages.success(request, 'Cliente desactivado con éxito.')
         return redirect('commercial:cliente_list')
 

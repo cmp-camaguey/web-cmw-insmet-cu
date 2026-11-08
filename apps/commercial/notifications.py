@@ -34,3 +34,40 @@ def notificar_solicitud_suscripcion(subscription):
         url=reverse('commercial:suscripcion_list'),
         dedupe_key=make_dedupe_key('subscription', subscription.uuid, 'requested'),
     )
+
+
+def notificar_cliente_desactivado(customer, suscripciones_vivas):
+    """Avisa a los admins que se desactivó un cliente que sigue con servicio.
+
+    No es un eco de la acción: es la única superficie donde el hecho aparece. La
+    pantalla no lo dice, el cliente desaparece del listado y sus suscripciones
+    siguen vivas, así que lo que se está dejando de facturar no se ve en ningún
+    sitio.
+
+    `source='commercial'` y no `'subscription'`: es información interna de
+    facturación, no un mensaje para el cliente. Cuando la audiencia por `source`
+    entre en juego, una fuente que no sea de cliente tiene que quedarse en los
+    superusuarios, y nombrarla aquí lo deja explícito en vez de depender de que
+    `'subscription'` signifique dos cosas.
+    """
+    from django.urls import reverse
+
+    from apps.core.models import Notification
+    from apps.core.notifications import make_dedupe_key, notify_superusers
+
+    if suscripciones_vivas == 1:
+        detalle = 'su suscripción activa sigue en pie'
+    else:
+        detalle = f'sus {suscripciones_vivas} suscripciones activas siguen en pie'
+
+    return notify_superusers(
+        source='commercial',
+        severity=Notification.Severity.WARNING,
+        title='Cliente desactivado con servicios activos',
+        body=(
+            f'{customer.display_name} quedó desactivado y {detalle}. '
+            'Revise si corresponde anularlas o seguir facturándolas.'
+        ),
+        url=reverse('commercial:suscripcion_list'),
+        dedupe_key=make_dedupe_key('commercial', customer.uuid, 'deactivated'),
+    )

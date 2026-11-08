@@ -65,7 +65,10 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
       commit. `core.0005` solo añade una columna nullable, sin reescritura de
       tabla en producción. Pruebas: `PendingSubscriberMaintenanceTests` (9) y la
       tarea añadida a `EXPECTED_TASKS` de `test_huey_registry`.
-- [ ] **T4** S4 · aviso al desactivar cliente con servicios vivos · inline
+- [x] **T4** S4 · aviso al desactivar cliente con servicios vivos · inline · este
+      commit. `notificar_cliente_desactivado` en `apps/commercial/notifications.py`
+      con `source='commercial'` (fuente interna, no `'subscription'`). Pruebas:
+      `ClienteDesactivadoTests` (5).
 - [ ] **T5** S5 · correo al cliente por anulación · inline
 - [ ] **T6** S6 · aviso de contratos por vencer · inline
 - [ ] **T7** Verificación: `manage.py check`, `makemigrations --check --dry-run`,
@@ -92,3 +95,8 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   inactiva sin confirmar es una baja pedida antes de confirmar, y borrarla
   contradiría la razón por la que `unsubscribe` no borra. La tarea corre a las
   4:30 UTC —medianoche en La Habana— y limpia antes de recordar.
+- **L4** (2026-11-08) T4 cerrada. El aviso cuenta las suscripciones con
+  `record_active=True` antes de la baja lógica del cliente (que no las toca) y
+  se omite cuando no queda ninguna viva: un aviso que dice «0» es el eco que la
+  S4 no quiere. La fuente es `commercial`, no `subscription`, porque es
+  información de facturación para el admin y no un mensaje al cliente.
