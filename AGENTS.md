@@ -128,9 +128,11 @@ contaminó el candidato de una revisión con archivos ajenos.
   con `pre-commit: not found`. Al commitear ahí, prestar el venv del checkout
   principal: `PATH=<checkout-principal>/.venv/bin:$PATH git commit ...`.
 - Con squash merge, `git merge-base --is-ancestor <rama> dev` **miente**: el squash
-  crea un commit nuevo y la rama original nunca pasa a ser ancestro. Para saber si
-  una rama ya entró, comparar contenido (`git diff <rama> dev -- <archivos>`), no
-  ascendencia.
+  crea un commit nuevo y la rama original nunca pasa a ser ancestro. Tampoco alcanza
+  comparar contenido: `git diff <rama> dev` marca como "le falta a dev" las líneas
+  que dev **reemplazó después**, así que una rama vieja y ya mergeada parece tener
+  trabajo propio. La fuente autoritativa es el PR: `gh pr list --head <rama> --state
+  all`. `MERGED` es borrado seguro; `CLOSED` sin merge y "sin PR" se miran a mano.
 
 ## CI — tests selectivos
 
