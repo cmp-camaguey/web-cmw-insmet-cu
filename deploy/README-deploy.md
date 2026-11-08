@@ -66,12 +66,13 @@ manage migrate --check
 - Sin migraciones pendientes no se respalda: un deploy que solo cambia HTML no
   llena el disco.
 
-Restaurar, con el sitio parado:
+Restaurar, con el sitio parado y **como root** (el dump es `root:root 0600`
+dentro de un directorio `0700`; otro usuario no puede leerlo):
 
 ```bash
 sudo systemctl stop webcmp webcmp-huey
-sudo -u webcmp pg_restore -d <base> --clean --if-exists \
-    /var/backups/webcmp/db/<archivo>.dump
+sudo pg_restore -h 127.0.0.1 -U <usuario-de-la-base> -W -d <base> \
+    --clean --if-exists /var/backups/webcmp/db/<archivo>.dump
 sudo systemctl start webcmp webcmp-huey
 ```
 
@@ -491,7 +492,7 @@ Opciones que importan:
 | `--dry-run`, `-n` | Imprime el plan y no ejecuta nada. Es el primer paso siempre |
 | `--non-interactive` | Sin preguntas: cada valor sale de la variable de entorno del mismo nombre o del default. Sin terminal esto es obligatorio |
 | `--allow-incomplete-env` | Deja los `CHANGE_ME` que sobren (por ejemplo, si el SMTP todavia no existe). NO migra, NO crea el superusuario y NO arranca los servicios |
-| `--skip-deploy-scaffold` | No crea el usuario de despliegue, su keypair ni el sudoers: para servidores donde el deploy se corre a mano |
+| `--skip-deploy-scaffold` | No crea el usuario de despliegue, el sudoers ni los ejecutores de deploy: para servidores donde el deploy se corre a mano |
 
 `sudo bash -s -- --help` imprime el uso y sale 0 sin exigir root ni terminal.
 

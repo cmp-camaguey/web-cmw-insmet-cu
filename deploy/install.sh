@@ -17,7 +17,7 @@
 #   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
 #      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
 #  10. /etc/webcmp/deploy.env con el destino del health check que corresponde
-#  11. andamiaje de deploy automatico (usuario, keypair, sudoers, webcmp-deploy)
+#  11. andamiaje de deploy automatico (usuario, sudoers, webcmp-deploy, autodeploy)
 #  12. superusuario, por systemd-run con la ENCRYPTION_KEY
 #
 # AUTO-CONTENIDO, y por que importa: este archivo se ejecuta por un pipe, sin
@@ -496,8 +496,9 @@ Opciones:
                       superusuario y NO arranca los servicios: avisa de que el
                       sitio queda sin levantar.
   --skip-deploy-scaffold
-                      No instalar el usuario de despliegue, su keypair ni el
-                      sudoers: para un servidor donde el deploy va a correr a mano.
+                      No instalar el usuario de despliegue, el sudoers ni los
+                      ejecutores de deploy: para un servidor donde el deploy va
+                      a correr a mano.
   --dry-run, -n      Imprimir el plan y no ejecutar nada.
   --help, -h         Esto. Sale 0 sin exigir root ni TTY y sin tocar nada.
 

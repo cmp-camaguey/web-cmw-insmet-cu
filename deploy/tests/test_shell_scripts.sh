@@ -126,3 +126,12 @@ assert_contains 'install.sh condiciona el aviso a la clave generada' \
     'if [ "$key" = SUPERUSER_PASSWORD ]' "$install_src"
 assert_contains 'install.sh aclara que la clave del superusuario no se guarda' \
     'no se guarda en ningun archivo' "$install_src"
+
+# El instalador ya no genera keypair. Un texto que lo sigue prometiendo manda al
+# operador a buscar un archivo que no existe, y en el README raiz a cargar un
+# secret de GitHub que ningun workflow lee.
+assert_not_contains 'install.sh --help no promete un keypair' 'su keypair' "$help_out"
+assert_not_contains 'README-deploy no promete un keypair' \
+    'su keypair' "$(cat "$README_DEPLOY")"
+assert_not_contains 'README raiz no manda a cargar el .pub del keypair' \
+    'keypair que creó install.sh' "$(cat "$REPO_ROOT/README.md")"

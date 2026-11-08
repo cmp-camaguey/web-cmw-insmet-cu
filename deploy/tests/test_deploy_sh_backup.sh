@@ -93,6 +93,21 @@ else
 fi
 
 deploy_src=$(cat "$DEPLOY_SH")
+
+# Los dos gates no tocan la base: corren antes del respaldo a proposito. Si el
+# respaldo se adelanta, un deploy que aborta en `check --deploy` deja un dump
+# inutil y llena el disco sin motivo.
+gate1_line=$(grep -n '^manage makemigrations --check --dry-run' "$DEPLOY_SH" | cut -d: -f1)
+gate2_line=$(grep -n '^manage check --deploy --fail-level WARNING' "$DEPLOY_SH" | cut -d: -f1)
+if [ -n "$gate1_line" ] && [ -n "$gate2_line" ] && [ -n "$backup_line" ] \
+    && [ "$gate1_line" -lt "$backup_line" ] && [ "$gate2_line" -lt "$backup_line" ]; then
+    ok 'respaldo: se toma despues de los dos gates'
+else
+    fail 'respaldo: se toma despues de los dos gates' \
+        'gate1 < gate2 < respaldo' \
+        "gate1=$gate1_line gate2=$gate2_line respaldo=$backup_line"
+fi
+
 assert_contains 'respaldo: si pg_dump falla, el deploy aborta sin migrar' \
     'El respaldo de la base fallo. NO se aplicaron migraciones.' "$deploy_src"
 assert_contains 'respaldo: un .dump a medias se borra' \
@@ -128,3 +143,11 @@ assert_contains 'respaldo: deploy.env.example documenta DB_BACKUP_DIR' \
     'DB_BACKUP_DIR=/var/backups/webcmp/db' "$example_src"
 assert_contains 'respaldo: deploy.env.example documenta DB_BACKUP_KEEP' \
     'DB_BACKUP_KEEP=10' "$example_src"
+
+# La restauracion tiene que correr como root: el dump es root:root 0600 dentro de
+# un directorio 0700. Una instruccion `sudo -u webcmp pg_restore` falla con
+# EACCES justo cuando hace falta, o sea durante un incidente.
+assert_not_contains 'respaldo: README-deploy no propone restaurar como webcmp' \
+    'sudo -u webcmp pg_restore' "$(cat "$REPO_ROOT/deploy/README-deploy.md")"
+assert_not_contains 'respaldo: deploy.env.example no propone restaurar como webcmp' \
+    'sudo -u webcmp pg_restore' "$example_src"
