@@ -180,6 +180,25 @@ class CheckMigrationsTests(unittest.TestCase):
         self.assertEqual(resultado.returncode, 1, resultado.stdout)
         self.assertIn('no se pudo parsear', resultado.stdout)
 
+    def test_runpython_y_separatedbstate_bloquean(self):
+        """El codigo arbitrario y el desacople del estado no viajan sin revision."""
+        self.repo.rama('feat')
+        self.repo.escribir(
+            'apps/meteo/migrations/0002_py.py',
+            migracion('migrations.RunPython(lambda apps, schema_editor: None),'),
+        )
+        self.repo.escribir(
+            'apps/meteo/migrations/0003_sep.py',
+            migracion('migrations.SeparateDatabaseAndState(database_operations=[]),'),
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 1, resultado.stdout)
+        self.assertIn('BLOQUEA  RunPython', resultado.stdout)
+        self.assertIn('BLOQUEA  SeparateDatabaseAndState', resultado.stdout)
+
     # --- El escape auditado -------------------------------------------------
 
     def test_escape_con_motivo_deja_pasar(self):
@@ -215,6 +234,38 @@ class CheckMigrationsTests(unittest.TestCase):
 
         self.assertEqual(resultado.returncode, 1, resultado.stdout)
         self.assertIn('esta vacio', resultado.stdout)
+
+    def test_escape_no_tapa_una_sintaxis_rota(self):
+        """No se puede revisar lo que no se puede leer: el marcador no compra eso."""
+        self.repo.rama('feat')
+        self.repo.escribir(
+            'apps/meteo/migrations/0002_rota.py',
+            '# data-safety: reviewed: lo revise\nclass Migration(\n',
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 1, resultado.stdout)
+        self.assertIn('no se pudo parsear', resultado.stdout)
+        self.assertIn('no cubre lo que el gate no puede verificar', resultado.stdout)
+
+    def test_escape_no_tapa_una_operacion_desconocida(self):
+        """Una operacion que el gate no clasifica es una incognita, no una decision."""
+        self.repo.rama('feat')
+        self.repo.escribir(
+            'apps/meteo/migrations/0002_rara.py',
+            migracion(
+                'migrations.TruncarTabla(name="Municipio"),',
+                comentario=' ' * 8 + '# data-safety: reviewed: la revise\n',
+            ),
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 1, resultado.stdout)
+        self.assertIn('no reconocida por el gate', resultado.stdout)
 
     # --- Historia ya publicada ---------------------------------------------
 
@@ -252,6 +303,21 @@ class CheckMigrationsTests(unittest.TestCase):
 
         self.assertEqual(resultado.returncode, 1, resultado.stdout)
         self.assertIn('no se renombra', resultado.stdout)
+
+    def test_escape_no_sirve_para_historia_publicada(self):
+        """El escape cubre una perdida nueva y revisada, no reescribir historia."""
+        self.repo.rama('feat')
+        path = self.repo.root / 'apps/meteo/migrations/0001_initial.py'
+        path.write_text(
+            path.read_text(encoding='utf-8') + '\n# data-safety: reviewed: motivo\n',
+            encoding='utf-8',
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 1, resultado.stdout)
+        self.assertIn('no se edita ni se borra', resultado.stdout)
 
     # --- Lo que NO bloquea --------------------------------------------------
 
@@ -306,6 +372,18 @@ class CheckMigrationsTests(unittest.TestCase):
             ),
         )
         self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 0, resultado.stdout)
+
+    def test_renombrar_un_archivo_que_no_es_migracion_no_bloquea(self):
+        """El gate habla de migraciones: renombrar codigo normal es del PR."""
+        self.repo.rama('feat')
+        self.repo.escribir('apps/meteo/helpers.py', 'X = 1\n')
+        self.repo.commit('helper')
+        self.repo.git('mv', 'apps/meteo/helpers.py', 'apps/meteo/helpers2.py')
+        self.repo.commit('renombra')
 
         resultado = self.gate_en_rama()
 

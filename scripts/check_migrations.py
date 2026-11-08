@@ -29,6 +29,11 @@ Historia inmutable, migraciones nuevas revisables
   El motivo vacio no cuenta: un marcador sin justificacion es una tecla que se
   aprieta sola. Sin escape, la operacion destructiva bloquea el merge.
 
+- El escape declara una perdida que una persona reviso. Por eso **no** cubre lo
+  que el gate no puede verificar: una migracion que no se parsea, una lista
+  `operations` que no se encuentra y una operacion desconocida bloquean siempre.
+  Ahi no hay una decision que revisar, hay una incognita.
+
 Uso
 ---
     python scripts/check_migrations.py --base origin/main --head HEAD
@@ -382,13 +387,21 @@ def main(argv: list[str] | None = None) -> int:
         for hallazgo in hallazgos:
             texto = _describir(hallazgo.operation, hallazgo.detail)
             if hallazgo.severity == BLOCK:
-                if marca:
+                # El escape declara una perdida de datos que una persona reviso.
+                # Solo aplica a operaciones conocidas: una migracion que no se
+                # parsea o una operacion desconocida no son una decision, son
+                # una incognita. Taparlas con el marcador convertiria el gate en
+                # un tramite.
+                if marca and hallazgo.operation in BLOCKING_OPERATIONS:
                     print(f'  AVISO    {texto} (declarado)')
                     avisos += 1
                 else:
                     print(f'  BLOQUEA  {texto}')
+                    if marca:
+                        print('           el escape no cubre lo que el gate no puede verificar')
                     bloqueos += 1
-                    bloqueos_escapables += 1
+                    if hallazgo.operation in BLOCKING_OPERATIONS:
+                        bloqueos_escapables += 1
             else:
                 print(f'  AVISO    {texto}')
                 avisos += 1

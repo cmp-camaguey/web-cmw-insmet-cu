@@ -3,7 +3,7 @@
 Objetivo: adaptar el despliegue al proveedor que prohibe SSH al contenedor, respaldar la
 base antes de aplicar migraciones y bloquear en el merge `dev -> main` las migraciones
 que puedan perder datos.
-Branch: `fix/install-docs` (rama actual; el commit va ahi).
+Branch: `feat/deploy-sin-ssh-backup-migraciones`.
 Delivery: single-pr.
 Test runner: `bash deploy/tests/run.sh`, `python manage.py test apps.core` y
 `python scripts/check_migrations.py --base origin/main --head HEAD`.
@@ -39,7 +39,7 @@ Test runner: `bash deploy/tests/run.sh`, `python manage.py test apps.core` y
 | T2 | S2, S4 | inline | hecho: respaldo en `deploy.sh`, `postgresql-client` en `install.sh`, claves en el `deploy.env` generado |
 | T3 | S3, S5 | inline | hecho: `scripts/check_migrations.py` + 16 tests |
 | T4 | S3 | inline | hecho: job `Migrations safety (dev -> main)` en `ci.yml` |
-| T5 | S5 | inline | hecho: README, sudoers, AGENTS.md y `deploy.env.example` al dia |
+| T5 | S5 | inline | hecho: README raiz, `README-deploy`, `--help`, sudoers, AGENTS.md y `deploy.env.example` al dia |
 
 ## Log
 
@@ -101,3 +101,44 @@ script es stdlib.
   sobre rutas `.env*` y el usuario autorizo explicitamente la excepcion. El archivo se
   valida con `bash -n` y con un `source` en subshell (no tiene secretos: es una
   plantilla versionada).
+
+### L3 — correccion tras la verificacion independiente
+
+La verificacion del diff completo levanto dos defectos que la implementacion habia
+dejado pasar, y los dos son de la misma clase: el texto prometia algo que el codigo
+ya no hace.
+
+1. **S4 estaba a medias.** `install.sh --help` (y la sinopsis del encabezado),
+   `deploy/README-deploy.md` y el `README.md` raiz seguian hablando de "su keypair",
+   de cargar `DEPLOY_SSH_KEY` y de `ssh-keyscan`, cuando el instalador ya no genera
+   ninguna clave. Se corrigieron los tres, y el bloque 8 del README raiz se reescribio
+   entero al modelo pull: ya no hay secrets de GitHub ni `deploy-production.yml` como
+   camino vigente. El orden del deploy documentado ahora incluye el respaldo.
+2. **La restauracion documentada no podia leer el dump.** Decia
+   `sudo -u webcmp pg_restore`, pero el dump es `root:root 0600` dentro de un
+   directorio `0700`, que es justamente lo que el mismo parrafo explica. Se cambio a
+   `sudo pg_restore -h <host> -U <usuario> -W`, con el sitio parado.
+
+Ademas, dos avisos del verificador se resolvieron como bloqueo:
+
+- **El escape tapaba lo que el gate no puede verificar.** `# data-safety: reviewed:`
+  convertia en aviso una migracion con sintaxis rota o una operacion desconocida, y
+  el script salia 0 — contra su propio docstring. Ahora el escape solo cubre
+  operaciones conocidas de `BLOCKING_OPERATIONS`; lo que no se puede leer o
+  clasificar bloquea siempre.
+- Un renombre de archivo que no es migracion ya no se reporta como historia.
+
+**Pruebas nuevas** (5 en `test_check_migrations_script.py`, 3 aserciones de shell en
+`test_deploy_sh_backup.sh` y `test_shell_scripts.sh`). Para el cambio del escape se
+verifico RED -> GREEN contra el script anterior (`git show 51035657`): el mismo repo
+de prueba con marcador y sintaxis rota daba `rc=0` antes y `rc=1` despues.
+
+**Evidencia nueva:** `bash deploy/tests/run.sh` -> `106 ok, 0 falla(s)`;
+`test_check_migrations_script` -> 21 tests OK; `ruff check` y `ruff format --check`
+limpios; `detect-secrets` limpio; `manage.py check` sin problemas.
+
+**Advertencias que quedaron sin cambiar a proposito**
+
+- Si `migrate` falla a mitad, `migrated=1` no llega a ponerse y el rollback revierte
+  codigo sin nombrar el dump. El dump igual se imprime en el paso 5, que corre
+  siempre antes de migrar.
