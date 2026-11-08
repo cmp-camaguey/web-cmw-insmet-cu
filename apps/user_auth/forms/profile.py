@@ -2,6 +2,7 @@ from django import forms
 from django.contrib.auth.models import User
 
 from apps.commercial.models import Customer
+from apps.core.subscriptions import move_subscription
 from apps.core.validators import validate_image_upload
 from apps.user_auth.models import Profile
 
@@ -144,12 +145,19 @@ class ProfileForm(forms.ModelForm):
             raise ValueError('El perfil no tiene un usuario asociado.')
 
         user = profile.user
+        old_email = user.email
         user.first_name = self.cleaned_data['first_name']
         user.last_name = self.cleaned_data['last_name']
         user.email = self.cleaned_data['email']
         profile.newsletter = self.cleaned_data.get('newsletter', False)
 
         if commit:
+            # Antes de guardar: si la dirección cambió, la suscripción tiene que
+            # viajar con ella. Sin esto la persona seguiría recibiendo en el
+            # buzón viejo y, con la casilla marcada, se crearía una segunda
+            # suscripción en la dirección nueva.
+            if old_email and old_email != user.email:
+                move_subscription(old_email, user.email)
             user.save()
             profile.save()
 

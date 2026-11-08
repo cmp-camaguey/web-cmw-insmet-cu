@@ -25,6 +25,11 @@ from apps.home.views.servicios.comerciales.views import (
     ServiceDetailView,
 )
 from apps.home.views.servicios.publicos.views import PublicServicesListView
+from apps.home.views.suscripcion.views import (
+    NewsletterConfirmView,
+    NewsletterSubscribeView,
+    NewsletterUnsubscribeView,
+)
 from apps.home.views.tiempo.views import WeatherReportDetailView
 from apps.meteo.models import Warning as MeteoWarning
 from apps.meteo.models import WeatherReport
@@ -36,6 +41,18 @@ urlpatterns = [
     # Inicio (landing pública en la raíz; home administrativo en /home/)
     path('', LandingView.as_view(), name='landing'),
     path('home/', IndexView.as_view(), name='index'),
+    # Suscripción (pública, sin cuenta)
+    path('suscripcion/', NewsletterSubscribeView.as_view(), name='newsletter_subscribe'),
+    path(
+        'suscripcion/confirmar/<uuid:token>/',
+        NewsletterConfirmView.as_view(),
+        name='newsletter_confirm',
+    ),
+    path(
+        'suscripcion/baja/<uuid:token>/',
+        NewsletterUnsubscribeView.as_view(),
+        name='newsletter_unsubscribe',
+    ),
     # Tiempo
     path(
         'tiempo/hoy/',

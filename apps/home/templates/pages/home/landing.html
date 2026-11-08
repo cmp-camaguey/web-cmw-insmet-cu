@@ -340,24 +340,34 @@
     </svg>
     <div class="container">
       <div class="section-header mb-6">
-        <h2 class="section-title">Suscríbase al boletín del Centro</h2>
+        <h2 class="section-title">Manténgase informado</h2>
         <p class="section-description">Reciba en su correo los avisos, pronósticos y novedades del Centro Meteorológico Provincial de Camagüey.</p>
       </div>
     </div>
     <div class="container-tight">
-      <div class="row">
-        <div class="col">
-          <input class="w-100 form-control"
-                 placeholder="Su correo electrónico"
-                 type="email">
+      <form method="post" action="{% url 'home:newsletter_subscribe' %}">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col">
+            <label class="visually-hidden" for="newsletter-email">Su correo electrónico</label>
+            <input class="w-100 form-control"
+                   id="newsletter-email"
+                   name="email"
+                   placeholder="Su correo electrónico"
+                   type="email"
+                   required>
+          </div>
+          <div class="col-auto">
+            <button type="submit" class="btn btn-primary">
+              <i class="icon ti ti-mail" aria-hidden="true"></i>
+              Suscribirse
+            </button>
+          </div>
         </div>
-        <div class="col-auto">
-          <button type="submit" class="btn btn-primary">
-            <i class="icon ti ti-mail" aria-hidden="true"></i>
-            Suscribirse
-          </button>
-        </div>
-      </div>
+        <small class="form-hint mt-2">
+          Le enviaremos un correo para confirmar la suscripción. Cada mensaje lleva un enlace de baja.
+        </small>
+      </form>
     </div>
   </section>
 {% endblock %}
