@@ -8,79 +8,63 @@
  *
  * Decisiones que no son obvias:
  *
- * - La franja sigue el tema del visitante. Una tira oscura sobre una página
- *   blanca se lee como un banner ajeno al sitio; con fondo claro y un filo de
- *   color se integra y sigue siendo inconfundible. En oscuro conserva el fondo
- *   de tablero.
- * - NO se puede cerrar. Cerrar una alerta de ciclón es la única acción que no
- *   queremos facilitar. Si algún día molesta, se acorta el contenido, no se
- *   agrega una X.
+ * - Todos los colores salen de tokens de Tabler (`--tblr-*`), no de literales.
+ *   El color primario lo configura el operador en SiteConfiguration y el tema
+ *   claro/oscuro lo elige el visitante: un literal aquí adentro se ve bien en
+ *   la máquina donde se escribió y mal en cualquier otra. El fondo se deriva
+ *   del acento con `color-mix`, así que la franja es la misma familia de color
+ *   en los dos temas sin mantener dos paletas a mano.
+ * - La franja queda pegada arriba mientras se lee la página. Se puede cerrar,
+ *   pero la memoria es por aviso (`uuid` + `valid_until`), no global: cerrar un
+ *   aviso de lluvias no puede silenciar el ciclón de la semana siguiente. El
+ *   estado inicial se resuelve con un script en línea dentro del include, antes
+ *   del primer paint, para que no haya parpadeo.
  * - El color NUNCA es la única señal: cada tipo lleva su nombre escrito al lado
  *   del punto ("Aviso vigente · Ciclón Tropical"), así que sirve igual para
  *   quien no distingue rojo de naranja.
- *
- * Todos los colores salen de tokens (`--em-*`). Un valor literal aquí adentro
- * es un valor que se olvida del tema oscuro y reaparece como "letras blancas
- * sobre fondo blanco" en la siguiente captura.
  */
 
 .emergency-banner {
-  --em-accent: #d63939;
-  --em-accent-text: #a61b1b;
-  --em-glow: rgba(214, 57, 57, 0.22);
-  --em-surface: #fdf4f4;
-  --em-ink: #1b2430;
-  --em-muted: #5c6b7c;
-  --em-hairline: rgba(17, 24, 39, 0.1);
-  --em-cta-border: rgba(17, 24, 39, 0.18);
-  --em-cta-border-hover: rgba(17, 24, 39, 0.4);
-  --em-cta-hover: rgba(17, 24, 39, 0.06);
-  position: relative;
+  /* Un solo acento por tipo de aviso; el resto se deriva del tema. */
+  --em-accent: var(--tblr-danger);
+  --em-surface: color-mix(in oklab, var(--em-accent) 7%, var(--tblr-bg-surface));
+  --em-accent-text: color-mix(in oklab, var(--em-accent) 70%, var(--tblr-emphasis-color));
+  --em-glow: color-mix(in oklab, var(--em-accent) 30%, transparent);
+  --em-ink: var(--tblr-emphasis-color);
+  --em-muted: var(--tblr-secondary-color);
+  --em-hairline: var(--tblr-border-color);
+  --em-cta-border: color-mix(in oklab, var(--em-ink) 22%, transparent);
+  --em-cta-border-hover: color-mix(in oklab, var(--em-ink) 45%, transparent);
+  --em-cta-hover: color-mix(in oklab, var(--em-ink) 8%, transparent);
+  /* Queda fija bajo el navbar: un aviso vigente no puede depender de que el
+     visitante se acuerde de haberlo visto al principio de la página. El
+     `z-index` va por encima del contenido de la página pero por debajo del
+     navbar (`sticky-top`, 1020) y de sus desplegables, que se abren hacia
+     abajo y tienen que poder taparla. Dos detalles que costaron un bug:
+     `.hero-img` del landing usa `z-index: 1` y, con el mismo valor, ganaba por
+     orden en el DOM y el mockup del navegador pasaba por encima de la franja;
+     el menú del usuario, en cambio, salía por detrás. Por eso 2: por encima
+     del contenido, por debajo de la navegación. Los modales de Bootstrap
+     (1055) siguen por encima de todo. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--em-surface);
   color: var(--em-ink);
   border-bottom: 1px solid var(--em-hairline);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.emergency-banner--tropical_cyclone {
+  --em-accent: var(--tblr-danger);
 }
 
 .emergency-banner--storm {
-  --em-accent: #e8590c;
-  --em-accent-text: #a33c06;
-  --em-glow: rgba(232, 89, 12, 0.22);
-  --em-surface: #fdf6f1;
+  --em-accent: var(--tblr-orange);
 }
 
 .emergency-banner--early {
-  --em-accent: #d9a300;
-  --em-accent-text: #7a5a00;
-  --em-glow: rgba(217, 163, 0, 0.22);
-  --em-surface: #fdfaef;
-}
-
-/* Tema oscuro: mismo componente, fondo de tablero. */
-[data-bs-theme="dark"] .emergency-banner {
-  --em-accent: #e5484d;
-  --em-accent-text: #ff8f92;
-  --em-glow: rgba(229, 72, 77, 0.45);
-  --em-surface: #0e1622;
-  --em-ink: #fff;
-  --em-muted: #9fb0c4;
-  --em-hairline: rgba(255, 255, 255, 0.1);
-  --em-cta-border: rgba(255, 255, 255, 0.24);
-  --em-cta-border-hover: rgba(255, 255, 255, 0.45);
-  --em-cta-hover: rgba(255, 255, 255, 0.12);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-[data-bs-theme="dark"] .emergency-banner--storm {
-  --em-accent: #f76707;
-  --em-accent-text: #ffa768;
-  --em-glow: rgba(247, 103, 7, 0.45);
-}
-
-[data-bs-theme="dark"] .emergency-banner--early {
-  --em-accent: #f0b429;
-  --em-accent-text: #ffd35c;
-  --em-glow: rgba(240, 180, 41, 0.45);
+  --em-accent: var(--tblr-yellow);
 }
 
 .emergency-banner__body {
@@ -210,19 +194,63 @@
   outline-offset: 2px;
 }
 
+/* Cerrar no compite visualmente con el enlace: es una acción de descarte, no
+   la acción útil. Por eso va sin fondo ni borde hasta que se apunta o se
+   enfoca, y hereda el color atenuado del texto secundario. */
+.emergency-banner__close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--em-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.emergency-banner__close:hover,
+.emergency-banner__close:focus {
+  color: var(--em-ink);
+  background: var(--em-cta-hover);
+}
+
+.emergency-banner__close:focus-visible {
+  outline: 2px solid var(--em-ink);
+  outline-offset: 2px;
+}
+
+/* El estado lo pone el script en línea del include antes del primer paint.
+   `display: none` y no `visibility` para que el espacio de la franja tampoco
+   quede reservado. */
+.emergency-banner-dismissed .emergency-banner {
+  display: none;
+}
+
 /* En móvil la fila no cabe: el filo sigue a la izquierda y la meta baja debajo
    del texto, con el enlace separado por una línea para que no se confunda con
-   información y se pueda tocar con el pulgar. */
+   información y se pueda tocar con el pulgar. Como la franja ahora queda fija,
+   además se recorta a lo esencial: en una pantalla de 360 px el navbar más tres
+   líneas de aviso se comen media pantalla. */
 @media (max-width: 767.98px) {
   .emergency-banner__body {
     grid-template-columns: 4px minmax(0, 1fr);
-    gap: 0.6rem 0.75rem;
+    gap: 0.5rem 0.75rem;
+    padding: 0.55rem 0;
+  }
+
+  .emergency-banner__summary {
+    display: none;
   }
 
   .emergency-banner__meta {
     grid-column: 2;
     justify-content: space-between;
-    padding-top: 0.6rem;
+    padding-top: 0.5rem;
     border-top: 1px solid var(--em-hairline);
   }
 }
@@ -240,13 +268,14 @@
 /* En papel no se gasta tinta en un fondo oscuro, pero la información de una
    alerta vigente se conserva: quien imprime el pronóstico tiene que verla. */
 @media print {
-  /* `html[data-bs-theme]` gana por especificidad al bloque oscuro, que si no
+  /* `html[data-bs-theme]` gana por especificidad a cualquier tema, que si no
      dejaria letras blancas sobre papel blanco. */
   html[data-bs-theme] .emergency-banner {
     --em-ink: #000;
     --em-muted: #333;
     --em-hairline: #000;
     --em-cta-border: #000;
+    position: static;
     background: #fff;
     border-bottom: 2px solid #000;
     box-shadow: none;
@@ -258,6 +287,12 @@
 
   /* En papel no hay "primera pantalla" que proteger: el recorte se deshace. */
   .emergency-banner__title {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+  }
+
+  .emergency-banner__summary {
     display: block;
     overflow: visible;
     -webkit-line-clamp: unset;

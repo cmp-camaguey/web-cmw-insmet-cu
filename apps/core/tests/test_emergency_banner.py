@@ -9,7 +9,9 @@ prueba acá, sin plantilla de por medio.
 from datetime import timedelta
 
 from django.contrib.auth.models import User
+from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.core.context_processors import menu_notifications
@@ -96,6 +98,59 @@ class EmergencyBannerTests(TestCase):
         self._warning('tropical_cyclone')
 
         self.assertIsNone(self._banner())
+
+
+class EmergencyBannerCloseTests(TestCase):
+    """El botón de cerrar y la memoria por aviso, probados donde se puede probar.
+
+    La interacción (localStorage) vive en el navegador y no se puede ejecutar
+    aquí; lo que sí se fija es el contrato del HTML: que exista el botón y que
+    lleve el aviso y su vigencia, que es lo que hace que cerrar uno no silencie
+    el siguiente.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.author = User.objects.create_user(
+            'autor-cierre',
+            'cierre@example.com',
+            'pass',
+            first_name='Ada',
+            last_name='Cierre',
+        )
+
+    def _render(self):
+        warning = Warning.objects.create(
+            warning_type='tropical_cyclone',
+            title='Ciclón de prueba',
+            user=self.author,
+            summary='Resumen',
+            valid_until=timezone.now() + timedelta(hours=12),
+        )
+        context = menu_notifications(RequestFactory().get('/'))
+        return warning, render_to_string(
+            'includes/home/emergency_banner.html', {'emergency_banner': context['emergency_banner']}
+        )
+
+    def test_la_franja_trae_el_boton_de_cerrar(self):
+        _warning, html = self._render()
+
+        self.assertIn('data-emergency-banner-close', html)
+        self.assertIn('Ocultar este aviso', html)
+
+    def test_el_boton_guarda_el_aviso_y_su_vigencia_no_un_cierre_global(self):
+        warning, html = self._render()
+
+        self.assertIn(f'data-warning-id="{warning.uuid}"', html)
+        self.assertIn('data-warning-valid-until=', html)
+        self.assertIn('cmp.emergencyBanner.dismissed', html)
+
+    def test_el_landing_carga_el_script_del_boton(self):
+        self._render()
+
+        response = self.client.get(reverse('home:landing'))
+
+        self.assertContains(response, 'dist/js/emergency-banner.js')
 
 
 class MenuWarningCountsTests(TestCase):

@@ -7,8 +7,36 @@
       por lluvias es rutina y ahí solo enseña a ignorar la franja.
     {% endcomment %}
     {% if not severe_only or warning.warning_type != 'early' %}
+      {% comment %}
+        Este script va ANTES de la franja a propósito: deja el estado inicial
+        resuelto antes del primer paint. Si se comprobara desde un archivo
+        diferido, la franja ya estaría pintada y el visitante que la cerró
+        ayer la vería aparecer y desaparecer en cada página.
+
+        La clave guarda el aviso y su fecha de vigencia: cerrar un aviso no
+        silencia el siguiente, y editar la vigencia del mismo aviso lo vuelve
+        a mostrar, porque es un hecho nuevo.
+      {% endcomment %}
+      <script>
+        (function () {
+          try {
+            var saved = JSON.parse(
+              window.localStorage.getItem('cmp.emergencyBanner.dismissed') || 'null'
+            );
+            if (saved && saved.id === '{{ warning.uuid }}' &&
+                saved.until === '{{ warning.valid_until|date:"c" }}') {
+              document.documentElement.classList.add('emergency-banner-dismissed');
+            }
+          } catch (error) {
+            /* Sin almacenamiento: se muestra. Nunca al revés. */
+          }
+        })();
+      </script>
       <aside class="emergency-banner emergency-banner--{{ warning.warning_type }}"
-             aria-label="Aviso meteorológico vigente">
+             aria-label="Aviso meteorológico vigente"
+             data-emergency-banner
+             data-warning-id="{{ warning.uuid }}"
+             data-warning-valid-until="{{ warning.valid_until|date:'c' }}">
         <div class="container-xl">
           <div class="emergency-banner__body">
             <span class="emergency-banner__marker" aria-hidden="true"></span>
@@ -36,6 +64,13 @@
                 {% endif %}
                 <i class="icon ti ti-arrow-up-right" aria-hidden="true"></i>
               </a>
+              <button type="button"
+                      class="emergency-banner__close"
+                      data-emergency-banner-close
+                      aria-label="Ocultar este aviso"
+                      title="Ocultar este aviso">
+                <i class="icon ti ti-x" aria-hidden="true"></i>
+              </button>
             </div>
           </div>
         </div>
