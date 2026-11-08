@@ -314,8 +314,12 @@ class ProductionProfileTests(
         # El bloque de producción inserta WhiteNoise en MIDDLEWARE[1] si falta; la
         # lista base ya lo trae, así que hoy la inserción no ocurre. Se fija la
         # posición efectiva, no la intención del `insert`.
-        self.assertEqual(middleware.index(base.whitenoise_middleware), 2)
-        self.assertEqual(middleware[0], 'django.middleware.security.SecurityMiddleware')
+        self.assertEqual(middleware.index(base.whitenoise_middleware), 3)
+        # `CurrentRequestMiddleware` va primero a propósito: deja el request en un
+        # `ContextVar` para todo lo que corra después, y al ser el más externo
+        # sigue disponible aunque otro middleware falle.
+        self.assertEqual(middleware[0], 'apps.core.middleware.CurrentRequestMiddleware')
+        self.assertEqual(middleware[1], 'django.middleware.security.SecurityMiddleware')
 
     def test_database_built_from_db_engine(self):
         database = self.module.DATABASES['default']

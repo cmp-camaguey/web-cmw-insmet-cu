@@ -170,7 +170,7 @@ Consecuencia útil: un colaborador futuro con `write` puede mergear en `dev`, pe
 
 - **UI Framework**: exclusivamente Tabler.io (Bootstrap 5). No usar otros frameworks CSS/UI.
 - **Permisos**: `default_permissions = ()` + 4 personalizados: `view_*`, `add_*`, `change_*`, `delete_*` (en español). NO asumas que existen por defecto.
-- **Middleware**: `CheckUserProfileMiddleware` → `MaintenanceModeMiddleware` (bloquea no-superusers excepto `/login/`)
+- **Middleware**: `CheckUserProfileMiddleware` → `MaintenanceModeMiddleware` (bloquea no-superusers excepto `/login/` y `/logout/`: sin la segunda, un usuario no-superuser que quedó con sesión abierta no puede cerrarla durante el mantenimiento)
 - **Auth**: LDAP opcional (`LDAP3Backend`) → fallback `ModelBackend`; Profile se crea por señal `post_save`; usuarios LDAP con `is_ldap=True`
 - **UUIDs** en URLs de modelos expuestos (no `pk`)
 - **FileHandlerMixin** obligatorio en todo modelo que tenga FileField/ImageField

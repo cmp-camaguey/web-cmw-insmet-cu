@@ -41,6 +41,22 @@ class CheckUserProfileMiddlewareTests(TestCase):
         response = self.client.get(self.dashboard_url)
         self.assertEqual(response.status_code, 200)
 
+    def test_incomplete_profile_can_still_log_out(self):
+        """El redirect al perfil no puede atrapar la baja de sesión.
+
+        `MaintenanceModeMiddleware` exime `/logout/` para que quien quedó con
+        sesión abierta pueda cerrarla, pero este middleware corre ANTES: si no
+        exime la ruta, la excepción del mantenimiento nunca llega y el usuario
+        con el perfil a medias queda encerrado.
+        """
+        user = _make_user('incomplete_logout', first_name='')
+        self.client.force_login(user)
+
+        response = self.client.post(reverse('user_auth:logout'))
+
+        self.assertNotEqual(response.url, self.profile_update_url)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
     def test_no_redirect_when_already_on_profile_update(self):
         user = _make_user('onprofile', first_name='', is_staff=True)
         self.client.force_login(user)
@@ -140,6 +156,16 @@ class MaintenanceModeMiddlewareTests(TestCase):
         self.client.force_login(user)
         response = self.client.get(self.login_url)
         self.assertEqual(response.status_code, 200)
+
+    def test_incomplete_profile_can_log_out_during_maintenance(self):
+        """Las dos excepciones tienen que alinearse, no sólo la del mantenimiento."""
+        set_maintenance(True)
+        user = _make_user('maint_logout', first_name='')
+        self.client.force_login(user)
+
+        self.client.post(reverse('user_auth:logout'))
+
+        self.assertNotIn('_auth_user_id', self.client.session)
 
     def test_maintenance_off_allows(self):
         set_maintenance(False)

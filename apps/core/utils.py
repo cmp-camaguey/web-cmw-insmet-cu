@@ -1,14 +1,17 @@
+import ipaddress
 import os
 from functools import wraps
 
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
+from django.db import transaction
 from django.shortcuts import render
 from django.templatetags.static import static
 from django.views import View
 
 from apps.core.models import ActivityLog, CompanySettings
+from apps.core.request_context import current_request
 
 # Mapa de códigos meteorológicos a nombres base de archivos
 TIEMPO_IMG_BASE_MAP = {
@@ -44,24 +47,100 @@ SUN_IMG_MAP = {
 
 
 def log_action(user, obj, action_flag, message, request=None):
-    LogEntry.objects.log_action(
-        user_id=user.pk,
-        content_type_id=ContentType.objects.get_for_model(obj).pk,
-        object_id=obj.pk,
-        object_repr=str(obj),
-        action_flag=action_flag,
-        change_message=message,
-    )
-    ActivityLog.objects.create(
-        user=user if isinstance(user, User) else None,
-        action_flag=action_flag,
-        content_type=ContentType.objects.get_for_model(obj),
-        object_id=str(obj.pk),
-        object_repr=str(obj),
-        message=message,
-        ip_address=request.META.get('REMOTE_ADDR') if request else None,
-        user_agent=request.META.get('HTTP_USER_AGENT', '') if request else '',
-    )
+    """Registra la acción en el log de Django y en `ActivityLog`.
+
+    El request se toma del parámetro o, si la vista no lo pasó, del
+    `ContextVar` que deja `CurrentRequestMiddleware`. Sin ese respaldo la fila
+    nace sin IP ni User-Agent y la tabla de auditoría muestra guiones en las dos
+    columnas que sirven para reconstruir quién hizo qué.
+    """
+    request = request or current_request()
+    content_type = ContentType.objects.get_for_model(obj)
+
+    # Las dos filas son el mismo hecho y tienen que existir juntas o no existir.
+    # Sin la transacción, un fallo al escribir `ActivityLog` deja el log de
+    # Django con una entrada que la auditoría del portal no tiene, y la
+    # diferencia es invisible hasta que alguien audita.
+    with transaction.atomic():
+        LogEntry.objects.log_action(
+            user_id=user.pk,
+            content_type_id=content_type.pk,
+            object_id=obj.pk,
+            object_repr=str(obj),
+            action_flag=action_flag,
+            change_message=message,
+        )
+        ActivityLog.objects.create(
+            user=user if isinstance(user, User) else None,
+            action_flag=action_flag,
+            content_type=content_type,
+            object_id=str(obj.pk),
+            object_repr=str(obj),
+            message=message,
+            ip_address=client_ip(request),
+            user_agent=(request.META.get('HTTP_USER_AGENT') or '') if request else '',
+        )
+
+
+def client_ip(request):
+    """IP del visitante, o `None` si no se puede determinar con certeza.
+
+    El portal corre detrás de Nginx y la petición llega por socket Unix, así que
+    `REMOTE_ADDR` es el proxy y no el visitante. Nginx añade la IP que él vio al
+    FINAL de `X-Forwarded-For` (`$proxy_add_x_forwarded_for`), por eso se toma la
+    última entrada y no la primera: la primera la puede escribir el cliente, y
+    guardarla sería dejar que cualquiera firme la auditoría con la IP que quiera.
+
+    Se valida con `ipaddress` antes de devolverla: la columna es un
+    `GenericIPAddressField` y un valor inventado haría fallar el INSERT, que es
+    justo la línea que no puede perderse.
+    """
+    if request is None:
+        return None
+
+    remote_addr = (request.META.get('REMOTE_ADDR') or '').strip()
+
+    # El encabezado sólo se cree cuando quien lo escribió es el proxy. Con
+    # Gunicorn escuchando en `unix:/run/webcmp/gunicorn.sock` el par es el socket
+    # (sin `REMOTE_ADDR`); si algún día Nginx pasa a TCP en loopback, sigue
+    # entrando por esta puerta. Un Gunicorn expuesto directo tiene un par que no
+    # es loopback, y ahí el encabezado lo pudo escribir cualquiera: se ignora y
+    # se usa `REMOTE_ADDR`, que en ese caso sí es el visitante.
+    forwarded = ''
+    if _is_trusted_proxy_peer(remote_addr):
+        forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+
+    # La última entrada es la que agregó el proxy de confianza. Se recorre de
+    # atrás hacia adelante y se acepta la primera que sea una IP válida: si el
+    # proxy escribió algo raro, la anterior sigue siendo más confiable que
+    # `REMOTE_ADDR`, que aquí es siempre el propio proxy.
+    for candidate in reversed([part.strip() for part in forwarded.split(',') if part.strip()]):
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            continue
+
+    # Sin encabezado (desarrollo, o un proxy que no lo añade) `REMOTE_ADDR` sí
+    # es el visitante.
+    try:
+        return str(ipaddress.ip_address(remote_addr))
+    except ValueError:
+        return None
+
+
+def _is_trusted_proxy_peer(remote_addr):
+    """`True` cuando `REMOTE_ADDR` es el proxy y no el visitante.
+
+    Socket Unix (el despliegue real) no deja `REMOTE_ADDR`, y un proxy local sí
+    deja una dirección de loopback. Cualquier otra cosa significa que la
+    petición llegó directo y su `X-Forwarded-For` no vale nada.
+    """
+    if not remote_addr:
+        return True
+    try:
+        return ipaddress.ip_address(remote_addr).is_loopback
+    except ValueError:
+        return False
 
 
 def log_activity_from_request(request, obj, action_flag, message):
@@ -70,7 +149,18 @@ def log_activity_from_request(request, obj, action_flag, message):
 
 
 def rate_limit_ip(limit=300, window=3600, key_prefix='rl'):
-    """Limita requests por IP usando el cache de Django (LocMemCache por defecto)."""
+    """Limita requests por IP usando el cache de Django (LocMemCache por defecto).
+
+    La IP sale de `client_ip` y no de `REMOTE_ADDR`: detrás de Nginx
+    `REMOTE_ADDR` es siempre el proxy, así que limitar por ahí convierte el
+    límite por visitante en un límite global del sitio y un cliente puede
+    agotarlo para todos.
+
+    El conteo usa `add` + `incr` y no `get` + `set`: la lectura y la escritura
+    separadas pierden incrementos concurrentes y dejan pasar más peticiones que
+    `limit`. Con `add` el TTL se fija una sola vez, así que la ventana es fija y
+    no se corre hacia adelante con cada request.
+    """
 
     def decorator(view):
         @wraps(view)
@@ -78,12 +168,19 @@ def rate_limit_ip(limit=300, window=3600, key_prefix='rl'):
             from django.core.cache import cache
             from django.http import HttpResponse
 
-            ip = request.META.get('REMOTE_ADDR', 'unknown')
+            ip = client_ip(request) or 'unknown'
             cache_key = f'{key_prefix}:{ip}'
-            count = cache.get(cache_key, 0)
-            if count >= limit:
+
+            cache.add(cache_key, 0, timeout=window)
+            try:
+                count = cache.incr(cache_key)
+            except ValueError:
+                # La clave venció entre el `add` y el `incr`.
+                cache.set(cache_key, 1, timeout=window)
+                count = 1
+
+            if count > limit:
                 return HttpResponse('Too Many Requests', status=429)
-            cache.set(cache_key, count + 1, timeout=window)
             return view(request, *args, **kwargs)
 
         return wrapper

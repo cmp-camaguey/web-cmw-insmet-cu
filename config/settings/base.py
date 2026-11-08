@@ -217,6 +217,9 @@ INSTALLED_APPS = [
 whitenoise_middleware = 'whitenoise.middleware.WhiteNoiseMiddleware'
 
 MIDDLEWARE = [
+    # Primero de todo: deja el request accesible para quien no lo recibe como
+    # parámetro (la auditoría lo necesita para la IP y el User-Agent).
+    'apps.core.middleware.CurrentRequestMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     whitenoise_middleware,
