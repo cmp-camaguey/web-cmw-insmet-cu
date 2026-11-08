@@ -299,6 +299,23 @@ def mail_send(request, alert_obj, subject, url, attachment_name=None):
             attachment_path=pdf_attachment,
         )
 
+    # Hasta aquí solo dejaba rastro el fracaso. Un envío que salió bien es justo
+    # el que nadie puede reconstruir después: el log de la tarea dice «correo
+    # enviado» por cada destinatario, sin decir de qué publicación ni a cuántos.
+    # La clave incluye `sent` para que reenviar el mismo objeto no duplique el
+    # aviso mientras siga sin leer, pero sí vuelva a avisar si el admin ya lo vio.
+    notify_superusers(
+        source='email',
+        severity=Notification.Severity.INFO,
+        title='Publicación enviada por correo',
+        body=(
+            f'{alert_obj._meta.verbose_name}: {getattr(alert_obj, "title", None) or subject} '
+            f'llegó a {len(subscribers)} suscriptor{"es" if len(subscribers) != 1 else ""}.'
+        ),
+        url=link,
+        dedupe_key=make_dedupe_key('email', source, alert_obj.pk, 'sent'),
+    )
+
 
 class My400View(View):
     def dispatch(self, request, *args, **kwargs):

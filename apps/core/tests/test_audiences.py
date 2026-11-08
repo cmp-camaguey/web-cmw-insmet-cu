@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.core.audiences import audience_size, resolve_audience
 from apps.core.models import EmailRecipientList, Notification, Subscriber, Subscription
-from apps.core.tests.base import get_default_list
+from apps.core.tests.base import add_confirmed_subscriber, get_default_list
 from apps.meteo.models import WeatherReport
 from config.huey import huey
 
@@ -56,6 +56,60 @@ class AudienceTests(TestCase):
 
         self.assertEqual(resolve_audience(), [])
         self.assertEqual(audience_size(), 0)
+
+
+class MailSendSuccessNotificationTests(TestCase):
+    """El envío que salió bien también deja rastro.
+
+    Hasta ahora solo el fracaso avisaba, y un envío correcto es justo el que
+    nadie puede reconstruir después: el log de la tarea dice «correo enviado» por
+    destinatario, sin decir de qué publicación ni a cuántos.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser(
+            'admin_envio', 'admin_envio@example.com', 'pass', first_name='A', last_name='B'
+        )
+        add_confirmed_subscriber(get_default_list(), 'recibe@ejemplo.com')
+
+    def _report(self):
+        return WeatherReport.objects.create(
+            report_type='today', summary='Con gente', user=self.admin, date=timezone.now()
+        )
+
+    def _send(self, report):
+        from apps.core.utils import mail_send
+
+        old_immediate = huey.immediate
+        huey.immediate = True
+        try:
+            mail_send(None, report, 'Asunto', 'home:weather_today')
+        finally:
+            huey.immediate = old_immediate
+
+    @override_settings(EMAIL_BACKEND=LOCMEM)
+    def test_el_envio_exitoso_avisa_cuantos_lo_recibieron(self):
+        self._send(self._report())
+
+        self.assertEqual(len(mail.outbox), 1)
+        notification = Notification.objects.get(recipient=self.admin, source='email')
+        self.assertEqual(notification.severity, Notification.Severity.INFO)
+        self.assertIn('1 suscriptor', notification.body)
+        self.assertTrue(notification.url.startswith('/'))
+
+    @override_settings(EMAIL_BACKEND=LOCMEM)
+    def test_el_mismo_envio_no_duplica_el_aviso_sin_leer(self):
+        report = self._report()
+        self._send(report)
+        self._send(report)
+
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient=self.admin, source='email', read_at__isnull=True
+            ).count(),
+            1,
+        )
 
 
 class MailSendEmptyAudienceTests(TestCase):
