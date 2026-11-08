@@ -130,7 +130,7 @@ def load_secret_key():
 
     if not encrypted and not encryption_key:
         raise ImproperlyConfigured(
-            'Falta el archivo .env: no hay SECRET_KEY ni ENCRYPTION_KEY. Generá el '
+            'Falta el archivo .env: no hay SECRET_KEY ni ENCRYPTION_KEY. Genere el '
             'archivo con `python scripts/generate_env.py --development`, o con '
             '`--production` en el servidor.'
         )
@@ -140,7 +140,7 @@ def load_secret_key():
             'Falta ENCRYPTION_KEY: hay SECRET_KEY pero nada con qué descifrarla. En '
             'producción la clave de descifrado NO va en el .env, la carga systemd con '
             '`EnvironmentFile=-/etc/webcmp/encryption.env`. En el resto de los perfiles, '
-            'regenerá el archivo con `python scripts/generate_env.py`.'
+            'regenere el archivo con `python scripts/generate_env.py`.'
         )
 
     if not encrypted:
@@ -315,30 +315,32 @@ def get_database_config():
             'uno falta o está vacío en el entorno. Defina las cuatro en el archivo .env.'
         )
 
+    # Lista blanca y no `django.db.backends.{db_engine}`: con el nombre armado
+    # por concatenación, `DB_ENGINE=mysql` arrancaba y hablaba con otro motor.
+    # El proyecto corre sobre PostgreSQL en los tres perfiles, así que cualquier
+    # otro valor es un error de configuración y no una elección.
+    if db_engine != 'postgresql':
+        raise ImproperlyConfigured(
+            f'DB_ENGINE="{db_engine}" no está soportado: este proyecto solo corre sobre '
+            'PostgreSQL. Defina DB_ENGINE=postgresql con DB_NAME, DB_USER, DB_PASS y '
+            'DB_HOST. Ejecute `python scripts/generate_env.py --development` (o '
+            '`--production`) para regenerar el archivo .env.'
+        )
+
     db_config = {
-        'ENGINE': f'django.db.backends.{db_engine}',
+        'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('DB_NAME'),
         'USER': os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASS'),
         'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT', '5432' if db_engine == 'postgresql' else '3306'),
+        'PORT': os.getenv('DB_PORT', '5432'),
         'CONN_MAX_AGE': 600,
     }
 
-    ssl_mode = os.getenv('DB_SSL_MODE', 'prefer' if db_engine == 'postgresql' else 'PREFERRED')
-    db_config['OPTIONS'] = {}
-
-    if db_engine == 'postgresql':
-        db_config['OPTIONS']['sslmode'] = ssl_mode
-        if ssl_mode in ('verify-ca', 'verify-full') and (cert := os.getenv('DB_SSL_ROOT_CERT')):
-            db_config['OPTIONS']['sslrootcert'] = cert
-
-    elif db_engine == 'mysql':
-        db_config['OPTIONS']['ssl_mode'] = ssl_mode.upper()
-        if ssl_mode.upper() in ('VERIFY_CA', 'VERIFY_IDENTITY'):
-            for k in ('ca', 'cert', 'key'):
-                if v := os.getenv(f'DB_SSL_{k.upper()}'):
-                    db_config['OPTIONS'].setdefault('ssl', {})[k] = v
+    ssl_mode = os.getenv('DB_SSL_MODE', 'prefer')
+    db_config['OPTIONS'] = {'sslmode': ssl_mode}
+    if ssl_mode in ('verify-ca', 'verify-full') and (cert := os.getenv('DB_SSL_ROOT_CERT')):
+        db_config['OPTIONS']['sslrootcert'] = cert
 
     return {'default': db_config}
 
@@ -421,6 +423,11 @@ TEST_RUNNER = 'config.test_runner.IsolatedMediaRunner'
 
 X_FRAME_OPTIONS = 'DENY'
 
+# W008 es "SECURE_SSL_REDIRECT debería estar activo". En producción el redirect a
+# HTTPS lo hace Nginx (`production.py` lo deja explícito), y dev y testing no
+# sirven TLS; sin silenciarlo, `check --deploy` fallaría en los tres perfiles por
+# una decisión que no es un descuido. El control real vive en
+# `deploy/nginx/webcmp.conf.example`.
 SILENCED_SYSTEM_CHECKS = ['security.W008']
 
 # REST Framework

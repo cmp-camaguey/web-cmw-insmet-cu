@@ -619,7 +619,7 @@ class SecretKeyFailClosedTests(SimpleTestCase):
         """`base` no inyecta nada: si el par falta, se niega; no se auto-parchea.
 
         Un perfil que se rellena a sí mismo es un perfil que vuelve a fallar en
-        el proceso siguiente, y esta vez sin explanation.
+        el proceso siguiente, y esta vez sin explicación.
         """
         with (
             mock.patch.dict(os.environ, {'DEBUG': 'True'}, clear=True),
