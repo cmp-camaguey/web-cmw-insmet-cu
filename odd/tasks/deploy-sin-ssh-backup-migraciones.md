@@ -142,3 +142,59 @@ limpios; `detect-secrets` limpio; `manage.py check` sin problemas.
 - Si `migrate` falla a mitad, `migrated=1` no llega a ponerse y el rollback revierte
   codigo sin nombrar el dump. El dump igual se imprime en el paso 5, que corre
   siempre antes de migrar.
+
+### L4 — el PR #166 sale rojo: desacuerdo de tzdata entre Python y PostgreSQL
+
+**Sintoma.** `Tests (Django)` falla con 18 errores en
+`apps.home.tests.test_pdf_viewer_a11y` (5 pruebas x 4 tipos de reporte). Todas dicen lo
+mismo: `'data-pdf-url="..."' not found in html`. La pagina devuelta trae el estado
+vacio `Nada que mostrar`, es decir, `weather_today` no existe en el contexto.
+
+**Descartado.** No es el codigo del PR: `apps/home/views/tiempo/views.py` y
+`apps/home/tests/test_pdf_viewer_a11y.py` son identicos a `dev`. Tampoco es la ventana
+horaria: el sondeo con reloj congelado a `2026-11-08T04:00:15Z` encuentra el reporte.
+
+**Causa raiz.** `date__date` compila a
+`("meteo_weatherreport"."date" AT TIME ZONE 'America/Havana')::date`, o sea que
+`America/Havana` se resuelve **dentro de PostgreSQL**, con el tzdata de la imagen de la
+base. El lado Python usa `timezone.localdate()`, que resuelve la zona con el tzdata de
+Python. En CI, `tzdata 2026.6` (dependencia transitiva de `matplotlib`) ya aplica el
+horario de verano cubano: dice `2026-11-08T00:00:15-04:00` para
+`2026-11-08T04:00:15Z`. PostgreSQL 18 dice `2026-11-07T23:00:15-05:00`. Python
+concluye `2026-11-08`; la base concluye `2026-11-07`; el filtro no encuentra nada.
+
+Es un bug real de produccion, no una fragilidad del test: durante las horas en que el
+tzdata de PyPI y el de la imagen de PostgreSQL discrepan, las cuatro paginas publicas
+del tiempo responden "Nada que mostrar".
+
+**Arreglo.** La ventana del dia local se calcula en Python y la base solo compara
+instantes:
+
+```python
+dia = timezone.localdate()
+inicio = timezone.make_aware(datetime.combine(dia, time.min))
+fin = timezone.make_aware(datetime.combine(dia + timedelta(days=1), time.min))
+WeatherReport.objects.filter(report_type=..., date__gte=inicio, date__lt=fin)
+```
+
+Asi ninguna zona se resuelve en PostgreSQL y la unica fuente de verdad es Python. La
+prueba nueva es
+`WeatherReportDetailViewContextTests.test_encuentra_el_reporte_del_dia_sin_depender_del_tzdata_de_la_base`.
+
+**Como se reprodujo el RED sin esperar a que CI fallara.** Se instalo `tzdata 2026.6`
+desde PyPI en `/tmp/opencode/tzd` y se apunto `PYTHONTZPATH` a ese `zoneinfo`; el reloj
+se congelo con `patch('django.utils.timezone.now', ...)` en el instante exacto de la
+corrida roja (`2026-11-08T04:00:15Z`). Con la vista anterior y ese entorno la prueba
+falla (`FAILED (failures=1)`); con la vista nueva pasa. La suite completa
+`apps.home.tests.test_pdf_viewer_a11y` + `apps.home.tests.test_models` da 60 tests OK
+bajo ese mismo entorno.
+
+**Evidencia.** Cluster PostgreSQL propio (puerto 55432, `initdb` privado, sin sudo,
+porque el rol pedido no se pudo crear sin autenticacion interactiva):
+`apps.core` -> 392 tests OK; `apps.home` + `apps.meteo` -> 324 tests OK;
+`ruff check` y `ruff format --check` limpios; `manage.py check` sin problemas.
+
+**Fuera de alcance de este PR, mismo patron latente** (mismo riesgo, distinta
+consecuencia): `apps/dashboard/views/dashboard/dashboard.py:377`
+(`last_login__date=timezone.localdate()`) y `apps/core/views/activity_log.py:51-53`
+(`action_time__date__gte/lte`). Se reportan, no se tocan aqui.
