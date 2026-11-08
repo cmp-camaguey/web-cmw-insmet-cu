@@ -4,7 +4,9 @@ persona recibe el mensaje con su enlace de baja, y el copyright.
 
 Espera `unsubscribe_url`, `index_url` y `current_year`. El motivo se puede
 cambiar con `footer_note`; sin él usa la frase de los envíos de avisos, donde
-la persona ya está suscrita.
+la persona ya está suscrita. El enlace de baja se omite cuando
+`unsubscribe_url` no viene: el correo de confirmación de baja no puede ofrecer
+darse de baja otra vez.
 {% endcomment %}
 <table cellspacing="0" cellpadding="0" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; border-collapse: collapse; width: 100%;">
   <tr>
@@ -60,7 +62,9 @@ la persona ya está suscrita.
             {% else %}
               Recibe este correo porque se suscribió a las actualizaciones del Centro.
             {% endif %}
-            <a href="{{ unsubscribe_url }}" style="color: #066FD1; text-decoration: none;">Darse de baja</a>.
+            {% if unsubscribe_url %}
+              <a href="{{ unsubscribe_url }}" style="color: #066FD1; text-decoration: none;">Darse de baja</a>.
+            {% endif %}
           </td>
         </tr>
         <tr>

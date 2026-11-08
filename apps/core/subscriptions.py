@@ -157,6 +157,7 @@ def unsubscribe(token):
     from apps.user_auth.models import Profile
 
     recipient_list = EmailRecipientList.get_default()
+    was_active = subscriber.active
     with transaction.atomic():
         if subscriber.active:
             subscriber.active = False
@@ -170,6 +171,20 @@ def unsubscribe(token):
         Profile.objects.filter(user__email__iexact=subscriber.email, newsletter=True).update(
             newsletter=False
         )
+
+    # Solo cuando la baja cambió algo. Un segundo clic en el mismo enlace —o un
+    # cliente de correo que reabre la URL— no reenvía nada: el aviso dice «quedó
+    # registrada», y mandarlo dos veces por una baja que ya estaba hecha es
+    # ruido con apariencia de error.
+    if was_active:
+        try:
+            send_unsubscribe_confirmation(subscriber)
+        except Exception:
+            # La baja ya está escrita y es lo que la persona pidió. Si el
+            # encolado falla (Redis caído), el peor caso es que no reciba el
+            # aviso; deshacer la baja o devolver un 500 sería peor.
+            logger.exception('No se pudo encolar el correo de baja de %s', subscriber.pk)
+
     return subscriber
 
 
@@ -288,6 +303,46 @@ def unsubscribe_url(subscriber):
     base_url = settings.SITE_URL
     path = reverse('home:newsletter_unsubscribe', args=[subscriber.unsubscribe_token])
     return base_url + path.lstrip('/')
+
+
+def subscribe_url():
+    """Alta pública, la misma que exige doble opt-in.
+
+    El correo de baja la enlaza para quien se arrepiente. No se reusa el alta
+    directa a propósito: volver a la lista tiene que pasar por la confirmación,
+    igual que la primera vez.
+    """
+    from django.urls import reverse
+
+    return settings.SITE_URL + reverse('home:newsletter_subscribe').lstrip('/')
+
+
+def send_unsubscribe_confirmation(subscriber):
+    """Avisa que la baja quedó registrada.
+
+    Es un correo **transaccional**, no un envío masivo: sale solo, por el mismo
+    camino que la confirmación, y no pasa por la audiencia ni por la ventana
+    horaria. Sin él, la persona que pulsa el enlace no recibe nada y no sabe si
+    la baja se aplicó; y una baja silenciosa es indistinguible de un enlace roto.
+    """
+    from django.template.loader import render_to_string
+
+    from apps.core.tasks import send_email_task
+
+    context = {
+        'subscriber': subscriber,
+        'title': 'Su baja quedó registrada',
+        'subscribe_url': subscribe_url(),
+        'index_url': settings.SITE_URL,
+        'current_year': timezone.now().year,
+    }
+    html_message = render_to_string('emails/newsletter_unsubscribe.html', context)
+    send_email_task(
+        'Su baja de las novedades del Centro quedó registrada',
+        html_message,
+        settings.DEFAULT_FROM_EMAIL,
+        [subscriber.email],
+    )
 
 
 def send_confirmation(subscriber):

@@ -7,8 +7,10 @@ Ver `openspec/changes/030-boletin-y-notificaciones-de-clientes/design.md` §3 y
 from datetime import timedelta
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.core.models import EmailRecipientList, Subscriber, Subscription
@@ -23,6 +25,7 @@ from apps.core.subscriptions import (
     unsubscribe,
 )
 from apps.core.tests.base import get_default_list
+from config.huey import huey
 
 
 class NewsletterFixtureMixin:
@@ -127,6 +130,15 @@ class ConfirmTests(NewsletterFixtureMixin, TestCase):
 
 
 class UnsubscribeTests(NewsletterFixtureMixin, TestCase):
+    def setUp(self):
+        # El aviso de baja sale por `send_email_task`: sin `immediate` la tarea
+        # queda en la cola de Huey y `mail.outbox` nunca la ve.
+        self._old_immediate = huey.immediate
+        huey.immediate = True
+
+    def tearDown(self):
+        huey.immediate = self._old_immediate
+
     def test_baja_desactiva_sin_borrar_la_fila(self):
         subscriber, _created, _needs = subscribe(
             'baja@ejemplo.cu', source=Subscriber.Source.LANDING
@@ -149,6 +161,46 @@ class UnsubscribeTests(NewsletterFixtureMixin, TestCase):
         second = unsubscribe(subscriber.unsubscribe_token)
 
         self.assertIsNotNone(second)
+
+    def test_la_baja_avisa_al_suscriptor_que_quedo_registrada(self):
+        """Sin aviso, una baja silenciosa es indistinguible de un enlace roto."""
+        subscriber, _created, _needs = subscribe(
+            'aviso-baja@ejemplo.cu', source=Subscriber.Source.LANDING
+        )
+        confirm(subscriber.confirmation_token)
+        mail.outbox = []
+
+        unsubscribe(subscriber.unsubscribe_token)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['aviso-baja@ejemplo.cu'])
+        self.assertIn('quedó fuera de la lista', mail.outbox[0].body)
+        self.assertIn(reverse('home:newsletter_subscribe'), mail.outbox[0].body)
+
+    def test_el_aviso_de_baja_no_ofrece_darse_de_baja_otra_vez(self):
+        """El pie no puede enlazar una baja a quien acaba de darse de baja."""
+        subscriber, _created, _needs = subscribe(
+            'pie-baja@ejemplo.cu', source=Subscriber.Source.LANDING
+        )
+        confirm(subscriber.confirmation_token)
+        mail.outbox = []
+
+        unsubscribe(subscriber.unsubscribe_token)
+
+        self.assertNotIn('Darse de baja', mail.outbox[0].body)
+
+    def test_una_segunda_baja_no_reenvia_el_aviso(self):
+        """El enlace es reabrible: el aviso dice «quedó registrada», no dos veces."""
+        subscriber, _created, _needs = subscribe(
+            'doble-aviso@ejemplo.cu', source=Subscriber.Source.LANDING
+        )
+        confirm(subscriber.confirmation_token)
+        unsubscribe(subscriber.unsubscribe_token)
+        mail.outbox = []
+
+        unsubscribe(subscriber.unsubscribe_token)
+
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_baja_saca_al_suscriptor_de_la_lista_principal(self):
         subscriber, _created, _needs = subscribe(
