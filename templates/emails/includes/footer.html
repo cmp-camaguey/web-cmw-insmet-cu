@@ -1,0 +1,75 @@
+{% comment %}
+Pie común de los correos del Centro: redes sociales, el motivo por el que la
+persona recibe el mensaje con su enlace de baja, y el copyright.
+
+Espera `unsubscribe_url`, `index_url` y `current_year`. El motivo se puede
+cambiar con `footer_note`; sin él usa la frase de los envíos de avisos, donde
+la persona ya está suscrita.
+{% endcomment %}
+<table cellspacing="0" cellpadding="0" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; border-collapse: collapse; width: 100%;">
+  <tr>
+    <td class="py-xl" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-top: 48px; padding-bottom: 48px;">
+      <table class="text-center text-muted" cellspacing="0" cellpadding="0" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; border-collapse: collapse; width: 100%; color: #667382; text-align: center;">
+        <tr>
+          <td align="center" class="pb-md" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-bottom: 16px;">
+            <table class="w-auto" cellspacing="0" cellpadding="0" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; border-collapse: collapse; width: auto;">
+              <tr>
+                <td class="px-sm" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-right: 8px; padding-left: 8px;">
+                  <a href="https://www.instagram.com/meteorologiacmg?utm_source=ig_web_button_share_sheet&amp;igsh=ZDNlZDc0MzIxNw==" style="color: #066FD1; text-decoration: none;">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-brand-instagram" width="44" height="44" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                      <path d="M4 4m0 4a4 4 0 0 1 4 -4h8a4 4 0 0 1 4 4v8a4 4 0 0 1 -4 4h-8a4 4 0 0 1 -4 -4z" />
+                      <path d="M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+                      <path d="M16.5 7.5l0 .01" />
+                    </svg>
+                  </a>
+                </td>
+                <td class="px-sm" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-right: 8px; padding-left: 8px;">
+                  <a href="https://www.facebook.com/insmetcmpcmg?locale=es_LA" style="color: #066FD1; text-decoration: none;">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-brand-facebook" width="44" height="44" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                      <path d="M7 10v4h3v7h4v-7h3l1 -4h-4v-2a1 1 0 0 1 1 -1h3v-4h-3a5 5 0 0 0 -5 5v2h-3" />
+                    </svg>
+                  </a>
+                </td>
+                <td class="px-sm" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-right: 8px; padding-left: 8px;">
+                  <a href="https://x.com/INSMET_CMP_CMG" style="color: #066FD1; text-decoration: none;">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-brand-x" width="44" height="44" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                      <path d="M4 4l11.733 16h4.267l-11.733 -16z" />
+                      <path d="M4 20l6.768 -6.768m2.46 -2.46l6.772 -6.772" />
+                    </svg>
+                  </a>
+                </td>
+                <td class="px-sm" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-right: 8px; padding-left: 8px;">
+                  <a href="https://t.me/meteoalertaCMG" style="color: #066FD1; text-decoration: none;">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-brand-telegram" width="44" height="44" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                      <path d="M15 10l-4 4l6 6l4 -16l-18 7l4 2l2 6l3 -4" />
+                    </svg>
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="pt-md" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-top: 16px;">
+            {% if footer_note %}
+              {{ footer_note }}
+            {% else %}
+              Recibe este correo porque se suscribió a las actualizaciones del Centro.
+            {% endif %}
+            <a href="{{ unsubscribe_url }}" style="color: #066FD1; text-decoration: none;">Darse de baja</a>.
+          </td>
+        </tr>
+        <tr>
+          <td class="pt-md" style="font-family: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif; padding-top: 16px;">
+            Copyright &copy; {{ current_year }} -
+            <a href="{{ index_url }}" style="color: #066FD1; text-decoration: none;">Centro Meteorológico Provincial de Camagüey</a>. Todos los derechos reservados.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 
-from apps.core.models import EmailRecipientList, FileHandlerMixin, pdf_upload_path
+from apps.core.models import FileHandlerMixin, pdf_upload_path
 
 
 class Forecasts(models.Model):
@@ -245,13 +245,6 @@ class WeatherReport(FileHandlerMixin, models.Model):
     file = models.FileField(
         upload_to=pdf_upload_path, verbose_name='Archivo PDF', blank=True, null=True
     )
-    email_recipient_list = models.ForeignKey(
-        EmailRecipientList,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name='Lista de Correos',
-    )
     report_type = models.CharField(max_length=20, choices=TYPE_CHOICES, verbose_name='Tipo')
 
     file_fields = ['file']
@@ -305,13 +298,6 @@ class Warning(FileHandlerMixin, models.Model):
     )
     valid_until = models.DateTimeField(verbose_name='Válido hasta')
     date = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de creación')
-    email_recipient_list = models.ForeignKey(
-        EmailRecipientList,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        verbose_name='Lista de correos',
-    )
 
     file_fields = ['file']
 

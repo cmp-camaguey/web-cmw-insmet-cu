@@ -211,17 +211,52 @@ def get_sun_img_path(sun_event):
 
 
 def mail_send(request, alert_obj, subject, url, attachment_name=None):
+    import logging
+
     from django.conf import settings
     from django.template.loader import render_to_string
     from django.urls import reverse
     from django.utils import timezone
 
+    from apps.core.audiences import resolve_audience
+    from apps.core.models import Notification
+    from apps.core.notifications import make_dedupe_key, notify_superusers
+    from apps.core.subscriptions import unsubscribe_url
     from apps.core.tasks import send_email_task
 
-    recipient_list = (
-        alert_obj.email_recipient_list.recipients.all() if alert_obj.email_recipient_list else []
-    )
-    if not recipient_list:
+    logger = logging.getLogger(__name__)
+    source = alert_obj._meta.model_name
+    subscribers = resolve_audience()
+    # El enlace se guarda como ruta, no como nombre de URL: `url` llega con el
+    # nombre (`home:warnings_tropical`) porque es lo que el correo necesita para
+    # `reverse()`. Guardarlo tal cual en la notificación producía un
+    # `href="home:..."`, que el navegador interpreta como esquema propio y
+    # delega en `xdg-open`.
+    link = url if url.startswith('/') else reverse(url)
+    if not subscribers:
+        # Antes esto era un `return` mudo: el aviso se publicaba en el portal,
+        # el correo no salía y nadie se enteraba. Ahora deja rastro y avisa al
+        # admin, con clave de deduplicación por objeto para que reintentar el
+        # mismo formulario no llene la bandeja.
+        logger.warning(
+            'Sin destinatarios para %s %s (source=%s): no se envió "%s".',
+            alert_obj._meta.label,
+            alert_obj.pk,
+            source,
+            subject,
+        )
+        notify_superusers(
+            source='email',
+            severity=Notification.Severity.WARNING,
+            title='Un aviso se publicó sin destinatarios de correo',
+            body=(
+                f'{alert_obj._meta.verbose_name}: {getattr(alert_obj, "title", None) or subject}'
+                ' no llegó a nadie porque la lista principal no tiene suscriptores '
+                'confirmados.'
+            ),
+            url=link,
+            dedupe_key=make_dedupe_key('email', source, alert_obj.pk),
+        )
         return
 
     company = CompanySettings.get_instance()
@@ -234,32 +269,35 @@ def mail_send(request, alert_obj, subject, url, attachment_name=None):
     # red interna, y el host por el que el operador entró no es el público. El
     # parámetro `request` se sigue aceptando porque los llamadores lo pasan.
     base_url = settings.SITE_URL
-    context = {
-        'company': company,
-        'alert': alert_obj,
-        'subject': subject,
-        'url': url,
-        'index_url': base_url,
-        'listado_url': base_url + reverse(url).lstrip('/'),
-        # `Warning` tiene `title`; `WeatherReport` no, así que cae al asunto.
-        'title': getattr(alert_obj, 'title', None) or subject,
-        'current_year': timezone.now().year,
-    }
-    html_message = render_to_string('emails/alert_notification.html', context)
-    recipient_emails = [r.email for r in recipient_list]
-
     pdf_attachment = None
     if hasattr(alert_obj, 'file') and alert_obj.file:
         pdf_attachment = alert_obj.file.path if os.path.isfile(alert_obj.file.path) else None
 
-    send_email_task(
-        subject,
-        html_message,
-        settings.DEFAULT_FROM_EMAIL,
-        recipient_emails,
-        attachment_name=attachment_name,
-        attachment_path=pdf_attachment,
-    )
+    # Un correo por destinatario, no una lista en `to:`: así cada uno recibe su
+    # propio enlace de baja y ninguno ve la dirección de los demás. El render es
+    # barato y corre dentro de la tarea de Huey, fuera del ciclo de la petición.
+    for subscriber in subscribers:
+        context = {
+            'company': company,
+            'alert': alert_obj,
+            'subject': subject,
+            'url': url,
+            'index_url': base_url,
+            'listado_url': base_url + reverse(url).lstrip('/'),
+            # `Warning` tiene `title`; `WeatherReport` no, así que cae al asunto.
+            'title': getattr(alert_obj, 'title', None) or subject,
+            'current_year': timezone.now().year,
+            'unsubscribe_url': unsubscribe_url(subscriber),
+        }
+        html_message = render_to_string('emails/alert_notification.html', context)
+        send_email_task(
+            subject,
+            html_message,
+            settings.DEFAULT_FROM_EMAIL,
+            [subscriber.email],
+            attachment_name=attachment_name,
+            attachment_path=pdf_attachment,
+        )
 
 
 class My400View(View):
