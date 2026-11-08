@@ -2,7 +2,8 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.core.models import EmailRecipient, EmailRecipientList, SiteConfiguration
+from apps.core.models import EmailRecipientList, SiteConfiguration, Subscriber, Subscription
+from apps.core.tests.base import add_confirmed_subscriber
 
 
 def disable_maintenance_mode():
@@ -65,7 +66,59 @@ class EmailRecipientListCreateViewTests(TestCase):
         self.client.post(self.url, data, follow=True)
         lst = EmailRecipientList.objects.filter(name='Lista Create').first()
         self.assertIsNotNone(lst)
-        self.assertEqual(lst.recipients.count(), 2)
+        self.assertEqual(lst.subscriptions.count(), 2)
+
+
+class EmailRecipientListListViewTests(TestCase):
+    """El badge anuncia a quién le llega de verdad, no cuántas filas hay.
+
+    La pantalla se usa para decidir a quién se escribe. Contar miembros sin
+    confirmar o dados de baja anunciaría un alcance que el envío no tiene:
+    `resolve_audience` exige `active` y `confirmed_at`, así que la lista dice
+    «3 en la lista» aparte, para que el operador vea la diferencia en vez de
+    descubrirla cuando el correo no llega.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        disable_maintenance_mode()
+        cls.superuser = User.objects.create_superuser(
+            'admin_alcance',
+            'admin_alcance@example.com',
+            'password',
+            first_name='Admin',
+            last_name='User',
+        )
+        cls.lst = EmailRecipientList.objects.create(name='Lista Alcance')
+        add_confirmed_subscriber(cls.lst, 'confirmado@example.com')
+
+        pendiente = Subscriber.objects.create(email='pendiente@example.com')
+        Subscription.objects.create(subscriber=pendiente, recipient_list=cls.lst)
+
+        de_baja = add_confirmed_subscriber(cls.lst, 'baja@example.com')
+        de_baja.active = False
+        de_baja.save(update_fields=['active'])
+
+    def setUp(self):
+        self.client.force_login(self.superuser)
+
+    def test_cuenta_solo_los_correos_que_reciben(self):
+        response = self.client.get(reverse('core:email_recipient_list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '1 correo')
+
+    def test_avisa_cuantos_miembros_no_reciben(self):
+        response = self.client.get(reverse('core:email_recipient_list'))
+
+        self.assertContains(response, '3 en la lista')
+
+    def test_no_anuncia_las_direcciones_que_no_reciben(self):
+        response = self.client.get(reverse('core:email_recipient_list'))
+
+        self.assertContains(response, 'confirmado@example.com')
+        self.assertNotContains(response, 'pendiente@example.com')
+        self.assertNotContains(response, 'baja@example.com')
 
 
 class EmailRecipientListUpdateViewTests(TestCase):
@@ -80,8 +133,8 @@ class EmailRecipientListUpdateViewTests(TestCase):
             last_name='User',
         )
         cls.lst = EmailRecipientList.objects.create(name='Lista Update')
-        cls.r1 = EmailRecipient.objects.create(recipient_list=cls.lst, email='keep@example.com')
-        cls.r2 = EmailRecipient.objects.create(recipient_list=cls.lst, email='drop@example.com')
+        cls.r1 = add_confirmed_subscriber(cls.lst, 'keep@example.com').subscriptions.get()
+        cls.r2 = add_confirmed_subscriber(cls.lst, 'drop@example.com').subscriptions.get()
         cls.url = reverse('core:email_recipient_update', args=[cls.lst.pk])
 
     def test_get_renders_existing_rows_and_matching_form_index(self):
@@ -113,5 +166,5 @@ class EmailRecipientListUpdateViewTests(TestCase):
             'recipients-1-DELETE': 'on',
         }
         self.client.post(self.url, data, follow=True)
-        self.assertTrue(EmailRecipient.objects.filter(pk=self.r1.pk).exists())
-        self.assertFalse(EmailRecipient.objects.filter(pk=self.r2.pk).exists())
+        self.assertTrue(Subscription.objects.filter(pk=self.r1.pk).exists())
+        self.assertFalse(Subscription.objects.filter(pk=self.r2.pk).exists())

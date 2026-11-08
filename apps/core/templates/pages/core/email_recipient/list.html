@@ -7,17 +7,27 @@
   <th class="text-end">Acciones</th>
 {% endblock %}
 {% block row %}
-  <td class="fw-medium">{{ object.name }}</td>
+  <td class="fw-medium">
+    {{ object.name }}
+    {% if object.is_default %}
+      <span class="badge bg-green-lt ms-1">Principal</span>
+    {% endif %}
+  </td>
   <td>{{ object.description|default:'Sin descripción' }}</td>
   <td>
-    {% with recipients=object.recipients.all %}
-      <span class="badge bg-blue-lt">{{ recipients|length }} correo{{ recipients|length|pluralize }}</span>
+    {% with recipients=object.reachable_subscriptions %}
+      <span class="badge bg-blue-lt">{{ object.reachable_count }} correo{{ object.reachable_count|pluralize }}</span>
       {% if recipients %}
         <div class="text-secondary small mt-1"
              data-bs-toggle="tooltip"
              data-bs-placement="bottom"
-             title="{% for r in recipients %}{{ r.email }}{% if not forloop.last %}, {% endif %}{% endfor %}">
-          {% for r in recipients|slice:':3' %}{{ r.email }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if recipients|length > 3 %}…{% endif %}
+             title="{% for r in recipients %}{{ r.subscriber.email }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+          {% for r in recipients|slice:':3' %}{{ r.subscriber.email }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if object.reachable_count > 3 %}…{% endif %}
+        </div>
+      {% endif %}
+      {% if object.member_count > object.reachable_count %}
+        <div class="text-secondary small mt-1">
+          {{ object.member_count }} en la lista; el resto no recibe por estar sin confirmar o de baja.
         </div>
       {% endif %}
     {% endwith %}
