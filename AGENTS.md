@@ -111,6 +111,27 @@ Secuencia de activación (el orden importa):
 - `strict_required_status_checks_policy`: **`true` en `main`, `false` en `dev`**. En `main` el release tiene que haberse probado contra lo último que hay en la rama. En `dev` no: con PRs semanales de Dependabot y `allow_update_branch: false`, exigir ponerse al día deja cada bump `BEHIND` esperando una actualización manual.
 - Que `dev` tenga required checks **no es opcional aunque no exigiera aprobación**: GitHub sólo permite habilitar auto-merge (`enablePullRequestAutoMerge`) en un PR cuya rama base tenga reglas de protección con required status checks. Sin ellos, `gh pr merge --auto` falla con `Pull request Branch does not have required protected branch rules` y `dependabot-auto-merge.yml` termina en rojo.
 
+## Concurrencia entre sesiones
+
+Este repo se trabaja a veces con más de un agente a la vez sobre la misma copia.
+`git commit` commitea en la rama que está checked out, no en la que la sesión cree
+estar usando, y `git checkout` arrastra los cambios sin commitear a la rama
+destino. Así fue como el commit de una tarea aterrizó en la rama de otra y
+contaminó el candidato de una revisión con archivos ajenos.
+
+- Cada sesión que va a escribir usa su propio worktree, fuera del repo:
+  `git worktree add ../<repo>-worktrees/<nombre> -b <tipo>/<descripcion> dev`.
+- Antes de commitear: `git branch --show-current`, y confirmar que es la rama propia.
+- No cambiar de rama en un checkout compartido con el árbol sucio.
+- Al terminar: `git worktree remove <ruta>`.
+- En un worktree no existe `.venv/` (está ignorado por git), así que el hook falla
+  con `pre-commit: not found`. Al commitear ahí, prestar el venv del checkout
+  principal: `PATH=<checkout-principal>/.venv/bin:$PATH git commit ...`.
+- Con squash merge, `git merge-base --is-ancestor <rama> dev` **miente**: el squash
+  crea un commit nuevo y la rama original nunca pasa a ser ancestro. Para saber si
+  una rama ya entró, comparar contenido (`git diff <rama> dev -- <archivos>`), no
+  ascendencia.
+
 ## CI — tests selectivos
 
 El job `test` de CI NO corre la suite completa en cada PR (tarda demasiado):
@@ -281,6 +302,11 @@ Lo que gentle-ai **no** cubre es la verificación funcional (`review validate --
 | Solo docs / markdown | nada |
 
 `python manage.py check` es barato (~1s): correlo siempre.
+
+**Frontera de revisión.** `gentle-ai review` con `--base-ref dev` compara de dos
+puntos: una rama que salió de un `dev` anterior aparece *revirtiendo* los commits
+que entraron después, y el reviewer revisa trabajo ajeno. Usar el punto de rama
+como frontera: `--base-ref $(git merge-base dev <rama>)`.
 
 ## API + Deploy + Locale
 
