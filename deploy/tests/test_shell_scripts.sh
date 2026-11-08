@@ -61,10 +61,13 @@ else
     assert_contains 'deploy.sh sin root lo explica' 'necesita root' "$deploy_noroot_out"
 fi
 
-# El deploy ya no entra por SSH, asi que el instalador no puede generar un
-# keypair ni escribir un authorized_keys. Si alguna de las dos cosas vuelve, es
-# un secreto mas viajando dentro de la imagen (que se entrega como salva a un
-# proveedor que prohibe SSH) y una privada que hay que rotar en cada copia.
+# El deploy es pull: nadie entra por red al servidor. Por eso el instalador no
+# puede generar un keypair, escribir un authorized_keys ni imprimir un
+# ssh-keyscan. Si alguna de las tres vuelve, es un secreto mas viajando dentro
+# de la imagen y una privada que hay que rotar en cada copia.
+#
+# Tampoco sugiere apagar sshd: la red del proveedor ya cierra el puerto, y el
+# comando cortaria la misma sesion sobre la que corre el instalador.
 #
 # Se inspecciona el FUENTE y no la salida de `--help`: estas rutas solo se
 # ejecutan como root, al final de la instalacion.
@@ -72,12 +75,9 @@ install_src=$(cat "$INSTALL_SH")
 assert_not_contains 'install.sh no genera keypairs SSH' 'ssh-keygen' "$install_src"
 assert_not_contains 'install.sh no escribe authorized_keys' 'authorized_keys' "$install_src"
 assert_not_contains 'install.sh no imprime ssh-keyscan' 'ssh-keyscan' "$install_src"
-assert_contains 'install.sh explica que el boton no usa SSH' \
-    'NO usa SSH' "$install_src"
+assert_not_contains 'install.sh no manda apagar sshd' 'disable --now ssh' "$install_src"
 assert_contains 'install.sh nombra la salida HTTPS que si necesita' \
     'salida HTTPS a github.com' "$install_src"
-assert_contains 'install.sh deja sshd a decision del operador' \
-    'sudo systemctl disable --now ssh' "$install_src"
 
 # El README documentaba la corrida interactiva como `curl ... | sudo bash -s`,
 # que el propio instalador rechaza: en el pipe el stdin del script es la
@@ -135,3 +135,12 @@ assert_not_contains 'README-deploy no promete un keypair' \
     'su keypair' "$(cat "$README_DEPLOY")"
 assert_not_contains 'README raiz no manda a cargar el .pub del keypair' \
     'keypair que creó install.sh' "$(cat "$REPO_ROOT/README.md")"
+
+# Ningun documento manda apagar sshd. La red del proveedor ya cierra el puerto, y
+# el comando corta la misma sesion sobre la que se corre el instalador: el que lo
+# ejecuta se queda sin volver a entrar. Un doc que lo sugiere es un incidente
+# esperando al proximo operador.
+assert_not_contains 'README raiz no manda apagar sshd' \
+    'systemctl disable --now ssh' "$(cat "$REPO_ROOT/README.md")"
+assert_not_contains 'README-deploy no manda apagar sshd' \
+    'systemctl disable --now ssh' "$(cat "$README_DEPLOY")"
