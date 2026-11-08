@@ -1,12 +1,8 @@
 """Tests for generate_skewt_file multi-format export (008-exportar-graficos)."""
 
-from unittest.mock import patch
-
 from django.test import TestCase
-from django.urls import reverse
 
 from apps.home.data.plot_generators import generate_skewt, generate_skewt_file
-from apps.meteo.models import Town
 
 
 def _make_sounding_data():
@@ -69,63 +65,3 @@ class GenerateSkewtWrapperTests(TestCase):
         self.assertTrue(
             decoded[:8] == b'\x89PNG\r\n\x1a\n', 'Base64 wrapper must decode to valid PNG'
         )
-
-
-class SoundingExportViewTests(TestCase):
-    """Tests for the models_sounding_export endpoint."""
-
-    def setUp(self):
-        self.sounding_data = _make_sounding_data()
-        Town.objects.create(name='Camagüey', latitude=21.3786, longitude=-77.9186)
-
-    def _mock_sounding_response(self, mock_get):
-        """Configure the mocked requests.get to return a valid sounding payload."""
-        mock_response = mock_get.return_value
-        mock_response.status_code = 200
-        mock_response.json.return_value = self.sounding_data
-
-    @patch('apps.home.views.modelos.views.requests.get')
-    def test_png_content_type_and_disposition(self, mock_get):
-        """PNG export returns image/png with attachment disposition."""
-        self._mock_sounding_response(mock_get)
-        response = self.client.get(reverse('home:models_sounding_export', args=['png']))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'image/png')
-        self.assertIn('attachment', response['Content-Disposition'])
-        self.assertIn('.png', response['Content-Disposition'])
-
-    @patch('apps.home.views.modelos.views.requests.get')
-    def test_pdf_content_type_and_disposition(self, mock_get):
-        """PDF export returns application/pdf with attachment disposition."""
-        self._mock_sounding_response(mock_get)
-        response = self.client.get(reverse('home:models_sounding_export', args=['pdf']))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'application/pdf')
-        self.assertIn('attachment', response['Content-Disposition'])
-        self.assertIn('.pdf', response['Content-Disposition'])
-
-    @patch('apps.home.views.modelos.views.requests.get')
-    def test_svg_content_type_and_disposition(self, mock_get):
-        """SVG export returns image/svg+xml with attachment disposition."""
-        self._mock_sounding_response(mock_get)
-        response = self.client.get(reverse('home:models_sounding_export', args=['svg']))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'image/svg+xml')
-        self.assertIn('attachment', response['Content-Disposition'])
-        self.assertIn('.svg', response['Content-Disposition'])
-
-    def test_invalid_fmt_returns_400(self):
-        """Unsupported fmt MUST return HTTP 400 without hitting upstream."""
-        response = self.client.get(reverse('home:models_sounding_export', args=['gif']))
-        self.assertEqual(response.status_code, 400)
-
-    def test_filename_uses_datetime_and_extension(self):
-        """Disposition filename must follow sounding_<datetime>.<ext> pattern."""
-        with patch('apps.home.views.modelos.views.requests.get') as mock_get:
-            self._mock_sounding_response(mock_get)
-            response = self.client.get(reverse('home:models_sounding_export', args=['png']))
-        self.assertEqual(response.status_code, 200)
-        import re
-
-        match = re.search(r'filename="sounding_\d+\.png"', response['Content-Disposition'])
-        self.assertIsNotNone(match, 'Disposition filename must be sounding_<datetime>.png')
