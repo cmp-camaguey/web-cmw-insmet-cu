@@ -3196,10 +3196,10 @@ setup_deploy_scaffold() {
         # NO es el usuario de servicio: aquel tiene shell nologin y ninguna
         # capacidad; este invoca webcmp-deploy por sudo, y ese es todo su poder.
         #
-        # No se genera ninguna clave SSH. El deploy no entra por ssh: el boton
-        # "Actualizar" resuelve refs/heads/main desde este servidor y aplica el
-        # commit localmente (ver C.11b). Una privada que nace aca es un secreto
-        # que viajaria dentro de la imagen y habria que rotar en cada copia.
+        # No se genera ninguna credencial de despliegue: el update es pull. El
+        # boton "Actualizar" resuelve refs/heads/main desde este servidor y
+        # aplica el commit localmente (ver C.11b), asi que no hay clave privada
+        # que viaje dentro de la imagen ni que rotar en cada copia.
         run useradd --create-home --shell /bin/bash "$DEPLOY_LOGIN_USER"
         echo "  creado con shell /bin/bash."
     fi
@@ -3231,13 +3231,10 @@ setup_deploy_scaffold() {
 
     cat <<EOF
 
-  El deploy automatico NO usa SSH. El boton "Actualizar" del panel resuelve
-  refs/heads/main desde este servidor y aplica el commit localmente; GitHub
-  nunca se conecta aca, asi que no hay DEPLOY_SSH_KEY que cargar ni known_hosts
-  que fijar.
-
-  Lo que si necesita: salida HTTPS a github.com (443) y DNS que resuelva. Sin
-  eso el boton no puede resolver el commit y el panel lo muestra como fallo.
+  El boton "Actualizar" del panel resuelve refs/heads/main desde este servidor
+  y aplica el commit localmente; GitHub nunca se conecta aca. Lo unico que
+  necesita es salida HTTPS a github.com (443) y DNS que resuelva. Sin eso el
+  boton no puede resolver el commit y el panel lo muestra como fallo.
 
   Ver el andamiaje del boton y deploy/README-deploy.md.
 EOF
@@ -3480,17 +3477,7 @@ cat <<EOF
      El rollback automatico no se conoce hasta que se lo vio funcionar una vez:
      probalo desplegando un commit anterior y confirmando que el sitio vuelve.
 
-  3. Acceso SSH:
-
-       Esta instalacion no configura ninguna clave SSH de despliegue. Si el
-       proveedor prohibe SSH al contenedor, deshabilitar sshd es decision del
-       operador y no del instalador, porque cortaria la sesion en la que corre:
-
-           sudo systemctl disable --now ssh
-
-       Hacerlo antes de empaquetar y confirmar que la consola sigue disponible.
-
-  4. Archivos que quedaron con material de clave:
+  3. Archivos que quedaron con material de clave:
 
        $ENV_FILE              (600 $SERVICE_USER)   SECRET_KEY cifrada, DB_PASS
        $ENCRYPTION_ENV        (600 root)             ENCRYPTION_KEY

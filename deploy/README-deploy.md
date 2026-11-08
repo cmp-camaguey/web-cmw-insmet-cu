@@ -5,8 +5,8 @@ cuando el CI de `main` esta en verde, con gates y rollback.
 
 La logica vive en [`deploy.sh`](deploy.sh), que corre **en el servidor**. Lo
 dispara el boton **"Actualizar"** del panel: el servidor resuelve `refs/heads/main`
-contra GitHub por HTTPS y aplica el commit localmente. No hace falta SSH entrante
-ni ningun runner conectandose.
+contra GitHub por HTTPS y aplica el commit localmente. No hace falta ningun puerto
+entrante ni ningun runner conectandose.
 Una sola fuente de verdad: si el procedimiento esta en los dos lados, el dia que
 uno cambie el deploy hace cosas distintas segun por donde entro.
 
@@ -320,13 +320,13 @@ tarde. Requiere storage con soporte de snapshots (ver arriba); si el tuyo no lo
 tiene, el equivalente es `vzdump 120 --mode snapshot --compress zstd` a un
 storage de backup.
 
-### Conectividad: salida HTTPS, no SSH entrante
+### Conectividad: solo salida HTTPS
 
 La actualizacion **la tira el servidor**. El boton "Actualizar" del panel escribe
 un archivo de peticion, un `.path` de systemd lo recoge y `webcmp-autodeploy`
 resuelve `refs/heads/main` con `git ls-remote` contra GitHub. No hay ningun runner
-de GitHub conectandose al contenedor, y por eso el proveedor puede prohibir SSH
-sin que el deploy deje de funcionar.
+de GitHub conectandose al contenedor: el deploy no necesita un solo puerto
+entrante.
 
 Lo que si hace falta:
 
@@ -345,17 +345,7 @@ Si eso devuelve un SHA, el boton funciona. Si no:
 | `Authentication failed` | El repo no es legible sin credenciales: el ejecutor no tiene token |
 
 El servidor solo necesita **salida** a `github.com:443`. Nada de puertos
-entrantes, ni el 22 ni ninguno.
-
-Para una instalacion sin SSH hay un paso que el instalador **no** hace, y es a
-proposito: apagar sshd. El instalador puede estar corriendo sobre esa misma
-sesion, asi que cortarla desde adentro es perder la sesion y quedar sin poder
-volver a entrar. Se hace despues, a mano, y solo cuando la consola del proveedor
-(Proxmox, `pct enter`) ya esta probada:
-
-```bash
-sudo systemctl disable --now ssh
-```
+entrantes.
 
 ### Topologia con Nginx Proxy Manager externo
 
@@ -552,9 +542,9 @@ alla.
 
 Al final queda el andamiaje del boton "Actualizar": el usuario `deploy`, el
 sudoers acotado a un comando, `/usr/local/sbin/webcmp-deploy` y el ejecutor
-`webcmp-autodeploy` con su `.path` de systemd. **No se genera ninguna clave SSH**:
-la actualizacion es pull, asi que no hay clave privada que sacar del servidor ni
-secret que cargar en GitHub. Ver **El boton "Actualizar"**.
+`webcmp-autodeploy` con su `.path` de systemd. **No se genera ninguna credencial
+de despliegue**: la actualizacion es pull, asi que no hay clave privada que sacar
+del servidor ni secret que cargar en GitHub. Ver **El boton "Actualizar"**.
 
 Re-correr el script es seguro: cada pregunta muestra el valor actual como
 default, no regenera claves, no borra la base y no pisa ni `/etc/webcmp/deploy.env`
@@ -572,8 +562,8 @@ mano. Despues de eso, el boton funciona igual. Es exactamente lo que hace
 
 ```bash
 # 1. Usuario de despliegue. Distinto de webcmp, que no tiene shell a proposito:
-#    existe para correr Gunicorn, no para que alguien se loguee. Sin clave SSH:
-#    nadie entra con este usuario, se usa para correr el ejecutor del boton.
+#    existe para correr Gunicorn, no para que alguien se loguee. No tiene
+#    credenciales: se usa unicamente para correr el ejecutor del boton.
 sudo useradd -m -s /bin/bash deploy
 
 # 2. Script FUERA del checkout.
@@ -681,16 +671,6 @@ desplegar: `webcmp-autodeploy` resuelve `refs/heads/main` con `git ls-remote`
 sobre el repositorio publico, sin credenciales y sin tocar el checkout. Tampoco
 existe una clave privada de despliegue en el servidor: el instalador ya no la
 genera.
-
-El workflow `.github/workflows/deploy-production.yml` sigue en el repo como
-alternativa por SSH, pero esta apagado y **no** es el camino de esta instalacion:
-
-- El job tiene `if: vars.DEPLOY_ENABLED == 'true'`, asi que sin esa variable
-  termina en gris (*skipped*) en vez de fallar por secrets que no existen.
-- Si algun dia se reactiva, necesita los cuatro secrets de antes (`DEPLOY_HOST`,
-  `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_SSH_KNOWN_HOSTS`) y conectividad
-  entrante al 22. Con un proveedor que prohibe SSH, no se activa: se deja sin la
-  variable.
 
 ## Correr un deploy a mano
 
@@ -940,24 +920,6 @@ EMERGENCY_BANNER_ENABLED=False
 
 Apagarla no toca el contenido publicado: las paginas de avisos y los badges del
 menu siguen igual.
-
-
-## La alternativa por SSH (no se usa aca)
-
-El workflow `.github/workflows/deploy-production.yml` hace `ssh` al puerto 22 y
-solo sirve si el servidor acepta conexiones entrantes. Con un proveedor que
-prohibe SSH no se activa: se deja `DEPLOY_ENABLED` sin definir y el job termina
-en gris.
-
-Si algun dia se necesita, conviene saber que un runner hospedado de GitHub no
-llega a una red interna: atras de un firewall que solo deja entrar por VPN o por
-un bastion, el deploy automatico no llega. Opciones, de peor a mejor:
-
-1. Correr el deploy a mano (el script esta ahi para eso).
-2. Self-hosted runner en la red interna.
-3. Abrir el 22 restringido a las IP de GitHub.
-
-Por eso este proyecto usa el boton del panel: no depende de nada de eso.
 
 ## Errores que solo aparecen en produccion
 
