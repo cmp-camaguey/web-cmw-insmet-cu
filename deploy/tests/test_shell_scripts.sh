@@ -61,18 +61,23 @@ else
     assert_contains 'deploy.sh sin root lo explica' 'necesita root' "$deploy_noroot_out"
 fi
 
-# El bloque "QUE FALTA" imprime el comando con el que el operador arma
-# DEPLOY_SSH_KNOWN_HOSTS. Tenia un `sed 's/^/|1 h=|/'` de mas que prefijaba cada
-# linea: ssh no parsea ese archivo y el deploy falla con "Host key verification
-# failed", un error que no dice "el secret esta mal formado".
+# El deploy ya no entra por SSH, asi que el instalador no puede generar un
+# keypair ni escribir un authorized_keys. Si alguna de las dos cosas vuelve, es
+# un secreto mas viajando dentro de la imagen (que se entrega como salva a un
+# proveedor que prohibe SSH) y una privada que hay que rotar en cada copia.
 #
-# No se ejecuta ssh-keyscan: la suite no puede depender de que el puerto 22 de un
-# host externo responda. Se fija la forma del comando, que es lo que se rompio.
-known_hosts_line=$(grep -F 'ssh-keyscan -p 22 -H <host>' "$INSTALL_SH")
-assert_contains 'install.sh imprime el ssh-keyscan de DEPLOY_SSH_KNOWN_HOSTS' \
-    '2>/dev/null > known_hosts' "$known_hosts_line"
-assert_not_contains 'install.sh no prefija el known_hosts con el sed roto' \
-    '|1 h=|' "$known_hosts_line"
+# Se inspecciona el FUENTE y no la salida de `--help`: estas rutas solo se
+# ejecutan como root, al final de la instalacion.
+install_src=$(cat "$INSTALL_SH")
+assert_not_contains 'install.sh no genera keypairs SSH' 'ssh-keygen' "$install_src"
+assert_not_contains 'install.sh no escribe authorized_keys' 'authorized_keys' "$install_src"
+assert_not_contains 'install.sh no imprime ssh-keyscan' 'ssh-keyscan' "$install_src"
+assert_contains 'install.sh explica que el boton no usa SSH' \
+    'NO usa SSH' "$install_src"
+assert_contains 'install.sh nombra la salida HTTPS que si necesita' \
+    'salida HTTPS a github.com' "$install_src"
+assert_contains 'install.sh deja sshd a decision del operador' \
+    'sudo systemctl disable --now ssh' "$install_src"
 
 # El README documentaba la corrida interactiva como `curl ... | sudo bash -s`,
 # que el propio instalador rechaza: en el pipe el stdin del script es la
@@ -121,3 +126,12 @@ assert_contains 'install.sh condiciona el aviso a la clave generada' \
     'if [ "$key" = SUPERUSER_PASSWORD ]' "$install_src"
 assert_contains 'install.sh aclara que la clave del superusuario no se guarda' \
     'no se guarda en ningun archivo' "$install_src"
+
+# El instalador ya no genera keypair. Un texto que lo sigue prometiendo manda al
+# operador a buscar un archivo que no existe, y en el README raiz a cargar un
+# secret de GitHub que ningun workflow lee.
+assert_not_contains 'install.sh --help no promete un keypair' 'su keypair' "$help_out"
+assert_not_contains 'README-deploy no promete un keypair' \
+    'su keypair' "$(cat "$README_DEPLOY")"
+assert_not_contains 'README raiz no manda a cargar el .pub del keypair' \
+    'keypair que creó install.sh' "$(cat "$REPO_ROOT/README.md")"

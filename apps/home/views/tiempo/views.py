@@ -1,6 +1,7 @@
 from django.utils import timezone
 from django.views.generic import DetailView
 
+from apps.core.utils import local_day_window
 from apps.meteo.models import WeatherReport
 
 
@@ -29,9 +30,15 @@ class WeatherReportDetailView(DetailView):
         return name_map[self.get_report_type()]
 
     def get_object(self):
+        # El dia local se decide en Python, no con `date__date`, que resuelve
+        # America/Havana dentro de PostgreSQL con el tzdata de la base. Cuando
+        # ese tzdata y el de Python discrepan, el filtro no encuentra el reporte
+        # del dia y las cuatro paginas publicas responden "Nada que mostrar"
+        # durante horas. Ver `apps.core.utils.local_day_window`.
+        inicio, fin = local_day_window(timezone.localdate())
         return (
             WeatherReport.objects.filter(
-                report_type=self.get_report_type(), date__date=timezone.localdate()
+                report_type=self.get_report_type(), date__gte=inicio, date__lt=fin
             )
             .select_related('user')
             .first()

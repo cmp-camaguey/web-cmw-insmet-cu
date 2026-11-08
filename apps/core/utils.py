@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, time, timedelta
 from functools import wraps
 
 from django.contrib.admin.models import LogEntry
@@ -6,6 +7,7 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.shortcuts import render
 from django.templatetags.static import static
+from django.utils import timezone
 from django.views import View
 
 from apps.core.models import ActivityLog, CompanySettings
@@ -41,6 +43,24 @@ SUN_IMG_MAP = {
     'sunrise': 'dist/img/sun/sunrise.png',
     'sunset': 'dist/img/sun/sunset.png',
 }
+
+
+def local_day_window(day):
+    """Rango `[inicio, fin)` del dia local `day`, en instantes con zona.
+
+    Los lookups `__date` resuelven la zona DENTRO de PostgreSQL
+    (`(col AT TIME ZONE 'America/Havana')::date`), con el tzdata de la imagen de
+    la base. `timezone.localdate()` la resuelve en Python, con el tzdata del
+    paquete `tzdata` / del sistema. Cuando los dos discrepan — pasa: el paquete
+    de PyPI y la imagen de PostgreSQL se mueven a distinto ritmo — el mismo
+    instante cae en fechas distintas segun el lado, y el filtro se equivoca.
+
+    Con una ventana de instantes la base solo compara `timestamptz` y no
+    resuelve ninguna zona: la unica fuente de verdad es Python.
+    """
+    inicio = timezone.make_aware(datetime.combine(day, time.min))
+    fin = timezone.make_aware(datetime.combine(day + timedelta(days=1), time.min))
+    return inicio, fin
 
 
 def log_action(user, obj, action_flag, message, request=None):

@@ -771,16 +771,22 @@ Con proxy externo, ese `curl` pasa por NPM y prueba la cadena completa. Para
 validar solo la capa local del servidor —vhost, `/static/` y `/media/`— sin salir
 de él: `curl -sSI http://127.0.0.1/`.
 
-### 8. Deploy automático con GitHub Actions
+### 8. Actualizaciones: las tira el servidor
 
 Hasta acá el servidor sirve, pero cada cambio hay que desplegarlo a mano. A partir
-de acá, `main` en verde se despliega solo.
+de acá se actualiza solo cuando alguien aprieta el botón "Actualizar" del panel.
+
+La dirección importa: **nada entra al contenedor**. No hay ningún workflow de
+GitHub conectándose por SSH al servidor; el servidor resuelve `refs/heads/main`
+contra GitHub por HTTPS y aplica el commit localmente. Por eso un proveedor que
+prohíbe SSH entrante no rompe las actualizaciones.
 
 #### 8.1 Instalar el andamiaje en el servidor (una vez)
 
-El deploy por workflow no es autocontenido: la primera vez hay que dejar el
-servidor armado —usuario de despliegue, su clave, el script, la config, el
-sudoers y el resto del andamiaje—.
+El andamiaje no es autocontenido: la primera vez hay que dejar el servidor armado
+—usuario de despliegue, el script, la config, el sudoers y las unidades de
+systemd—. **No se genera ninguna clave SSH**: el instalador ya no crea keypair de
+despliegue.
 
 ```bash
 sudo ./deploy/install.sh --dry-run   # muestra qué haría, sin tocar nada
@@ -801,7 +807,7 @@ Qué hace, y por qué en ese orden:
 | 8 | Unidades systemd renderizadas a `APP_DIR` y al usuario reales |
 | 9 | Nginx en las dos topologías, y el vhost que corresponde a `PROXY_MODE` |
 | 10 | `/etc/webcmp/deploy.env` con el destino del health check que corresponde |
-| 11 | Andamiaje de deploy: usuario `deploy`, keypair, sudoers y `webcmp-deploy` |
+| 11 | Andamiaje de deploy: usuario `deploy`, sudoers, `webcmp-deploy` y `webcmp-autodeploy` |
 | 12 | Superusuario, por `systemd-run` con la `ENCRYPTION_KEY` |
 
 Es idempotente: correrlo dos veces no cambia nada y no regenera secretos. Importa
@@ -810,9 +816,10 @@ regenera una clave o pisa una config editada a mano convierte un reintento en un
 incidente.
 
 A propósito **no** hace: tocar el firewall (imprime los comandos de `ufw`),
-configurar el proxy externo (imprime los datos para NPM), crear los secrets del
-environment de GitHub, ni tomar snapshots. Son decisiones que dependen de la red
-real del sitio, y automatizarlas a ciegas deja más basura de la que recoge.
+configurar el proxy externo (imprime los datos para NPM), apagar `sshd` (puede
+estar corriendo sobre esa misma sesión), ni tomar snapshots. Son decisiones que
+dependen de la red real del sitio, y automatizarlas a ciegas deja más basura de la
+que recoge.
 
 > **Por qué el script vive en `/usr/local/sbin` y no en `/srv/webcmp/deploy/`.** El
 > deploy corre como root y el checkout es escribible por `webcmp`. Con el sudoers
@@ -859,58 +866,62 @@ Mientras `HEALTHCHECK_INSECURE=1`, el health check corre `curl --insecure` y dej
 detectar un certificado vencido o con nombre incorrecto. Sacalo cuando tengas un
 certificado de una CA real.
 
-#### 8.2 Secrets de GitHub
+#### 8.2 Lo único que hace falta en la red
 
-En **Settings → Environments → `production`** (no secrets del repo: el environment
-puede pedir aprobación humana, y las credenciales de producción no quedan
-visibles desde cualquier workflow).
-
-| Secret | Qué es |
-| --- | --- |
-| `DEPLOY_HOST` | IP o hostname del servidor |
-| `DEPLOY_USER` | `deploy` |
-| `DEPLOY_SSH_KEY` | La clave **privada** ed25519 en PEM, con `BEGIN`/`END` |
-| `DEPLOY_SSH_KNOWN_HOSTS` | Salida de `ssh-keyscan -p 22 <host>` |
+El servidor necesita **salida** a `github.com:443` y DNS. Nada de puertos
+entrantes, ni el 22 ni ninguno, y ningún secret de GitHub que cargar.
 
 ```bash
-# El .pub del keypair que creó install.sh
-cat /home/deploy/.ssh/id_ed25519.pub
-
-# El known_hosts del servidor
-ssh-keyscan -p 22 <host-del-servidor>
+# como el usuario deploy, sin credenciales: el repo es público
+sudo -u deploy env GIT_TERMINAL_PROMPT=0 \
+    git ls-remote https://github.com/cmp-camaguey/webcmp.git refs/heads/main
 ```
 
-`DEPLOY_SSH_KNOWN_HOSTS` no es decorativo: el workflow usa
-`StrictHostKeyChecking=yes`. Va ahí, y no con `accept-new`, porque `accept-new`
-acepta cualquier clave la primera vez — un deploy que no verifica a quién se conecta
-le entrega la clave de despliegue a cualquiera que responda ese puerto.
+Si eso devuelve un SHA, el botón "Actualizar" va a funcionar. Si no:
 
-> **Los runners de GitHub no llegan a una IP privada.** Si `DEPLOY_HOST` es algo en
-> `192.168.x.x` o `10.x.x.x`, el job se queda colgado en `ConnectTimeout=20` y falla.
-> Hace falta una IP pública alcanzable, un runner self-hosted dentro de la red, o
-> un bastion.
-
-#### 8.3 Qué dispara el deploy
-
-`.github/workflows/deploy-production.yml` corre en dos casos:
-
-| Disparador | Qué hace |
+| Síntoma | Causa |
 | --- | --- |
-| `workflow_run` sobre CI, con `conclusion == success` y `branches: [main]` | Despliega el commit que quedó en verde |
-| `workflow_dispatch` | Manual, desde la pestaña Actions |
+| `Could not resolve host` | DNS. Sin resolución no hay `ls-remote` |
+| timeout / `Connection refused` | Sin salida al 443. Pedirla al proveedor |
+| `Authentication failed` | El repo no es legible sin credenciales: el ejecutor no tiene token |
 
-`workflow_dispatch` es el que se usa para los dos casos raros: un rollback
-apegado a un SHA viejo, y un primer deploy antes de fiarse del automático.
+Con un proveedor que prohíbe SSH se puede apagar `sshd`, pero **no desde el
+instalador**: puede estar corriendo sobre esa misma sesión. Se hace a mano, y solo
+cuando la consola del proveedor (Proxmox, `pct enter`) ya está probada:
 
-Hoy los dos están **apagados a propósito**: no existe servidor de producción, así
-que el job tiene `if: vars.DEPLOY_ENABLED == 'true'` y se salta en vez de fallar
-por secrets que todavía no se pueden cargar. Se enciende creando esa variable de
-repositorio, después de cargar los cuatro secrets.
+```bash
+sudo systemctl disable --now ssh
+```
 
-El concurrency group es `deploy-production` con `cancel-in-progress: false`: dos
-deploys se ejecutan **uno después del otro**, nunca superpuestos. Cancelar el que
-está corriendo para arrancar otro deja el servidor en un estado intermedio que
-nadie pidió.
+> **`.github/workflows/deploy-production.yml` ya no se usa.** Era el deploy por
+> push con `DEPLOY_SSH_KEY`, y quedó apagado con `if: vars.DEPLOY_ENABLED ==
+> 'true'` (variable que no existe). La actualización es pull; ese archivo es una
+> alternativa histórica, no el camino vigente.
+
+#### 8.3 Qué dispara la actualización
+
+El botón **"Actualizar"** del dashboard:
+
+```text
+panel (usuario webcmp) escribe /var/lib/webcmp/deploy-request
+  → webcmp-autodeploy.path lo ve y arranca webcmp-autodeploy.service
+  → el servicio corre como el usuario deploy, sin privilegios extra
+  → git ls-remote contra refs/heads/main
+  → sudo -n /usr/local/sbin/webcmp-deploy <sha>   (una sola regla de sudoers)
+```
+
+El contenido del archivo de petición **no** se usa como destino: solo avisa que
+hay una petición. El commit se resuelve contra `refs/heads/main`, así que aunque
+el proceso web quedara comprometido y escribiera cualquier cosa, lo máximo que
+consigue es desplegar lo que ya está en `main`. Promover a producción sigue siendo
+un PR `dev` → `main` con aprobación humana.
+
+El panel lee el resultado de `/var/lib/webcmp/deploy-status.json` (`running`,
+`ok`, `failed`). Un fallo no se reintenta solo: un reintento automático de una
+migración rota es un bucle.
+
+Si el fallo es antes de mover el checkout no hay nada que deshacer. Si es después,
+el `trap rollback EXIT` de `deploy.sh` devuelve el servidor al commit anterior.
 
 #### 8.4 Qué hace el deploy
 
@@ -918,13 +929,14 @@ En orden, y todo en `deploy/deploy.sh`:
 
 ```text
 flock → aborted si hay cambios sin commitear → checkout del SHA → pip install
-      → makemigrations --check → check --deploy → migrate → collectstatic
-      → restart → health check
+      → makemigrations --check → check --deploy
+      → respaldo de la base si hay migraciones pendientes
+      → migrate → collectstatic → restart → health check
 ```
 
-El `flock` del principio no es un detalle: dos pushes seguidos no pueden migrar a
-la vez. Y el `check --deploy` va **antes** de `migrate` a propósito, para que un
-deploy con la configuración rota no llegue a tocar el esquema.
+El `flock` del principio no es un detalle: dos actualizaciones seguidas no pueden
+migrar a la vez. Y el `check --deploy` va **antes** de `migrate` a propósito, para
+que un deploy con la configuración rota no llegue a tocar el esquema.
 
 Dos cosas que parecen raras y no lo son:
 
@@ -939,11 +951,58 @@ CI corre sin `ENCRYPTION_KEY` ni con el par de testing, y pasa sobre cosas que e
 producción no. Este es el gate que de verdad importa, y corre con los valores con
 los que el sitio va a servir.
 
+##### Respaldo antes de migrar
+
+Django no revierte esquema. Si una migración destructiva se cuela, el código se
+puede volver a un commit anterior, pero la columna borrada no vuelve. Por eso,
+cuando `migrate --check` reporta migraciones pendientes, el deploy respalda la
+base **antes** de aplicarlas:
+
+```text
+/var/backups/webcmp/db/webcmp-<desde>-<hasta>-<fecha>.dump
+```
+
+- Solo se toma si hay migraciones pendientes: un deploy sin cambios de esquema no
+  escribe nada.
+- Va **después** de los dos gates: un commit que no los pasa nunca toca la base.
+- Si `pg_dump` falla, el deploy **aborta**. Una migración destructiva sin respaldo
+  no tiene vuelta atrás.
+- Se conservan los últimos 10 (`DB_BACKUP_KEEP`); el resto se borra.
+- El directorio es `0700` de root y los archivos `0600`: ni el usuario del sitio
+  ni el de deploy pueden leer un respaldo completo de la base.
+
+Restaurar uno, con el sitio parado y **como root** (los permisos no dejan que lo
+haga otro usuario):
+
+```bash
+sudo pg_restore -h 127.0.0.1 -U <usuario-de-la-base> -W -d <base> --clean --if-exists \
+    /var/backups/webcmp/db/<archivo>.dump
+```
+
+##### Gate de migraciones en el merge a `main`
+
+El respaldo es la red de seguridad; el gate es que la migración destructiva no
+llegue a producción. El job `Migrations safety (dev -> main)` corre **solo** en un
+PR hacia `main` y bloquea:
+
+- `RemoveField`, `DeleteModel`, `RunSQL`, `RunPython`, `SeparateDatabaseAndState` y
+  cualquier operación que no sepa clasificar;
+- editar, borrar o renombrar una migración ya publicada — esto **no** tiene escape;
+- una migración que no se puede parsear.
+
+El único escape, para una migración nueva destructiva revisada a propósito, es un
+comentario en el propio archivo con el motivo:
+
+```python
+# data-safety: reviewed: la columna se migró a 0012 y se verificó en producción
+```
+
 #### 8.5 Rollback
 
 Automático: si algo falla **después** de que el checkout se movió, un
 `trap rollback EXIT` devuelve el servidor al commit anterior y reinicia los
-servicios. Si el fallo es antes de mover nada, no hay nada que deshacer.
+servicios. Si el fallo es antes de mover nada, no hay nada que deshacer. El
+mensaje de error nombra el respaldo que se tomó, si se tomó alguno.
 
 ```bash
 # Rollback manual a un SHA que ya se sabe que es bueno
@@ -952,8 +1011,8 @@ sudo journalctl -u webcmp -n 100      # ver qué pasó
 ```
 
 **El primer deploy en serio: hacelo a mano.** Un `sudo /usr/local/sbin/webcmp-deploy`
-con un SHA conocido te dice si el servidor está listo sin meter un workflow de
-GitHub en el medio. Recién después, probá el automático.
+con un SHA conocido te dice si el servidor está listo sin apretar el botón en el
+medio. Recién después, probá el botón.
 
 Los porqués del diseño y la tabla de errores que solo aparecen en producción están
 en [`deploy/README-deploy.md`](deploy/README-deploy.md).
@@ -1068,8 +1127,10 @@ Los labels de app van con la ruta completa (`apps.meteo`, no `meteo`): en Django
 Ocho jobs son required status checks en las dos ramas: *Detect affected apps*,
 *Tests (Django)*, *Lint (Ruff)*, *Templates (djlint)*, *Pre-commit hooks*,
 *Bandit SAST*, *Security (pip-audit + migrations)* y *Deploy check (check
---deploy)*. Si un PR renombra o borra uno de esos jobs, el check requerido nunca
-reporta y el merge queda bloqueado: **fail-closed** a propósito.
+--deploy)*. En `main` hay un noveno, *Migrations safety (dev -> main)*, que
+bloquea una migración destructiva o una migración ya publicada editada. Si un PR
+renombra o borra uno de esos jobs, el check requerido nunca reporta y el merge
+queda bloqueado: **fail-closed** a propósito.
 
 Autores: el Instituto de Meteorología de Cuba.
 

@@ -1,4 +1,4 @@
-from datetime import date, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -71,6 +71,25 @@ class WeatherReportDetailViewContextTests(TestCase):
         self._create_report('today')
         response = self.client.get(reverse('home:weather_today'))
         self.assertIn('objects', response.context)
+
+    def test_encuentra_el_reporte_del_dia_sin_depender_del_tzdata_de_la_base(self):
+        """El dia local se resuelve en Python, no dentro de PostgreSQL.
+
+        `date__date` resuelve America/Havana con el tzdata del servidor de base.
+        Si ese tzdata y el de Python discrepan (el paquete `tzdata` de PyPI y la
+        imagen de PostgreSQL se mueven a distinto ritmo), el reporte recien
+        creado deja de encontrarse y las cuatro paginas responden "Nada que
+        mostrar". El instante congelado es el de una corrida real de CI que
+        fallo exactamente por esto.
+        """
+        instante = datetime(2026, 11, 8, 4, 0, 15, tzinfo=UTC)
+        with patch('django.utils.timezone.now', return_value=instante):
+            self._create_report('today')
+            response = self.client.get(reverse('home:weather_today'))
+            # Django omite la clave del contexto cuando `get_object()` devuelve
+            # None, y la pagina cae en el estado vacio que vio el usuario.
+            self.assertIsNotNone(response.context.get('weather_today'))
+            self.assertNotContains(response, 'Nada que mostrar')
 
     def test_tomorrow_context_title(self):
         self._create_report('tomorrow')
