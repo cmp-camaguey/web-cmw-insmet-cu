@@ -1,22 +1,20 @@
-# Usuario de despliegue: el dueno de la clave SSH que usa GitHub Actions.
+# Usuario de despliegue: el que aprieta el boton "Actualizar" del panel.
 #
 # NO es el usuario del servicio. `webcmp` existe para correr Gunicorn y Huey, y
-# tiene el shell en /bin/false justamente para que nadie pueda loguearse con el.
-# El despliegue necesita un usuario con shell y con privilege escalation acotado,
-# que son dos cosas distintas.
+# no tiene shell justamente para que nadie pueda loguearse con el. La
+# actualizacion necesita un usuario con shell y con privilege escalation
+# acotado, que son dos cosas distintas.
 #
-# Crear el usuario (una vez):
+# El update es pull y no pasa por SSH: `webcmp-autodeploy` resuelve
+# refs/heads/main contra GitHub por HTTPS como este usuario y despues invoca el
+# script con sudo local. No hay clave privada de despliegue en ningun lado.
+#
+# Crear el usuario y lo demas es trabajo de deploy/install.sh. A mano:
 #   sudo useradd -m -s /bin/bash deploy
 #   sudo install -o root -g root -m 0440 deploy/sudoers/webcmp-deploy /etc/sudoers.d/webcmp-deploy
 #   sudo visudo -c -f /etc/sudoers.d/webcmp-deploy
 #   sudo install -o root -g root -m 0755 deploy/deploy.sh /usr/local/sbin/webcmp-deploy
 #   sudo install -o root -g root -m 0600 deploy/deploy.env.example /etc/webcmp/deploy.env
-#
-# La clave PRIVADA es lo que se publica como secret DEPLOY_SSH_KEY de GitHub.
-# La publica ya queda en /home/deploy/.ssh/authorized_keys (la instala
-# deploy/install.sh); pegar la .pub en el secret es el error natural y falla con
-# "Permission denied (publickey)":
-#   sudo cat /etc/webcmp/deploy_key
 #
 # La ruta de /usr/local/sbin NO es arbitraria. Si el script viviera en
 # /srv/webcmp/deploy/deploy.sh, que es escribible por webcmp, este sudoers seria
@@ -30,8 +28,8 @@
 #
 # Notar que no hay reglas para git, systemctl ni manage.py: el usuario de
 # despliegue no opera el servidor, solo invoca el script, que ya hace lo que
-# corresponde. El workflow resuelve el SHA con git ls-remote desde el runner de
-# GitHub, no desde el servidor.
+# corresponde. Quien resuelve el SHA es `webcmp-autodeploy`, con `git ls-remote`
+# contra GitHub desde este mismo servidor, y le pasa el resultado al script.
 #
 # Sintaxis de /etc/sudoers.d/: a diferencia de una linea suelta pegada al final de
 # /etc/sudoers, un archivo de este directorio NO admite una lista de comandos a

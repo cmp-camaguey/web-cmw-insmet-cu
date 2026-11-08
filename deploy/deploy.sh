@@ -2,10 +2,9 @@
 # Despliegue de webcmp en el servidor de produccion.
 #
 # Se ejecuta EN el servidor, como root, y es la fuente unica de verdad del
-# procedimiento. El workflow .github/workflows/deploy-production.yml lo invoca
-# por SSH; el
-# operador tambien puede correrlo a mano cuando Actions no llega o cuando hay que
-# volver atras sin pasar por un PR.
+# procedimiento. Lo invoca el boton "Actualizar" del panel (como el usuario
+# `deploy`, via sudo); el operador tambien puede correrlo a mano por consola
+# cuando hay que volver atras sin pasar por un PR. No necesita SSH entrante.
 #
 #   sudo /usr/local/sbin/webcmp-deploy <commit-sha> [ref-de-respaldo]
 #   sudo /usr/local/sbin/webcmp-deploy --configure   # (re)escribe /etc/webcmp/deploy.env
@@ -17,15 +16,18 @@
 #   3. pip install requirements/prod.txt
 #   4. gate 1: makemigrations --check (el modelo cambio y no hay migracion)
 #   5. gate 2: check --deploy con la configuracion REAL de produccion
-#   6. migrate  (antes de que el codigo nuevo atienda requests)
-#   7. collectstatic (antes de que el codigo nuevo sirva HTML que los referencia)
-#   8. restart de webcmp y webcmp-huey (reload NO sirve: ver nota de Gunicorn)
-#   9. health check contra el reverse proxy que corresponda (ver HEALTHCHECK_*)
+#   6. respaldo de la base SI hay migraciones pendientes (pg_dump --format=custom).
+#      Si el respaldo falla, el deploy aborta: una migracion destructiva sin dump
+#      no tiene vuelta atras.
+#   7. migrate  (antes de que el codigo nuevo atienda requests)
+#   8. collectstatic (antes de que el codigo nuevo sirva HTML que los referencia)
+#   9. restart de webcmp y webcmp-huey (reload NO sirve: ver nota de Gunicorn)
+#  10. health check contra el reverse proxy que corresponda (ver HEALTHCHECK_*)
 #
-# Si algo falla despues del punto 6, se revierte el codigo y se reinicia. La
+# Si algo falla despues del punto 7, se revierte el codigo y se reinicia. La
 # base de datos NO se revierte sola: Django no genera migraciones inversas y una
 # operacion destructiva (DROP COLUMN) no tiene hacia atras. El script lo dice por
-# pantalla y quien lee la salida sabe que tiene que mirar la base a mano.
+# pantalla y nombra el respaldo que tomo antes de migrar.
 #
 # INSTALACION (una vez, y de ahi en adelante el archivo vive FUERA del checkout):
 #   sudo install -o root -g root -m 0755 deploy/deploy.sh /usr/local/sbin/webcmp-deploy
@@ -34,7 +36,7 @@
 # escribible por el usuario de servicio. Si el script se ejecutara desde
 # /srv/webcmp/deploy/deploy.sh con sudo, bastaria editar el archivo para obtener
 # root: es una escalada de privilegios trivial. En /usr/local/sbin, propiedad de
-# root, el dueño de la clave de despliegue no puede escribirlo.
+# root, ninguno de los dos usuarios puede escribirlo.
 
 set -Eeuo pipefail
 
@@ -49,7 +51,7 @@ log() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mAVISO:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 
 # TODO git corre como DEPLOY_USER, nunca como root.
 #
@@ -333,12 +335,18 @@ fi
 # escribible, cada import regenera el indice de fuentes y escupe un WARNING que
 # tapa el resto del log. Lo declara tambien webcmp.service.
 : "${MPLCONFIGDIR:=$APP_DIR/.cache/matplotlib}"
+# Respaldo de la base antes de aplicar migraciones pendientes. El deploy corre
+# sin nadie mirando (boton del panel) y Django no revierte esquema: si una
+# migracion destructiva llega a main, el dump es la unica vuelta atras.
+: "${DB_BACKUP_DIR:=/var/backups/webcmp/db}"
+: "${DB_BACKUP_KEEP:=10}"
 
 readonly APP_DIR DEPLOY_USER GUNICORN_UNIT HUEY_UNIT ENCRYPTION_ENV PYTHON
 readonly PUBLIC_HOSTNAME PROXY_MODE HEALTHCHECK_URL HEALTHCHECK_RESOLVE
 readonly HEALTHCHECK_UNIX_SOCKET HEALTHCHECK_HOST_HEADER HEALTHCHECK_INSECURE
 readonly HEALTHCHECK_URL_DEFINED HEALTHCHECK_RESOLVE_DEFINED
 readonly PIP_CACHE_DIR MPLCONFIGDIR
+readonly DB_BACKUP_DIR DB_BACKUP_KEEP
 # El array se congela aparte: `readonly PIP_CMD` sin `-a` no protege el contenido
 # de un array en bash < 5.0.
 readonly -a PIP_CMD
@@ -574,7 +582,7 @@ check_sudoers() {
         if [ "$covered" -eq 1 ]; then
             check_ok "'$SUDO_USER' esta cubierto: puede invocar webcmp-deploy."
         else
-            check_fail "'$SUDO_USER' NO figura en $sudoers: el deploy por SSH desde ese usuario va a fallar con 'command not allowed'."
+            check_fail "'$SUDO_USER' NO figura en $sudoers: invocar webcmp-deploy desde ese usuario va a fallar con 'command not allowed'."
         fi
     fi
 }
@@ -653,6 +661,22 @@ check_django() {
     fi
 }
 
+check_db_backup() {
+    log "Respaldo de la base"
+    if command -v pg_dump >/dev/null 2>&1; then
+        check_ok "pg_dump disponible ($(command -v pg_dump))."
+    else
+        check_fail "No hay pg_dump: un deploy con migraciones no podria respaldar la base antes de migrar."
+    fi
+    if [ -d "$DB_BACKUP_DIR" ]; then
+        local count
+        count=$(find "$DB_BACKUP_DIR" -maxdepth 1 -type f -name '*.dump' 2>/dev/null | wc -l)
+        check_ok "Directorio de respaldos: $DB_BACKUP_DIR ($count guardados; se conservan $DB_BACKUP_KEEP)."
+    else
+        check_skip "Todavia no existe $DB_BACKUP_DIR: se crea en el primer deploy con migraciones."
+    fi
+}
+
 if [ "$MODE" = check ]; then
     validate_healthcheck_target
     log "Chequeo de $CONFIG (no se despliega nada)"
@@ -661,6 +685,7 @@ if [ "$MODE" = check ]; then
     check_sudoers
     check_healthcheck
     check_django
+    check_db_backup
     echo
     if [ "$CHECK_FAILED" -eq 0 ]; then
         log "Todo lo chequeado esta bien."
@@ -672,6 +697,8 @@ fi
 [ -d "$APP_DIR/.git" ] || die "$APP_DIR no es un checkout de git."
 [ -x "$PYTHON" ] || die "No existe el venv: $PYTHON"
 validate_healthcheck_target
+valid_abs_path "$DB_BACKUP_DIR" \
+    || die "DB_BACKUP_DIR='$DB_BACKUP_DIR' no es una ruta absoluta limpia (sin espacios, comillas ni \$)."
 
 # El cache es de DEPLOY_USER, no de root: si fuera de root, los artefactos
 # cacheados serian ilegibles para el pip del deploy y el cache no serviria de
@@ -698,6 +725,7 @@ previous_sha=$(gitapp rev-parse HEAD)
 previous_sha=${2:-$previous_sha}
 migrated=0
 current_sha="$previous_sha"
+db_dump_file=''
 
 # OJO: aca NO se hace `rev-parse --short "$target_sha"`. Ese comando solo resuelve
 # objetos que ya estan en el repo local, y el `fetch` de mas abajo todavia no
@@ -727,6 +755,10 @@ rollback() {
         warn "Las migraciones YA se aplicaron. Django no genera rollback automatico:"
         warn "si una migracion fue destructiva, la base quedo con el esquema nuevo."
         warn "Revisala a mano antes de volver a exponer el sitio."
+        if [ -n "$db_dump_file" ]; then
+            warn "Respaldo previo a las migraciones: $db_dump_file"
+            warn "Restaurar: pg_restore -d <base> --clean --if-exists $db_dump_file"
+        fi
     fi
 
     gitapp fetch --quiet origin || true
@@ -788,6 +820,86 @@ manage() {
         --working-directory="$APP_DIR" \
         "$PYTHON" manage.py "$@"
 }
+
+# Hay migraciones sin aplicar?
+#
+# `migrate --check` sale 1 si queda algo pendiente y 0 si el esquema esta al dia.
+# Es la unica forma de decidir sin aplicar nada. Cualquier otro fallo (base
+# inalcanzable, venv roto) tambien cae aca: se trata como "pendiente" y el
+# respaldo posterior falla cerrado, que es el lado correcto para equivocarse.
+# >>> TEST-BLOCK: pending-migrations
+pending_migrations() {
+    ! manage migrate --check >/dev/null 2>&1
+}
+# <<< TEST-BLOCK: pending-migrations
+
+# Respaldo de la base antes de migrar.
+#
+# Corre como root a proposito: el archivo queda root:root 0600 dentro de un
+# directorio 0700, asi que el usuario del sitio no puede leerlo ni tocarlo. La
+# conexion se toma de settings.DATABASES --la misma que usa Django-- en vez de
+# parsear el .env aca: duplicar ese parseo es exactamente como se termina
+# respaldando otra base.
+db_dump() {
+    local dest=$1
+    install -d -m 0700 -o root -g root "$DB_BACKUP_DIR"
+    # `-B`: sin escribir .pyc. Root puede leer el checkout, pero si escribiera
+    # __pycache__ dentro de /srv/webcmp dejaria archivos con dueno root en un
+    # arbol que es de DEPLOY_USER y que el proximo deploy tiene que poder
+    # reemplazar con `git checkout -f`. Un respaldo no tiene por que dejar
+    # huella en el codigo.
+    systemd-run --quiet --pipe --wait \
+        --uid=root --gid=root \
+        -p "EnvironmentFile=$ENCRYPTION_ENV" \
+        -p Environment=PRODUCTION=1 \
+        -p Environment=MPLCONFIGDIR=/root/.cache/matplotlib \
+        -p "Environment=WEBCOMP_DUMP_DEST=$dest" \
+        --working-directory="$APP_DIR" \
+        "$PYTHON" -B manage.py shell -c '
+import os
+import subprocess
+import sys
+
+from django.conf import settings
+
+db = settings.DATABASES["default"]
+engine = str(db.get("ENGINE", ""))
+if "postgresql" not in engine:
+    sys.exit(f"El respaldo solo soporta PostgreSQL (ENGINE={engine}).")
+
+# La conexion sale de settings.DATABASES, o sea del mismo .env que acaba de usar
+# `manage.py check --deploy`. Parsear el .env otra vez aca es como se termina
+# respaldando otra base: no falla, guarda algo y parece que funciono.
+env = dict(os.environ)
+env.update(
+    PGHOST=str(db.get("HOST") or ""),
+    PGPORT=str(db.get("PORT") or ""),
+    PGUSER=db.get("USER") or "",
+    PGPASSWORD=db.get("PASSWORD") or "",
+    PGDATABASE=db.get("NAME") or "",
+)
+cmd = [
+    "pg_dump",
+    "--format=custom",
+    "--file",
+    os.environ["WEBCOMP_DUMP_DEST"],
+]
+sys.exit(subprocess.run(cmd, env=env).returncode)
+'
+}
+
+# Rotacion: conserva los N mas nuevos. `ls -1t` ordena por mtime, asi que el
+# primero es el ultimo respaldo; `tail -n +N` salta los N que se conservan.
+# >>> TEST-BLOCK: prune-db-backups
+prune_db_backups() {
+    local keep=$DB_BACKUP_KEEP
+    case "$keep" in '' | *[!0-9]*) keep=10 ;; esac
+    [ "$keep" -ge 1 ] || keep=1
+    ls -1t "$DB_BACKUP_DIR"/*.dump 2>/dev/null \
+        | tail -n "+$((keep + 1))" \
+        | xargs -r rm -f
+}
+# <<< TEST-BLOCK: prune-db-backups
 
 # La trampa es EXIT y no ERR. No es indistinto: `trap ... ERR` NO se dispara
 # cuando el script hace `exit`, y `die()` -que es como termina practicamente todo
@@ -853,7 +965,34 @@ manage makemigrations --check --dry-run
 log "Gate: check --deploy (configuracion real)"
 manage check --deploy --fail-level WARNING
 
-# 5. Migraciones: antes de que el codigo nuevo atienda un solo request
+# 5. Respaldo: solo si hay migraciones pendientes
+#
+# Va DESPUES de los dos gates a proposito. Un commit que no pasa
+# `makemigrations --check` o `check --deploy` no toca la base, asi que respaldar
+# ahi seria llenar el disco por deploys que abortan antes de migrar.
+if pending_migrations; then
+    log "Migraciones pendientes: respaldando la base antes de aplicar"
+    command -v pg_dump >/dev/null 2>&1 \
+        || die "No hay pg_dump en el PATH: sin respaldo no se aplican migraciones.
+  Instalalo con: apt-get install -y postgresql-client"
+    # Los dos SHA cortos se resuelven aca: `$2` puede venir como nombre de ref
+    # (es el "ref-de-respaldo" del uso), y cortarle los primeros 7 caracteres a
+    # "main" da "main", que en el nombre del archivo no dice nada.
+    dump_from=$(gitapp rev-parse --short "$previous_sha" 2>/dev/null || printf 'prev')
+    db_dump_file="$DB_BACKUP_DIR/webcmp-$(date -u +%Y%m%dT%H%M%SZ)-${dump_from}-to-${current_sha:0:7}.dump"
+    if ! db_dump "$db_dump_file"; then
+        rm -f "$db_dump_file"
+        die "El respaldo de la base fallo. NO se aplicaron migraciones."
+    fi
+    chmod 0600 "$db_dump_file"
+    log "Respaldo: $db_dump_file ($(du -h "$db_dump_file" | cut -f1))"
+    printf '  Restaurar: pg_restore -d <base> --clean --if-exists %s\n' "$db_dump_file"
+    prune_db_backups
+else
+    log "Sin migraciones pendientes: no se respalda la base"
+fi
+
+# 6. Migraciones: antes de que el codigo nuevo atienda un solo request
 log "Aplicando migraciones"
 manage migrate --noinput
 migrated=1
@@ -863,11 +1002,11 @@ migrated=1
 # nada", que es lo mismo que no haber corrido nada.
 manage migrate --check
 
-# 6. Estaticos: antes de que el codigo nuevo emita HTML que los referencia
+# 7. Estaticos: antes de que el codigo nuevo emita HTML que los referencia
 log "Recolectando estaticos"
 manage collectstatic --no-input
 
-# 7. Reinicio
+# 8. Reinicio
 #
 # `systemctl reload` (SIGHUP) NO alcanza para un despliegue: Gunicorn hace que el
 # master recargue su configuracion y los workers se re-forkean desde el master.
@@ -881,7 +1020,7 @@ systemctl is-active --quiet "$GUNICORN_UNIT" || die "$GUNICORN_UNIT quedo inacti
 systemctl is-active --quiet "$HUEY_UNIT" || die "$HUEY_UNIT quedo inactivo."
 
 # --------------------------------------------------------------------------
-# 8. Health check
+# 9. Health check
 # --------------------------------------------------------------------------
 #
 # Por defecto (HEALTHCHECK_URL vacio) sale al puerto 443 de 127.0.0.1 con el SNI
