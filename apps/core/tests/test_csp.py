@@ -144,16 +144,16 @@ REPORT_ONLY_POLICY = {
 class CSPReportOnlyTest(TestCase):
     """Verify the CSP_REPORT_ONLY staging toggle (tasks.md 2.4)."""
 
-    def test_report_only_header_on_meteogram_page(self):
+    def test_report_only_header_on_public_page(self):
         """With CSP_REPORT_ONLY the header is Content-Security-Policy-Report-Only."""
-        response = self.client.get('/modelo/meteogram/')
+        response = self.client.get('/tiempo/hoy/')
         self.assertEqual(response.status_code, 200)
         self.assertIn('Content-Security-Policy-Report-Only', response.headers)
         self.assertNotIn('Content-Security-Policy', response.headers)
 
     def test_report_only_policy_allows_cdn_images(self):
         """The report-only policy keeps jsdelivr in img-src (no external-origin block)."""
-        header = self.client.get('/modelo/meteogram/').headers.get(
+        header = self.client.get('/tiempo/hoy/').headers.get(
             'Content-Security-Policy-Report-Only', ''
         )
         self.assertIn("img-src 'self' data: https://cdn.jsdelivr.net", header)
