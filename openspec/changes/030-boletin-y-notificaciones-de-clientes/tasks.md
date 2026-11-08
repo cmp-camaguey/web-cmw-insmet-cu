@@ -55,17 +55,17 @@
       `name` y `{% csrf_token %}`; mensajes de éxito y error en la misma página.
       *Verificación:* `djlint . --reformat --check` y `djlint . --lint`.
 
-- [ ] **T8. Boletín como entidad.** Pantalla de administración con borrador,
-      vista previa y confirmación de envío; comando
-      `manage.py send_newsletter <uuid> [--dry-run]`; lotes de 50, ventana
-      horaria y estados `draft`/`sending`/`sent`.
-      *Verificación:* `--dry-run` no encola, segundo envío rechazado, fuera de
-      ventana falla con mensaje.
+- [x] **T8. (Descartada) Boletín como entidad.** El operador no crea ni elige
+      boletines: lo que se envía son avisos, pronósticos y novedades, y la
+      audiencia es automática (lista principal + externos). Se eliminaron el
+      modelo `Newsletter`, sus vistas, formulario, comando y plantillas de
+      correo; `core.0002` ya no crea la tabla. La creación manual quedó fuera de
+      alcance por decisión del usuario.
 
-- [ ] **T9. Verificación y cierre del PR A.** `python manage.py check`,
-      `python manage.py test` completo, `ruff check .`,
-      `ruff format --check .`, `djlint . --lint`, `bash -n` de los scripts
-      tocados y `git diff --check`.
+- [x] **T9. Verificación y cierre del PR A.** `python manage.py check` sin
+      problemas; `python manage.py test` completo en verde (1662 pruebas);
+      `ruff check` y `ruff format --check` en verde; `djlint . --lint` 0
+      errores; `makemigrations --check --dry-run` sin cambios.
 
 ## PR B — avisos in-app para clientes
 
