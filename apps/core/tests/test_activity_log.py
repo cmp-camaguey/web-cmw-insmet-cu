@@ -1,13 +1,17 @@
+from datetime import date, timedelta
+
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
+from django.db import connection
 from django.test import RequestFactory, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from apps.core.admin import ActivityLogAdmin
 from apps.core.models import ActivityLog, SiteConfiguration
-from apps.core.utils import log_action, log_activity_from_request
+from apps.core.utils import local_day_window, log_action, log_activity_from_request
 
 
 def disable_maintenance_mode():
@@ -173,3 +177,66 @@ class ActivityLogViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<table>')
         self.assertContains(response, '<tbody>')
+
+    def test_el_filtro_por_fecha_recorta_el_dia_local_por_sus_bordes(self):
+        """El rango del picker es [inicio, fin) del dia local, no un `__date`.
+
+        `action_time__date__gte/lte` resuelve America/Havana dentro de
+        PostgreSQL con el tzdata de la base; con una ventana de instantes la
+        frontera la decide Python. La prueba fija la semantica semiabierta: el
+        primer instante del dia entra, la medianoche del dia siguiente no.
+        """
+        dia = date(2026, 11, 8)
+        inicio, fin = local_day_window(dia)
+        bordes = {
+            'antes del dia': inicio - timedelta(seconds=1),
+            'primer instante': inicio,
+            'ultimo instante': fin - timedelta(seconds=1),
+            'medianoche siguiente': fin,
+        }
+        ActivityLog.objects.all().delete()
+        for etiqueta, instante in bordes.items():
+            registro = ActivityLog.objects.create(
+                user=self.superuser,
+                action_flag=1,
+                object_repr=etiqueta,
+                message=etiqueta,
+            )
+            ActivityLog.objects.filter(pk=registro.pk).update(action_time=instante)
+
+        self.client.force_login(self.superuser)
+        response = self.client.get(
+            reverse('core:activity_log'),
+            {'partial': '1', 'date_from': '08/11/2026', 'date_to': '08/11/2026'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'primer instante')
+        self.assertContains(response, 'ultimo instante')
+        self.assertNotContains(response, 'antes del dia')
+        self.assertNotContains(response, 'medianoche siguiente')
+
+    def test_el_filtro_por_fecha_no_delega_la_zona_en_la_base(self):
+        """Ninguna consulta del filtro resuelve la zona dentro de PostgreSQL.
+
+        `action_time__date__gte` compila a `(action_time AT TIME ZONE
+        'America/Havana')::date`: la zona se resuelve con el tzdata de la imagen
+        de la base, no con el de Python, y el borde del dia se corre una hora
+        cuando discrepan. Esta prueba mira el SQL real, que es el unico lugar
+        donde la diferencia se ve sin depender del entorno.
+        """
+        self.client.force_login(self.superuser)
+
+        with CaptureQueriesContext(connection) as capturadas:
+            self.client.get(
+                reverse('core:activity_log'),
+                {'partial': '1', 'date_from': '08/11/2026', 'date_to': '08/11/2026'},
+            )
+
+        consultas = [q['sql'] for q in capturadas.captured_queries]
+        del_filtro = [
+            sql for sql in consultas if 'core_activity_log' in sql and 'action_time' in sql
+        ]
+        self.assertTrue(del_filtro, 'el filtro no emitio ninguna consulta')
+        for sql in del_filtro:
+            self.assertNotIn('AT TIME ZONE', sql)

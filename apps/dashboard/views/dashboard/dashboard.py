@@ -19,6 +19,7 @@ from django.views.generic import TemplateView, View
 from apps.commercial.models import Customer, Invoice, InvoiceItem, ServiceSubscription
 from apps.core.cache_utils import safe_cache_get, safe_cache_set
 from apps.core.models import TaskExecutionLog
+from apps.core.utils import local_day_window
 from apps.meteo.models import Forecasts, Warning
 
 logger = logging.getLogger(__name__)
@@ -372,9 +373,15 @@ class DashboardView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
             )
 
         if user.is_superuser:
+            inicio_hoy, fin_hoy = local_day_window(timezone.localdate())
             context['user_stats'] = {
                 'total_users': User.objects.count(),
-                'active_today': User.objects.filter(last_login__date=timezone.localdate()).count(),
+                # Rango de instantes, no `last_login__date`: el `__date` resuelve
+                # America/Havana dentro de PostgreSQL con su propio tzdata y el
+                # conteo se corre un dia cuando discrepa del de Python.
+                'active_today': User.objects.filter(
+                    last_login__gte=inicio_hoy, last_login__lt=fin_hoy
+                ).count(),
                 'staff_users': User.objects.filter(is_staff=True).count(),
             }
 

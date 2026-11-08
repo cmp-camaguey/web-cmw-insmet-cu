@@ -5,6 +5,7 @@ from django.core.exceptions import PermissionDenied
 from django.views.generic import ListView
 
 from apps.core.models import ActivityLog
+from apps.core.utils import local_day_window
 
 
 class ActivityLogListView(ListView):
@@ -48,9 +49,14 @@ class ActivityLogListView(ListView):
         if action_flag and action_flag.isdigit():
             qs = qs.filter(action_flag=int(action_flag))
         if date_from:
-            qs = qs.filter(action_time__date__gte=date_from)
+            # Rango de instantes, no `action_time__date__gte`: el `__date`
+            # resuelve America/Havana dentro de PostgreSQL con su propio tzdata
+            # y desplaza el limite una hora cuando discrepa del de Python.
+            inicio, _ = local_day_window(date_from)
+            qs = qs.filter(action_time__gte=inicio)
         if date_to:
-            qs = qs.filter(action_time__date__lte=date_to)
+            _, fin = local_day_window(date_to)
+            qs = qs.filter(action_time__lt=fin)
 
         return qs.order_by('-action_time')
 
