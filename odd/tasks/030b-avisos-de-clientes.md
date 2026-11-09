@@ -40,8 +40,10 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   nuevo que cubra esa fecha. `Certificate` queda fuera: el cliente se queda con
   sus certificados para siempre una vez entregados, no vencen.
 - **S7.** Los avisos nuevos no duplican: cada uno usa `make_dedupe_key` con las
-  partes del hecho, nunca con la fecha, y los recordatorios que deben volver usan
-  `repeat_after`.
+  partes del hecho, nunca con la fecha de ejecución, y los recordatorios que
+  deben volver usan `repeat_after`. La fecha de **fin** de un contrato sí entra
+  en la clave: no es cuándo corrió la tarea, es la identidad del hecho —un
+  contrato extendido es otro aviso—.
 
 ## Assumptions
 
@@ -72,7 +74,10 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
 - [x] **T5** S5 · correo al cliente por anulación · inline · este commit.
       `apps/commercial/emails.py` + `templates/emails/suscripcion_anulada.html`.
       Pruebas: `SubscriptionCancelEmailTests` (3).
-- [ ] **T6** S6 · aviso de contratos por vencer · inline
+- [x] **T6** S6 · aviso de contratos por vencer · inline · este commit.
+      `CONTRACT_EXPIRY_WARNING_DAYS=30` en `config/settings/base.py`, tarea
+      `avisar_contratos_por_vencer` a las 13 UTC. Pruebas:
+      `ContratosPorVencerTests` (7) y la tarea añadida a `EXPECTED_TASKS`.
 - [ ] **T7** Verificación: `manage.py check`, `makemigrations --check --dry-run`,
       pruebas de las apps tocadas y suite completa · inline
 
@@ -107,3 +112,28 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   nada, porque no hubo hecho. El encolado va dentro de `try/except` en la vista
   —la fila ya cambió y un 500 no la devuelve— y la plantilla reusa la cabecera y
   el pie comunes de `templates/emails/includes/`.
+- **L6** (2026-11-08) T6 cerrada. El filtro de vencimiento va en Python porque
+  `end_date` es derivada, y la renovación se detecta por `start_date` —no por
+  `pk`—: otro contrato activo del mismo cliente, más nuevo, que cubra la fecha
+  de fin. `Certificate` no entra, como pediste: entregado es para siempre. La
+  fecha de fin sí va en la clave de deduplicación porque identifica el hecho.
+- **L7** (2026-11-09) El revisor de `gga` encontró tres cosas en T6 y dos se
+  arreglaron aquí: el comentario de cabecera decía «las 13 UTC son las 9 de la
+  mañana» y eso solo vale en horario de verano (en invierno son las 8), y la
+  comprobación de renovación pedía los contratos del cliente dentro del bucle,
+  una consulta por contrato en una tarea diaria. Ahora se cargan todos de una
+  vez y se agrupan en memoria.
+- **L8** (2026-11-09) Hallazgo pendiente, fuera de T6: `SubscriptionForm` declara
+  `start_date` como `forms.DateField` pero `ServiceSubscription.start_date` es un
+  `DateTimeField`, así que guardar la solicitud escribe una fecha ingenua y
+  Django emite un `RuntimeWarning`. No cambia el resultado, pero conviene
+  decidir si el campo del modelo debe ser fecha o el formulario datetime.
+- **L9** (2026-11-09) Empate de `start_date` en la detección de renovación: se
+  aplicó una condición mejor que la acordada. `start_date >=` arreglaba la
+  renovación firmada el mismo día, pero creaba un agujero peor: dos contratos
+  con el mismo inicio y la misma vigencia cubren el mismo rango, así que cada
+  uno suprimiría al otro y no avisaría ninguno. La condición queda en «otro
+  contrato del mismo cliente que cubre este fin y se extiende más allá»
+  (`otro.cubre(fin) and otro.end_date > fin`): resuelve el empate y no esconde
+  dos vencimientos reales. Dos pruebas nuevas: la renovación del mismo día no
+  avisa, y dos contratos idénticos avisan los dos.

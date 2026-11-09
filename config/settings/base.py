@@ -104,6 +104,10 @@ NOTIFICATIONS_WARNING_HORIZON_HOURS = int(os.getenv('NOTIFICATIONS_WARNING_HORIZ
 # recordatorio. El mismo valor se usa como cadencia: mientras siga sin cobrarse,
 # vuelve a avisar como mucho una vez por intervalo, no en cada corrida diaria.
 INVOICE_PENDING_REMINDER_DAYS = int(os.getenv('INVOICE_PENDING_REMINDER_DAYS', '7'))
+# Días de antelación con que se avisa que un contrato está por vencer. Treinta
+# alcanza para renovarlo sin apuro: el contrato sigue vigente mientras tanto, y
+# avisar con más tiempo convertiría el icono en ruido permanente.
+CONTRACT_EXPIRY_WARNING_DAYS = int(os.getenv('CONTRACT_EXPIRY_WARNING_DAYS', '30'))
 
 # ---------------------------------------------------------------------------
 # Franja de aviso meteorológico vigente (portal público)

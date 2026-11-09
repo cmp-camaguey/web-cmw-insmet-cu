@@ -45,6 +45,8 @@ EXPECTED_TASKS = {
     # 026 (huecos): recordatorio de facturas pendientes. Se registra por
     # `CommercialConfig.ready()`.
     'apps.commercial.tasks.recordar_facturas_pendientes',
+    # 030: contratos que vencen dentro del horizonte de aviso.
+    'apps.commercial.tasks.avisar_contratos_por_vencer',
 }
 
 # Lo que hace `huey_consumer config.huey_consumer_entry.huey`, reducido a lo que
