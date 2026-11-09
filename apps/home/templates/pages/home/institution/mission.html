@@ -1,4 +1,30 @@
 {% extends 'layouts/landing.html' %}
+{% load static %}
+{% block extrahead %}
+  <style>
+    /* ─── COLORES EXACTOS Y FONDOS (MODO CLARO) ─── */
+    [data-bs-theme="light"] .section-tarjetas { background-color: #2b4b9b !important; }
+
+    /* Textos del encabezado y de los items en blanco */
+    [data-bs-theme="light"] .section-tarjetas .section-title,
+    [data-bs-theme="light"] .section-tarjetas .section-description,
+    [data-bs-theme="light"] .section-tarjetas h4,
+    [data-bs-theme="light"] .section-tarjetas p {
+      color: #ffffff !important;
+    }
+
+    /* ─── OLAS ANIMADAS MODO CLARO ─── */
+    [data-bs-theme="light"] .section-tarjetas .wave-1 { fill: var(--tblr-bg-surface) !important; opacity: 1 !important; }
+    [data-bs-theme="light"] .section-tarjetas .wave-2 { fill: #e5201e !important; opacity: 1 !important; }
+    [data-bs-theme="light"] .section-tarjetas .wave-3 { fill: #2b4b9b !important; opacity: 1 !important; }
+
+    /* ─── MODO OSCURO: SIN ROJO Y SIN TRANSPARENCIA ─── */
+    [data-bs-theme="dark"] .section-tarjetas { background-color: var(--tblr-bg-surface-secondary) !important; }
+    [data-bs-theme="dark"] .section-tarjetas .wave-1 { fill: var(--tblr-bg-surface) !important; opacity: 1 !important; }
+    [data-bs-theme="dark"] .section-tarjetas .wave-2 { fill: var(--tblr-border-color) !important; opacity: 1 !important; }
+    [data-bs-theme="dark"] .section-tarjetas .wave-3 { fill: var(--tblr-bg-surface-secondary) !important; opacity: 1 !important; }
+  </style>
+{% endblock %}
 {% block hero_content %}
   <div class="pb-10">
     <h1 class="hero-title">{{ title }}</h1>
@@ -11,7 +37,8 @@
   </div>
 {% endblock %}
 {% block content %}
-  <section class="section section-light">
+  <section class="section section-tarjetas">
+    <!-- Patrón de olas original de mission.html -->
     <svg class="section-divider"
          xmlns="http://www.w3.org/2000/svg"
          viewBox="0 24 150 28"
@@ -23,7 +50,7 @@
       <path class="wave-3" d="M-110 44c15 0 29-9 44-9s29 9 44 9c15 0 29-9 44-9s29 9 44 9c15 0 29-9 44-9s29 9 44 9c15 0 29-9 44-9s29 9 44 9v44h-352z">
       </path>
     </svg>
-    <div class="container">
+    <div class="container position-relative">
       <div class="section-header mb-6">
         <h2 class="section-title">Nuestros compromisos</h2>
         <div class="section-description">La razón de ser de nuestra labor de vigilancia meteorológica.</div>
@@ -31,45 +58,45 @@
       <div class="row g-4 gx-lg-10 gy-lg-5">
         <div class="col-lg-6">
           <div class="d-flex gap-3">
-            <div class="shape shape-md flex-shrink-0">
+            <div class="shape shape-md flex-shrink-0 bg-white bg-opacity-10 text-white">
               <i class="icon ti ti-shield-check" aria-hidden="true"></i>
             </div>
             <div>
               <h4 class="h4 mb-1">Proteger la vida</h4>
-              <p class="text-secondary mb-0">Dirigimos la información a velar por la seguridad de la vida humana y a reducir las pérdidas de bienes materiales ante desastres naturales de origen meteorológico.</p>
+              <p class="mb-0">Dirigimos la información a velar por la seguridad de la vida humana y a reducir las pérdidas de bienes materiales ante desastres naturales de origen meteorológico.</p>
             </div>
           </div>
         </div>
         <div class="col-lg-6">
           <div class="d-flex gap-3">
-            <div class="shape shape-md flex-shrink-0">
+            <div class="shape shape-md flex-shrink-0 bg-white bg-opacity-10 text-white">
               <i class="icon ti ti-clock-24" aria-hidden="true"></i>
             </div>
             <div>
               <h4 class="h4 mb-1">Vigilancia permanente</h4>
-              <p class="text-secondary mb-0">Mantenemos la observación y el seguimiento de los fenómenos atmosféricos durante las 24 horas, todos los días del año.</p>
+              <p class="mb-0">Mantenemos la observación y el seguimiento de los fenómenos atmosféricos durante las 24 horas, todos los días del año.</p>
             </div>
           </div>
         </div>
         <div class="col-lg-6">
           <div class="d-flex gap-3">
-            <div class="shape shape-md flex-shrink-0">
+            <div class="shape shape-md flex-shrink-0 bg-white bg-opacity-10 text-white">
               <i class="icon ti ti-bell" aria-hidden="true"></i>
             </div>
             <div>
               <h4 class="h4 mb-1">Información oportuna</h4>
-              <p class="text-secondary mb-0">Emisión de avisos y alertas con la antelación necesaria para que la población y los organismos tomen decisiones seguras.</p>
+              <p class="mb-0">Emisión de avisos y alertas con la antelación necesaria para que la población y los organismos tomen decisiones seguras.</p>
             </div>
           </div>
         </div>
         <div class="col-lg-6">
           <div class="d-flex gap-3">
-            <div class="shape shape-md flex-shrink-0">
+            <div class="shape shape-md flex-shrink-0 bg-white bg-opacity-10 text-white">
               <i class="icon ti ti-leaf" aria-hidden="true"></i>
             </div>
             <div>
               <h4 class="h4 mb-1">Desarrollo sostenible</h4>
-              <p class="text-secondary mb-0">Contribuimos directamente al bienestar de la comunidad y al desarrollo sostenible de la provincia de Camagüey.</p>
+              <p class="mb-0">Contribuimos directamente al bienestar de la comunidad y al desarrollo sostenible de la provincia de Camagüey.</p>
             </div>
           </div>
         </div>

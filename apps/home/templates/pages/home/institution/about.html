@@ -1,4 +1,48 @@
 {% extends 'layouts/landing.html' %}
+{% load static %}
+{% block extrahead %}
+  <style>
+    /* ─── COLORES EXACTOS Y FONDOS (MODO CLARO) ─── */
+    [data-bs-theme="light"] .section-tarjetas { background-color: #2b4b9b !important; }
+
+    /* Textos del encabezado de la sección en blanco */
+    [data-bs-theme="light"] .section-tarjetas .section-title,
+    [data-bs-theme="light"] .section-tarjetas .section-description {
+      color: #ffffff !important;
+    }
+
+    /* ─── OLAS ANIMADAS MODO CLARO ─── */
+    [data-bs-theme="light"] .section-tarjetas .wave-1 { fill: var(--tblr-bg-surface) !important; opacity: 1 !important; }
+    [data-bs-theme="light"] .section-tarjetas .wave-2 { fill: #e5201e !important; opacity: 1 !important; }
+    [data-bs-theme="light"] .section-tarjetas .wave-3 { fill: #2b4b9b !important; opacity: 1 !important; }
+
+    /* ─── MEJORA DE LAS TARJETAS EN MODO CLARO (EFECTO CRISTAL) ─── */
+    [data-bs-theme="light"] .section-tarjetas .card {
+      background-color: rgba(255, 255, 255, 0.1) !important;
+      border: 1px solid rgba(255, 255, 255, 0.15) !important;
+      color: #ffffff !important;
+    }
+    [data-bs-theme="light"] .section-tarjetas .card:hover {
+      background-color: rgba(255, 255, 255, 0.15) !important;
+    }
+    [data-bs-theme="light"] .section-tarjetas .card h4 {
+      color: #ffffff !important;
+    }
+    [data-bs-theme="light"] .section-tarjetas .card p {
+      color: rgba(255, 255, 255, 0.75) !important;
+    }
+    [data-bs-theme="light"] .section-tarjetas .card-stamp-icon {
+      background-color: rgba(255, 255, 255, 0.2) !important;
+      color: #ffffff !important;
+    }
+
+    /* ─── MODO OSCURO: SIN ROJO Y SIN TRANSPARENCIA ─── */
+    [data-bs-theme="dark"] .section-tarjetas { background-color: var(--tblr-bg-surface-secondary) !important; }
+    [data-bs-theme="dark"] .section-tarjetas .wave-1 { fill: var(--tblr-bg-surface) !important; opacity: 1 !important; }
+    [data-bs-theme="dark"] .section-tarjetas .wave-2 { fill: var(--tblr-border-color) !important; opacity: 1 !important; }
+    [data-bs-theme="dark"] .section-tarjetas .wave-3 { fill: var(--tblr-bg-surface-secondary) !important; opacity: 1 !important; }
+  </style>
+{% endblock %}
 {% block hero_content %}
   <div class="pb-10">
     <h1 class="hero-title">{{ title }}</h1>
@@ -11,16 +55,17 @@
   </div>
 {% endblock %}
 {% block content %}
-  <section class="section section-light">
+  <section class="section section-tarjetas">
+    <!-- Patrón de olas corregido para que la animación sea fluida -->
     <svg class="section-divider"
          xmlns="http://www.w3.org/2000/svg"
          viewBox="0 24 150 28"
          preserveAspectRatio="none">
-      <path class="wave-1" d="M-110 44c60 0 117-19 176-19s116 19 176 19v44h-352z"></path>
-      <path class="wave-2" d="M-110 44c60 0 117-19 176-19s116 19 176 19v44h-352z"></path>
-      <path class="wave-3" d="M-110 44c60 0 117-19 176-19s116 19 176 19v44h-352z"></path>
+      <path class="wave-1" d="M-110 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z"></path>
+      <path class="wave-2" d="M-110 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z"></path>
+      <path class="wave-3" d="M-110 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z"></path>
     </svg>
-    <div class="container">
+    <div class="container position-relative">
       <div class="section-header mb-6">
         <h2 class="section-title">El quehacer del Centro</h2>
         <div class="section-description">Vigilancia, investigación, servicios y contacto directo con la comunidad.</div>

@@ -1,11 +1,10 @@
 """Landing "traducida + contenido real" contract.
 
-Tests for the landing as it stands on disk: hero with browser mockup (preview_light.png),
+Tests for the landing as it stands on disk: a plain hero (no browser mockup),
 six capability sections with ti-* icons and Spanish headings, institutional
-logos strip, real marketing copy ("Servicios y herramientas del Centro" con
-imagen GOES-16), real stats (3 regiones / 13 municipios / 24/7 / 100%
-cobertura), newsletter CTA, and an institution navbar (Visión / Misión /
-Quiénes Somos) that links to real pages. The landing NEVER duplicates the
+logos in the footer, real marketing copy ("Servicios y herramientas del Centro"
+con imagen GOES-16), newsletter CTA, and an institution navbar (Visión /
+Misión / Quiénes Somos) that links to real pages. The landing NEVER duplicates the
 home's dashboard content (no region cards, no live warnings strip, no
 services grid). Global adjustments: the brand logo always points to the
 landing (landing, home and dashboard), the home reuses the small transparent
@@ -179,26 +178,12 @@ class LandingRenderTests(TestCase):
     def setUp(self):
         self.html = self.client.get('/').content.decode()
 
-    def test_browser_mockup_renders_in_hero(self):
-        for marker in (
-            'class="browser"',
-            'browser-header',
-            'browser-dots-colored',
-            'browser-input',
-        ):
-            self.assertIn(marker, self.html, msg=marker)
-
     def test_hero_ctas_render(self):
         """CTAs traducidos: portal administrativo + página "Quiénes Somos"."""
         self.assertIn('Explorar el portal', self.html)
         self.assertIn('Conozca el centro', self.html)
         self.assertIn(reverse('home:index'), self.html)
         self.assertIn(reverse('home:institution_about'), self.html)
-
-    def test_hero_mockup_built_from_existing_assets(self):
-        self.assertIn('dist/img/preview_light.png', self.html)
-        self.assertNotIn('preview_light@2x.png', self.html, msg='srcset roto eliminado')
-        self.assertNotIn('127.0.0.1', self.html, msg='URL hardcodeada eliminada')
 
     def test_hero_copy_real_spanish(self):
         self.assertIn('Centro Meteorológico Provincial de Camagüey', self.html)
@@ -252,20 +237,24 @@ class LandingRenderTests(TestCase):
         ):
             self.assertNotIn(marker, self.html, msg=marker)
 
-    def test_stats_show_real_center_data(self):
-        for marker in (
-            'Regiones de pronóstico',
-            'Municipios atendidos',
-            'Vigilancia permanente',
-            'Cobertura provincial',
-            '>24/7<',
-        ):
-            self.assertIn(marker, self.html, msg=marker)
-
     def test_newsletter_cta_renders(self):
-        self.assertIn('Manténgase informado', self.html)
+        self.assertIn('Suscríbase al boletín del Centro', self.html)
         self.assertIn('Reciba en su correo los avisos, pronósticos y novedades', self.html)
         self.assertIn('Suscribirse', self.html)
+
+    def test_newsletter_form_is_real(self):
+        """El formulario del diseño tiene que enviar, no ser un mock.
+
+        El rediseño de las páginas públicas trajo un `<input>` y un botón
+        `type="submit"` sin `<form>`: se veía igual y no hacía nada. Doble
+        opt-in exige `action`, `method`, CSRF y el campo con nombre.
+        """
+        self.assertIn(f'action="{reverse("home:newsletter_subscribe")}"', self.html)
+        self.assertIn('method="post"', self.html)
+        self.assertIn('name="csrfmiddlewaretoken"', self.html)
+        self.assertIn('name="email"', self.html)
+        self.assertIn('id="newsletter-email"', self.html)
+        self.assertIn('Le enviaremos un correo para confirmar la suscripción', self.html)
 
     def test_public_footer_socials_on_landing(self):
         """Big footer stays on the landing with its 4 social-gray anchors."""
@@ -346,7 +335,7 @@ class LandingMarketingRedesignEmptyTests(TestCase):
         response = self.client.get('/')
         self.assertEqual(200, response.status_code)
         self.assertIn(
-            'Manténgase informado',
+            'Suscríbase al boletín del Centro',
             response.content.decode(),
         )
 
@@ -360,7 +349,7 @@ class LandingEmptyStateTests(TestCase):
     """The showcase renders 200 without any data.
 
     The landing does not list DB content, so the empty state IS the
-    showcase (browser mockup + newsletter CTA render regardless of data).
+    showcase (hero + newsletter CTA render regardless of data).
     """
 
     def test_get_root_succeeds_without_data(self):
@@ -369,8 +358,7 @@ class LandingEmptyStateTests(TestCase):
         html = response.content.decode()
         self.assertNotIn('Traceback', html)
         self.assertNotIn('Avisos meteorológicos activos', html)
-        self.assertIn('class="browser"', html)
-        self.assertIn('Manténgase informado', html)
+        self.assertIn('Suscríbase al boletín del Centro', html)
 
 
 class LandingNavbarTests(TestCase):
