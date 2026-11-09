@@ -77,9 +77,13 @@
       llamada declara con `customers=`. Un aviso de fallo con `source='invoice'`
       no pasa clientes, así que sigue siendo solo para admins.
 
-- [ ] **T11. Fuentes de cliente.** Factura emitida y cambio de estado de
+- [x] **T11. Fuentes de cliente.** Factura emitida y cambio de estado de
       suscripción, con `dedupe_key` estable.
       *Verificación:* el cliente ve su aviso; el admin sigue viendo el suyo.
+      Los avisos nacen donde el hecho ocurre: `notificar_factura_emitida` en la
+      facturación por lote y en la manual, y `notificar_estado_suscripcion` en
+      pago aprobado y anulación. `requested` y `pending` no avisan: el primero
+      lo provoca el cliente y el segundo llega con la factura.
 
 - [ ] **T12. Preferencias.** `NotificationPreference` con opt-out por defecto y
       dos interruptores independientes (in-app / correo).

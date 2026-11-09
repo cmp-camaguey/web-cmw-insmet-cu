@@ -168,3 +168,11 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   funcional y no decoración: el formulario real del landing (T7),
   `data-emergency-banner`/`data-warning-id` (lo que lee el JS del botón) y la
   carga de `emergency-banner.js`.
+- **L13** (2026-11-09) T11 decidió dónde nacen los avisos de cliente. Factura
+  emitida: en la facturación por lote (`process_batch_invoice`) y en la manual
+  (`InvoiceCreateView.form_valid`), no dentro de
+  `generate_invoice_pdf_and_email_task`, porque esa tarea también corre para
+  re-renderizar un PDF y el aviso debe existir aunque el correo falle. Cambio de
+  estado: `paid` al aprobar el pago y `cancelled` al anular. `requested` no avisa
+  (lo provoca el cliente) y `pending` no avisa (llega con la factura); avisar de
+  ambos repetiría el mismo hecho.

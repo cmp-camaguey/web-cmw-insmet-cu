@@ -18,7 +18,11 @@ from apps.commercial.models import (
     Service,
     ServiceSubscription,
 )
-from apps.commercial.notifications import notificar_solicitud_suscripcion
+from apps.commercial.notifications import (
+    notificar_estado_suscripcion,
+    notificar_factura_emitida,
+    notificar_solicitud_suscripcion,
+)
 from apps.commercial.tasks import contratos_por_vencer, facturas_pendientes
 from apps.commercial.tests.factories import natural_customer
 from apps.core.models import Notification, SiteConfiguration
@@ -496,3 +500,129 @@ class ContratosPorVencerTests(TestCase):
         )
 
         self.assertEqual(len(contratos_por_vencer()), 2)
+
+
+class AvisosDeClienteTests(TestCase):
+    """T11: el cliente ve su aviso y el admin sigue viendo el suyo.
+
+    Las dos fuentes de cliente (`invoice` y `subscription`) alcanzan al titular
+    del cliente sin dejar de alcanzar a los superusuarios. Lo que se prueba no
+    es que la función escriba filas, sino a quién deja entrar cada hecho.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        _disable_maintenance_mode()
+        cls.admin = _superuser('admin-avisos-cliente')
+        cls.client_user = User.objects.create_user(
+            'titular-avisos',
+            'titular-avisos@example.com',
+            'pass',
+            first_name='Ti',
+            last_name='Tular',
+        )
+        cls.customer = natural_customer(cls.client_user)
+        cls.service = Service.objects.create(
+            user=cls.admin,
+            title='Pronóstico trimestral',
+            summary='Resumen',
+            service_type=Service.COMMERCIAL,
+            service_category='pronostico',
+            price=Decimal('80.00'),
+            code='NOTIF-004',
+        )
+
+    def _suscripcion(self, status='requested'):
+        return ServiceSubscription.objects.create(
+            customer=self.customer,
+            service=self.service,
+            start_date=timezone.now(),
+            payment_status=status,
+        )
+
+    def _factura(self, number='F-AVISOS-001'):
+        return Invoice.objects.create(
+            customer=self.customer,
+            number=number,
+            amount=Decimal('80.00'),
+        )
+
+    def _destinatarios(self, source=None):
+        qs = Notification.objects.all()
+        if source:
+            qs = qs.filter(source=source)
+        return set(qs.values_list('recipient__username', flat=True))
+
+    def test_la_factura_emitida_avisa_al_cliente_y_al_admin(self):
+        factura = self._factura()
+
+        creadas = notificar_factura_emitida(factura)
+
+        self.assertEqual(len(creadas), 2)
+        self.assertEqual(
+            self._destinatarios('invoice'),
+            {self.admin.username, self.client_user.username},
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.client_user, title=f'Factura {factura.number} emitida'
+            ).exists()
+        )
+
+    def test_reemitir_la_misma_factura_no_duplica_el_aviso(self):
+        factura = self._factura()
+
+        notificar_factura_emitida(factura)
+        notificar_factura_emitida(factura)
+
+        self.assertEqual(
+            Notification.objects.filter(source='invoice', recipient=self.client_user).count(), 1
+        )
+
+    def test_el_pago_aprobado_avisa_al_cliente(self):
+        sub = self._suscripcion('pending')
+
+        notificar_estado_suscripcion(sub, 'paid')
+
+        self.assertEqual(
+            self._destinatarios('subscription'),
+            {self.admin.username, self.client_user.username},
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.client_user, title__startswith='Pago aprobado'
+            ).exists()
+        )
+
+    def test_la_anulacion_avisa_al_cliente(self):
+        sub = self._suscripcion('requested')
+        sub.delete()
+
+        notificar_estado_suscripcion(sub, 'cancelled')
+
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.client_user, title__startswith='Suscripción anulada'
+            ).exists()
+        )
+
+    def test_anular_la_suscripcion_desde_el_panel_deja_el_aviso_al_cliente(self):
+        """El aviso nace del hecho real, no solo de llamar a la función."""
+        from config.huey import huey
+
+        sub = self._suscripcion('requested')
+        self.client.force_login(self.admin)
+        # La anulación encola el correo al cliente: con la cola real la tarea
+        # queda pendiente y ensucia a los tests que después cuentan la cola.
+        old = huey.immediate
+        huey.immediate = True
+        try:
+            self.client.post(reverse('commercial:suscripcion_cancel', args=[sub.uuid]))
+        finally:
+            huey.immediate = old
+
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.client_user, title__startswith='Suscripción anulada'
+            ).exists()
+        )

@@ -25,6 +25,7 @@ from apps.commercial.models import (
     Invoice,
     ServiceSubscription,
 )
+from apps.commercial.notifications import notificar_estado_suscripcion
 from apps.core.utils import log_action
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,7 @@ class ApproveSubscriptionView(LoginRequiredMixin, PermissionRequiredMixin, Updat
         sub.save()
 
         self.send_certificate_email(self.request, sub, certificate)
+        notificar_estado_suscripcion(sub, 'paid')
 
         log_action(
             user=self.request.user,
@@ -357,6 +359,7 @@ class SubscriptionCancelView(LoginRequiredMixin, PermissionRequiredMixin, View):
                 f'- {subscription.service.title}'
             ),
         )
+        notificar_estado_suscripcion(subscription, 'cancelled')
         # La anulación ya está escrita, que es lo que el operador pidió. Si el
         # encolado falla (Redis caído), el peor caso es que el cliente no reciba
         # el aviso; devolver un 500 sería peor, porque la fila ya cambió.
