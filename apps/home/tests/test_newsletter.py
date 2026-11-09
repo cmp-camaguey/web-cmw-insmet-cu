@@ -89,19 +89,6 @@ class NewsletterViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Enlace no válido')
 
-    def test_la_pagina_de_confirmacion_usa_el_mismo_layout_que_la_baja(self):
-        """Confirmar y darse de baja son el mismo trámite: misma página, sin menús."""
-        self.client.post(reverse('home:newsletter_subscribe'), {'email': 'mismo@ejemplo.cu'})
-        subscriber = Subscriber.objects.get(email='mismo@ejemplo.cu')
-
-        response = self.client.get(
-            reverse('home:newsletter_confirm', args=[subscriber.confirmation_token])
-        )
-
-        self.assertContains(response, 'Suscripción confirmada')
-        self.assertContains(response, 'dist/img/webp/good-news.webp')
-        self.assertNotContains(response, 'class="navbar')
-
     def test_confirmar_desde_el_portal_marca_la_casilla_del_perfil(self):
         """Un usuario registrado no puede quedar suscrito y con la casilla apagada.
 
@@ -157,31 +144,6 @@ class NewsletterViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Enlace no válido')
-
-    def test_la_pagina_de_baja_usa_el_layout_sin_menus(self):
-        """La baja se abre desde un correo y no debe ofrecer navegación."""
-        subscriber = Subscriber.objects.create(
-            email='sinmenus@ejemplo.cu', source='landing', confirmed_at=timezone.now()
-        )
-
-        response = self.client.get(
-            reverse('home:newsletter_unsubscribe', args=[subscriber.unsubscribe_token])
-        )
-
-        self.assertContains(response, 'Baja confirmada')
-        self.assertContains(response, 'dist/img/webp/exit.webp')
-        self.assertNotContains(response, 'class="navbar')
-
-    def test_la_pagina_de_baja_invalida_usa_el_layout_sin_menus(self):
-        response = self.client.get(
-            reverse(
-                'home:newsletter_unsubscribe',
-                args=['00000000-0000-0000-0000-000000000000'],
-            )
-        )
-
-        self.assertContains(response, 'dist/img/webp/error.webp')
-        self.assertNotContains(response, 'class="navbar')
 
 
 class LandingFormTests(TestCase):

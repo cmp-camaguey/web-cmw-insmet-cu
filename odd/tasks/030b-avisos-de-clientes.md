@@ -137,3 +137,33 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   (`otro.cubre(fin) and otro.end_date > fin`): resuelve el empate y no esconde
   dos vencimientos reales. Dos pruebas nuevas: la renovación del mismo día no
   avisa, y dos contratos idénticos avisan los dos.
+- **L10** (2026-11-09) T7 encontró dos fallos que no eran del código de las
+  tareas sino de la prueba: `test_operator_logs` y `SubscriptionCancelViewTests`
+  anulan una suscripción, y desde T5 eso encola un correo. Con la cola real la
+  tarea quedaba pendiente en el `huey.db` compartido y rompía
+  `test_send_test_invoice`, que afirma que el camino por defecto no deja nada
+  encolado. Se corrigió en los dos tests que provocan el efecto, no en el test
+  que lo detecta: ponen `huey.immediate = True` y lo restauran.
+- **L11** (2026-11-09) Auditoría de los 102 tests añadidos por la rama (tests
+  nuevos de 030 y 030b). No se encontró ninguno que sobre por las razones que
+  importan —tautológico, duplicado exacto, prueba de framework o camino
+  muerto—. Los dos pares que parecían duplicados prueban capas distintas:
+  `test_cambiar_el_correo_mueve_la_suscripcion` existe una vez sobre
+  `move_subscription()` y otra sobre el `ProfileForm`; y las dos
+  `test_sin_la_casilla_no_se_envia_correo` cubren `Warning` y `WeatherReport`,
+  que son modelos distintos. Se conservan todos.
+- **L12** (2026-11-09) Recorte pedido por el usuario: se eliminan las tres
+  pruebas de plantilla de `apps/home/tests/test_newsletter.py` que solo
+  afirmaban decoración —`test_la_pagina_de_confirmacion_usa_el_mismo_layout_que_la_baja`,
+  `test_la_pagina_de_baja_usa_el_layout_sin_menus` y
+  `test_la_pagina_de_baja_invalida_usa_el_layout_sin_menus`—. Añadían la ruta
+  del webp, la ausencia de navbar y el texto de éxito; la conducta (200, fila
+  confirmada, baja idempotente, «Enlace no válido») sigue cubierta por
+  `test_confirmar_con_token_valido_confirma`,
+  `test_baja_funciona_sin_login_y_es_idempotente` y
+  `test_baja_con_token_inexistente_no_da_404`. Lo que deja de cubrirse es el
+  copy de éxito y que esas páginas no muestren navegación.
+  Se conservan, en cambio, las pruebas de plantilla que prueban un contrato
+  funcional y no decoración: el formulario real del landing (T7),
+  `data-emergency-banner`/`data-warning-id` (lo que lee el JS del botón) y la
+  carga de `emergency-banner.js`.
