@@ -220,7 +220,11 @@ def mail_send(request, alert_obj, subject, url, attachment_name=None):
 
     from apps.core.audiences import resolve_audience
     from apps.core.models import Notification
-    from apps.core.notifications import make_dedupe_key, notify_superusers
+    from apps.core.notifications import (
+        make_dedupe_key,
+        muted_email_addresses,
+        notify_superusers,
+    )
     from apps.core.subscriptions import unsubscribe_url
     from apps.core.tasks import send_email_task
 
@@ -258,6 +262,22 @@ def mail_send(request, alert_obj, subject, url, attachment_name=None):
             dedupe_key=make_dedupe_key('email', source, alert_obj.pk),
         )
         return
+
+    # Quien apagó el correo para esta fuente no lo recibe, aunque siga en la
+    # lista. No es un fallo operativo —la audiencia existe y la decisión es
+    # suya—, así que si quedan cero no se avisa al admin: sería ruido por un
+    # consentimiento, no por un problema.
+    muted = muted_email_addresses(source)
+    if muted:
+        subscribers = [s for s in subscribers if s.email.lower() not in muted]
+        if not subscribers:
+            logger.info(
+                'Todos los destinatarios de %s %s apagaron el correo para source=%s.',
+                alert_obj._meta.label,
+                alert_obj.pk,
+                source,
+            )
+            return
 
     company = CompanySettings.get_instance()
     # `emails/alert_notification.html` espera `index_url`, `listado_url`, `title`

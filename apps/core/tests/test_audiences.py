@@ -9,7 +9,13 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.core.audiences import audience_size, resolve_audience
-from apps.core.models import EmailRecipientList, Notification, Subscriber, Subscription
+from apps.core.models import (
+    EmailRecipientList,
+    Notification,
+    NotificationPreference,
+    Subscriber,
+    Subscription,
+)
 from apps.core.tests.base import add_confirmed_subscriber, get_default_list
 from apps.meteo.models import WeatherReport
 from config.huey import huey
@@ -140,3 +146,44 @@ class MailSendEmptyAudienceTests(TestCase):
         # `href` hace que el navegador lo trate como esquema y abra `xdg-open`.
         self.assertTrue(notification.url.startswith('/'))
         self.assertNotIn(':', notification.url.split('/')[1])
+
+
+class MailSendEmailPreferenceTests(TestCase):
+    """T12: apagar el correo de una fuente no lo apaga para los demás.
+
+    El interruptor de correo se aplica sobre la dirección, no sobre la fila de la
+    lista: quien se dio de baja del canal sigue suscrito a la lista y puede
+    volver a activarlo sin confirmar nada otra vez.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser(
+            'admin_pref', 'admin_pref@example.com', 'pass', first_name='A', last_name='B'
+        )
+        cls.lista = get_default_list()
+        add_confirmed_subscriber(cls.lista, 'recibe@ejemplo.com')
+        add_confirmed_subscriber(cls.lista, 'apagado@ejemplo.com')
+        cls.apagado = User.objects.create_user(
+            'apagado', 'apagado@ejemplo.com', 'pass', first_name='Ap', last_name='Agado'
+        )
+        NotificationPreference.objects.create(user=cls.apagado, source='weatherreport', email=False)
+
+    def _send(self):
+        from apps.core.utils import mail_send
+
+        report = WeatherReport.objects.create(
+            report_type='today', summary='Con dos', user=self.admin, date=timezone.now()
+        )
+        old_immediate = huey.immediate
+        huey.immediate = True
+        try:
+            mail_send(None, report, 'Asunto', 'home:weather_today')
+        finally:
+            huey.immediate = old_immediate
+
+    @override_settings(EMAIL_BACKEND=LOCMEM)
+    def test_quien_apago_el_correo_no_lo_recibe_y_el_resto_si(self):
+        self._send()
+
+        self.assertEqual([message.to for message in mail.outbox], [['recibe@ejemplo.com']])

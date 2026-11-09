@@ -176,3 +176,13 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   estado: `paid` al aprobar el pago y `cancelled` al anular. `requested` no avisa
   (lo provoca el cliente) y `pending` no avisa (llega con la factura); avisar de
   ambos repetiría el mismo hecho.
+- **L14** (2026-11-09) T12: la preferencia es **opt-out** (sin fila = activado)
+  y cada canal lee su propio booleano: `notify_audience` consulta `in_app` en una
+  sola query para toda la tanda y `mail_send` consulta `muted_email_addresses`
+  antes de encolar. El filtro de `notify_audience` **no toca a los superusuarios**:
+  una fila de preferencia es del cliente y no puede silenciar al que administra.
+  Si todos los suscriptores de un envío apagaron el correo, no se avisa al admin:
+  no es un fallo operativo, es un consentimiento.
+  Migración `core.0006_notificationpreference` (tabla nueva, sin datos previos).
+  La UI para mover los interruptores no está en la lista de tareas de 030; queda
+  fuera de este PR y se reporta al cierre.

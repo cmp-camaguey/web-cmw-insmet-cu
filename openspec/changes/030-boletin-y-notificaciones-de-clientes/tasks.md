@@ -85,9 +85,12 @@
       pago aprobado y anulación. `requested` y `pending` no avisan: el primero
       lo provoca el cliente y el segundo llega con la factura.
 
-- [ ] **T12. Preferencias.** `NotificationPreference` con opt-out por defecto y
+- [x] **T12. Preferencias.** `NotificationPreference` con opt-out por defecto y
       dos interruptores independientes (in-app / correo).
       *Verificación:* apagar in-app no apaga el correo y viceversa.
+      `notify_audience` filtra por `in_app` y `mail_send` por `email`, cada uno
+      con su propia consulta. Un superusuario no puede silenciar sus avisos
+      internos con una fila de preferencia: el filtro no lo toca.
 
 - [ ] **T13. Verificación y cierre del PR B.** Misma batería que T9 más las
       pruebas de aislamiento entre roles.

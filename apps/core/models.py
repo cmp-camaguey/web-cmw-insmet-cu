@@ -635,3 +635,51 @@ class Notification(models.Model):
             return reverse(self.url)
         except NoReverseMatch:
             return ''
+
+
+class NotificationPreference(models.Model):
+    """Interruptores del cliente por canal y por fuente (cambio 030, §7.2).
+
+    **Opt-out, no opt-in**: sin fila el aviso está activado. Un cliente nuevo no
+    tiene que configurar nada para recibir lo que le corresponde, y la ausencia
+    de fila es el estado normal.
+
+    Los dos canales son independientes a propósito: apagar el aviso in-app no
+    corta el correo, y apagar el correo no borra la campana. Son dos formas de
+    enterarse del mismo hecho y quien decide no ver una no está pidiendo perder
+    la otra.
+
+    Solo existen filas para fuentes de cliente. Los avisos internos de los
+    admins no pasan por aquí: `notify_superusers` no consulta preferencias.
+    """
+
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_preferences',
+        verbose_name='Usuario',
+    )
+    source = models.CharField(max_length=20, verbose_name='Origen')
+    in_app = models.BooleanField(default=True, verbose_name='Aviso en la campana')
+    email = models.BooleanField(default=True, verbose_name='Aviso por correo')
+
+    class Meta:
+        verbose_name = 'Preferencia de aviso'
+        verbose_name_plural = 'Preferencias de aviso'
+        default_permissions = ()
+        permissions = [
+            ('view_notificationpreference', 'Ver'),
+            ('add_notificationpreference', 'Añadir'),
+            ('change_notificationpreference', 'Editar'),
+            ('delete_notificationpreference', 'Eliminar'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'source'], name='uniq_notification_preference_user_source'
+            ),
+        ]
+        ordering = ['user', 'source']
+
+    def __str__(self):
+        return f'{self.user} · {self.source}'

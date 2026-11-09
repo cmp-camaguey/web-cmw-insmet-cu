@@ -155,6 +155,36 @@ def notify(
 CLIENT_SOURCES = frozenset({'invoice', 'subscription'})
 
 
+def in_app_enabled(user, source):
+    """¿El usuario quiere ver en la campana los avisos de esa fuente?
+
+    Opt-out: sin fila de preferencia está activado. Los admins no tienen filas,
+    así que este camino nunca les quita sus avisos.
+    """
+    from apps.core.models import NotificationPreference
+
+    preference = NotificationPreference.objects.filter(user=user, source=source).first()
+    return preference is None or preference.in_app
+
+
+def muted_email_addresses(source):
+    """Direcciones cuyo dueño apagó el canal de correo para esa fuente.
+
+    Devuelve el correo en minúsculas porque `Subscriber.email` se normaliza así
+    al guardarse; comparar sin normalizar dejaría pasar al que escribió el
+    correo con mayúsculas en su perfil.
+    """
+    from apps.core.models import NotificationPreference
+
+    return {
+        email.lower()
+        for email in NotificationPreference.objects.filter(source=source, email=False).values_list(
+            'user__email', flat=True
+        )
+        if email
+    }
+
+
 def notify_audience(
     *,
     source,
@@ -190,6 +220,23 @@ def notify_audience(
             user = getattr(customer, 'user', None)
             if user is not None and getattr(user, 'is_active', False):
                 recipients.setdefault(user.pk, user)
+
+    # Preferencias en una sola consulta: apagar la campana de una fuente no
+    # afecta al correo ni a las demás fuentes. Los admins sin fila siguen
+    # recibiendo, porque la ausencia de preferencia es «activado».
+    from apps.core.models import NotificationPreference
+
+    preferences = {
+        preference.user_id: preference
+        for preference in NotificationPreference.objects.filter(
+            user_id__in=recipients, source=source
+        )
+    }
+    recipients = {
+        pk: user
+        for pk, user in recipients.items()
+        if user.is_superuser or pk not in preferences or preferences[pk].in_app
+    }
 
     created = []
     for user in recipients.values():
