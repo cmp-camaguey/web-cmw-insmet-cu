@@ -1,5 +1,7 @@
 """Pruebas del núcleo de avisos (cambio 026, `design.md` §9 tests 1, 2, 6, 7 y 8)."""
 
+from types import SimpleNamespace
+
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -10,6 +12,7 @@ from apps.core.notifications import (
     TASK_ERROR_ALLOWLIST,
     make_dedupe_key,
     notify,
+    notify_audience,
     notify_superusers,
     notify_task_failure,
 )
@@ -134,6 +137,82 @@ class NotifySuperusersCountTests(TestCase):
     def test_sistema_apagado_no_reporta_nada(self):
         self.assertEqual(notify_superusers(**self._args()), [])
         self.assertEqual(Notification.objects.count(), 0)
+
+
+class NotifyAudienceTests(TestCase):
+    """Techo de audiencia por fuente (cambio 030, `design.md` §7.1).
+
+    `notify_audience` decide a quién puede alcanzar cada `source`: una fuente
+    interna no llega a un no-superusuario ni aunque la llamada pase clientes.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser('admin-audiencia', 'admin@example.com', 'x')
+        cls.titular = User.objects.create_user(
+            'titular', 'titular@example.com', 'x', first_name='Ti', last_name='Tular'
+        )
+        cls.customer = SimpleNamespace(user=cls.titular)
+
+    def _notify(self, source):
+        # La llamada siempre pasa el cliente: lo que decide quién lo recibe es
+        # la política de la fuente, no el llamador.
+        return notify_audience(
+            source=source,
+            severity=Notification.Severity.INFO,
+            title='Aviso de prueba',
+            dedupe_key=make_dedupe_key('audiencia', source, 'test'),
+            customers=[self.customer],
+        )
+
+    def test_una_fuente_interna_no_alcanza_al_cliente(self):
+        self._notify('huey')
+
+        self.assertEqual(
+            list(Notification.objects.values_list('recipient__username', flat=True)),
+            [self.admin.username],
+        )
+
+    def test_una_fuente_de_cliente_alcanza_al_titular(self):
+        self._notify('invoice')
+
+        self.assertEqual(
+            set(Notification.objects.values_list('recipient__username', flat=True)),
+            {self.admin.username, self.titular.username},
+        )
+
+    def test_el_admin_que_es_tambien_el_titular_recibe_una_sola_fila(self):
+        self.customer.user = self.admin
+
+        created = self._notify('subscription')
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(Notification.objects.count(), 1)
+
+    def test_un_titular_inactivo_no_recibe_el_aviso(self):
+        self.titular.is_active = False
+        self.titular.save(update_fields=['is_active'])
+
+        self._notify('subscription')
+
+        self.assertEqual(
+            list(Notification.objects.values_list('recipient__username', flat=True)),
+            [self.admin.username],
+        )
+
+    def test_notify_superusers_sigue_siendo_solo_para_admins(self):
+        """El envoltorio no hereda la audiencia de cliente de la fuente."""
+        notify_superusers(
+            source='subscription',
+            severity=Notification.Severity.INFO,
+            title='Aviso interno',
+            dedupe_key=make_dedupe_key('audiencia', 'wrapper', 'test'),
+        )
+
+        self.assertEqual(
+            list(Notification.objects.values_list('recipient__username', flat=True)),
+            [self.admin.username],
+        )
 
 
 class TaskFailureNotificationTests(TestCase):

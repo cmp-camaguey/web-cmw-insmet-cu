@@ -69,9 +69,13 @@
 
 ## PR B — avisos in-app para clientes
 
-- [ ] **T10. Capa de política.** `notify_audience` con audiencia declarada por
+- [x] **T10. Capa de política.** `notify_audience` con audiencia declarada por
       `source`; `notify_superusers` pasa a ser un caso.
       *Verificación:* una fuente interna no alcanza a un no-superusuario.
+      Se resolvió con un techo por fuente (`CLIENT_SOURCES = {'invoice',
+      'subscription'}`; lo desconocido es interno) más los titulares que la
+      llamada declara con `customers=`. Un aviso de fallo con `source='invoice'`
+      no pasa clientes, así que sigue siendo solo para admins.
 
 - [ ] **T11. Fuentes de cliente.** Factura emitida y cambio de estado de
       suscripción, con `dedupe_key` estable.

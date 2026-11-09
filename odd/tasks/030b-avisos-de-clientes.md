@@ -78,8 +78,9 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
       `CONTRACT_EXPIRY_WARNING_DAYS=30` en `config/settings/base.py`, tarea
       `avisar_contratos_por_vencer` a las 13 UTC. Pruebas:
       `ContratosPorVencerTests` (7) y la tarea añadida a `EXPECTED_TASKS`.
-- [ ] **T7** Verificación: `manage.py check`, `makemigrations --check --dry-run`,
-      pruebas de las apps tocadas y suite completa · inline
+- [x] **T7** Verificación: `manage.py check` sin problemas, `makemigrations
+      --check --dry-run` sin cambios, `ruff check`/`format --check` en verde,
+      apps tocadas (939) y suite completa (1693) en verde · inline · `3bb8bf2`
 
 ## Log
 
