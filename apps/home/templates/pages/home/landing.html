@@ -10,6 +10,74 @@
   <meta property="og:type" content="website" />
   <meta property="og:url" content="{{ og_url }}" />
   <meta property="og:locale" content="es_MX" />
+  <style>
+    /* ─── COLORES EXACTOS Y FONDOS (MODO CLARO) ─── */
+    [data-bs-theme="light"] .section-tarjetas { background-color: #2b4b9b !important; }
+    [data-bs-theme="light"] .section-servicios { background-color: var(--tblr-bg-surface) !important; }
+    [data-bs-theme="light"] .section-boletin { background-color: #2b4b9b !important; }
+
+    /* Textos para que contrasten sobre el azul */
+    [data-bs-theme="light"] .section-tarjetas h2,
+    [data-bs-theme="light"] .section-boletin h2 { color: #ffffff !important; }
+    [data-bs-theme="light"] .section-tarjetas p,
+    [data-bs-theme="light"] .section-boletin p { color: rgba(255, 255, 255, 0.8) !important; }
+
+    /* ─── OLAS ANIMADAS MODO CLARO ─── */
+    [data-bs-theme="light"] .section-tarjetas .wave-1 {
+      fill: var(--tblr-bg-surface) !important;
+      opacity: 1 !important;
+    }
+    [data-bs-theme="light"] .section-tarjetas .wave-2 {
+      fill: #e5201e !important;
+      opacity: 1 !important;
+    }
+    [data-bs-theme="light"] .section-tarjetas .wave-3 {
+      fill: #2b4b9b !important;
+      opacity: 1 !important;
+    }
+
+    /* Curva estática del boletín MODO CLARO */
+    [data-bs-theme="light"] .curve-blue {
+      fill: #2b4b9b !important;
+      opacity: 1 !important;
+    }
+
+
+    /* ─── MODO OSCURO: SIN ROJO Y SIN TRANSPARENCIA ─── */
+    [data-bs-theme="dark"] .section-tarjetas { background-color: var(--tblr-bg-surface-secondary) !important; }
+    [data-bs-theme="dark"] .section-servicios { background-color: var(--tblr-bg-surface) !important; }
+    [data-bs-theme="dark"] .section-boletin { background-color: var(--tblr-bg-surface-secondary) !important; }
+
+    /* Olas en modo oscuro (grises sutiles, sin rojo) */
+    [data-bs-theme="dark"] .section-tarjetas .wave-1 {
+      fill: var(--tblr-bg-surface) !important;
+      opacity: 1 !important;
+    }
+    [data-bs-theme="dark"] .section-tarjetas .wave-2 {
+      fill: var(--tblr-border-color) !important;
+      opacity: 1 !important;
+    }
+    [data-bs-theme="dark"] .section-tarjetas .wave-3 {
+      fill: var(--tblr-bg-surface-secondary) !important;
+      opacity: 1 !important;
+    }
+
+    /* Curva en modo oscuro */
+    [data-bs-theme="dark"] .curve-blue {
+      fill: var(--tblr-bg-surface-secondary) !important;
+      opacity: 1 !important;
+    }
+
+    /* ─── BOTÓN DEL BOLETÍN: Gris en oscuro, Blanco en claro ─── */
+    [data-bs-theme="dark"] .section-boletin .btn-outline-light {
+      color: var(--tblr-secondary) !important;
+      border-color: var(--tblr-secondary) !important;
+    }
+    [data-bs-theme="dark"] .section-boletin .btn-outline-light:hover {
+      color: var(--tblr-dark) !important;
+      background-color: var(--tblr-secondary) !important;
+    }
+  </style>
 {% endblock %}
 {% block hero_content %}
   <h1 class="hero-title">Centro Meteorológico Provincial de Camagüey</h1>
@@ -27,45 +95,10 @@
       </div>
     </div>
   </div>
-  <div class="hero-img img-overlap-margin">
-    <div class="browser">
-      <div class="browser-header">
-        <div class="row align-items-center">
-          <div class="col-auto col-md-2">
-            <div class="browser-dots browser-dots-colored">
-              <div class="browser-dot"></div>
-              <div class="browser-dot"></div>
-              <div class="browser-dot"></div>
-            </div>
-          </div>
-          <div class="col-8">
-            <a href="{% url 'home:index' %}"
-               class="browser-input"
-               target="_blank"
-               rel="noopener noreferrer"
-               data-bs-toggle="tooltip"
-               data-bs-placement="top"
-               title="Vista previa del portal del Centro Meteorológico Provincial de Camagüey">
-              <i class="icon ti ti-lock icon me-2 text-green icon-sm"
-                 aria-hidden="true"></i>
-              {% url 'home:index' %}
-            </a>
-          </div>
-        </div>
-      </div>
-      <picture>
-        <img src="{% static 'dist/img/preview_light.png' %}"
-             alt="Vista previa del portal del Centro Meteorológico Provincial de Camagüey"
-             class="img-fluid"
-             width="1040"
-             height="760"
-             loading="lazy" />
-      </picture>
-    </div>
-  </div>
 {% endblock %}
 {% block content %}
-  <section class="section section-light mt-n12 pt-12">
+  {# ─── 1. TARJETAS: Azul (Claro) / Oscuro (Dark) con olas animadas ─── #}
+  <section class="section section-tarjetas">
     <svg class="section-divider"
          xmlns="http://www.w3.org/2000/svg"
          viewBox="0 24 150 28"
@@ -74,119 +107,69 @@
       <path class="wave-2" d="M-110 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z"></path>
       <path class="wave-3" d="M-110 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z"></path>
     </svg>
-    <div class="container">
-      <div class="section-header mb-6">
-        <h2 class="section-title text-secondary">Respaldo institucional</h2>
-      </div>
-      <div class="row g-lg-8 align-items-center justify-content-center">
-        <div class="col-auto">
-          <a href="https://www.citma.gob.cu/"
-             class="link-secondary"
-             target="_blank"
-             rel="noopener noreferrer">
-            <img src="{% static 'dist/img/citma.png' %}"
-                 alt="CITMA"
-                 width="188"
-                 height="28"
-                 class="navbar-brand-image" />
-          </a>
-        </div>
-        <div class="col-auto">
-          <a href="https://www.ama.cu/"
-             class="link-secondary"
-             target="_blank"
-             rel="noopener noreferrer">
-            <img src="{% static 'dist/img/ama.png' %}"
-                 alt="AMA"
-                 width="188"
-                 height="28"
-                 class="navbar-brand-image" />
-          </a>
-        </div>
-        <div class="col-auto">
-          <a href="https://www.insmet.cu/"
-             class="link-secondary"
-             target="_blank"
-             rel="noopener noreferrer">
-            <img src="{% static 'dist/img/insmet.svg' %}"
-                 alt="INSMET"
-                 width="188"
-                 height="28"
-                 class="navbar-brand-image" />
-          </a>
-        </div>
-      </div>
-    </div>
-  </section>
-  <section class="section">
-    <div class="container">
+    <div class="container position-relative">
       <div class="row items-center text-center g-lg-10 mb-4">
         <div class="col-md-6 col-lg">
-          <div class="shape shape-md mb-3">
+          <div class="shape shape-md bg-white bg-opacity-10 text-white mb-3">
             <i class="icon ti ti-temperature-sun" aria-hidden="true"></i>
           </div>
           <h2 class="h2">El tiempo en su región</h2>
-          <p class="text-secondary mb-4">
+          <p class="mb-4">
             Pronóstico del tiempo por regiones de la provincia, con la temperatura, el viento y el estado del mar previstos para cada jornada.
           </p>
         </div>
         <div class="col-md-6 col-lg">
-          <div class="shape shape-md mb-3">
+          <div class="shape shape-md bg-white bg-opacity-10 text-white mb-3">
             <i class="icon ti ti-alert-triangle" aria-hidden="true"></i>
           </div>
           <h2 class="h2">Avisos y alertas meteorológicas</h2>
-          <p class="text-secondary mb-4">
+          <p class="mb-4">
             Alertas tempranas, ciclones tropicales y tormentas con sus documentos oficiales, actualizados por los especialistas del centro.
           </p>
         </div>
         <div class="col-md-6 col-lg">
-          <div class="shape shape-md mb-3">
+          <div class="shape shape-md bg-white bg-opacity-10 text-white mb-3">
             <i class="icon ti ti-atom" aria-hidden="true"></i>
           </div>
           <h2 class="h2">Física de la atmósfera</h2>
-          <p class="text-secondary mb-4">
+          <p class="mb-4">
             Mapas del modelo WRF, meteogramas y sondeos para el seguimiento detallado de los fenómenos meteorológicos.
           </p>
         </div>
       </div>
       <div class="row items-center text-center g-lg-10">
         <div class="col-md-6 col-lg">
-          <div class="shape shape-md mb-3">
+          <div class="shape shape-md bg-white bg-opacity-10 text-white mb-3">
             <i class="icon ti ti-satellite" aria-hidden="true"></i>
           </div>
           <h2 class="h2">Imágenes satelitales</h2>
-          <p class="text-secondary mb-4">
+          <p class="mb-4">
             Seguimiento en imagen de la nubosidad sobre la región desde el satélite GOES-16, actualizado durante toda la jornada.
           </p>
         </div>
         <div class="col-md-6 col-lg">
-          <div class="shape shape-md mb-3">
+          <div class="shape shape-md bg-white bg-opacity-10 text-white mb-3">
             <i class="icon ti ti-tools" aria-hidden="true"></i>
           </div>
           <h2 class="h2">Servicios meteorológicos</h2>
-          <p class="text-secondary mb-4">
+          <p class="mb-4">
             Servicios públicos y comerciales para la comunidad y el sector empresarial, con solicitud y facturación en línea.
           </p>
         </div>
         <div class="col-md-6 col-lg">
-          <div class="shape shape-md mb-3">
+          <div class="shape shape-md bg-white bg-opacity-10 text-white mb-3">
             <i class="icon ti ti-book" aria-hidden="true"></i>
           </div>
           <h2 class="h2">Publicaciones científicas</h2>
-          <p class="text-secondary mb-4">
+          <p class="mb-4">
             Artículos y resultados de la investigación meteorológica provincial, con acceso a los documentos completos.
           </p>
         </div>
       </div>
     </div>
   </section>
-  <section class="section section-light">
-    <svg class="section-divider"
-         xmlns="http://www.w3.org/2000/svg"
-         viewBox="0 0 1920 60"
-         preserveAspectRatio="none">
-      <path d="M1920 60H0V0s387 60 960 60 960-60 960-60v60Z" fill="var(--tblr-bg-surface-secondary)"></path>
-    </svg>
+  {# ─── 2. SERVICIOS: Sección clara con curva azul al final ─── #}
+  <section class="section section-servicios pb-0">
     <div class="container">
       <div class="section-header">
         <h2 class="section-title">Servicios y herramientas del Centro</h2>
@@ -294,66 +277,37 @@
         </div>
       </div>
     </div>
-  </section>
-  <section class="section">
-    <svg class="section-divider"
-         xmlns="http://www.w3.org/2000/svg"
-         viewBox="0 24 150 28"
-         preserveAspectRatio="none">
-      <path d="M-110 44c60 0 117-19 176-19s116 19 176 19v44h-352z" fill="var(--tblr-bg-surface)"></path>
-    </svg>
-    <div class="container">
-      <div class="row justify-content-lg-center">
-        <div class="col-sm-6 col-lg-3">
-          <div class="text-center">
-            <h2 class="display-5 m-0 fw-bold">3</h2>
-            <p class="text-secondary m-0">Regiones de pronóstico</p>
-          </div>
-        </div>
-        <div class="col-sm-6 col-lg-3">
-          <div class="text-center">
-            <h2 class="display-5 m-0 fw-bold">13</h2>
-            <p class="text-secondary m-0">Municipios atendidos</p>
-          </div>
-        </div>
-        <div class="col-sm-6 col-lg-3">
-          <div class="text-center">
-            <h2 class="display-5 m-0 fw-bold">24/7</h2>
-            <p class="text-secondary m-0">Vigilancia permanente</p>
-          </div>
-        </div>
-        <div class="col-sm-6 col-lg-3">
-          <div class="text-center">
-            <h2 class="display-5 m-0 fw-bold">100%</h2>
-            <p class="text-secondary m-0">Cobertura provincial</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-  <section class="section section-light">
-    <svg class="section-divider"
-         xmlns="http://www.w3.org/2000/svg"
+    {# La curva azul con margin-bottom: -1px para evitar líneas blancas #}
+    <svg xmlns="http://www.w3.org/2000/svg"
          viewBox="0 0 1920 120"
-         preserveAspectRatio="none">
-      <path d="M1920 120H0V0s387 120 960 120 960-120 960-120v120Z" fill="var(--tblr-bg-surface-secondary)"></path>
+         preserveAspectRatio="none"
+         style="display: block;
+                width: 100%;
+                height: 120px;
+                margin-bottom: -1px">
+      <path class="curve-blue" d="M1920 120H0V0s387 120 960 120 960-120 960-120v120Z"></path>
     </svg>
-    <div class="container">
+  </section>
+  {# ─── 3. BOLETÍN: Fondo Azul (pt-0 elimina el espacio) ─── #}
+  <section class="section section-boletin py-8 pt-0">
+    <div class="container mt-6">
       <div class="section-header mb-6">
         <h2 class="section-title">Suscríbase al boletín del Centro</h2>
-        <p class="section-description">Reciba en su correo los avisos, pronósticos y novedades del Centro Meteorológico Provincial de Camagüey.</p>
+        <p>Reciba en su correo los avisos, pronósticos y novedades del Centro Meteorológico Provincial de Camagüey.</p>
       </div>
     </div>
     <div class="container-tight">
       <div class="row">
         <div class="col">
-          <input class="w-100 form-control"
+          <!-- Campo de texto nativo de Tabler -->
+          <input class="w-100 form-control form-control-lg"
                  placeholder="Su correo electrónico"
                  type="email">
         </div>
         <div class="col-auto">
-          <button type="submit" class="btn btn-primary">
-            <i class="icon ti ti-mail" aria-hidden="true"></i>
+          <!-- Botón que se adapta a ambos temas mediante CSS -->
+          <button type="submit" class="btn btn-lg btn-outline-light">
+            <i class="icon ti ti-mail me-2" aria-hidden="true"></i>
             Suscribirse
           </button>
         </div>
