@@ -1,11 +1,11 @@
-"""Notificaciones operativas del panel (cambio 026, fase 3).
+"""Notificaciones del panel (cambio 026, fase 3; abiertas al cliente en 030).
 
-Cinco vistas y un solo destinatario posible: el superusuario autenticado. Las
-notificaciones de 026 son operativas —una tarea que fallo, una factura que no se
-pudo generar, un aviso por vencer—, asi que un usuario normal no tiene nada que
-ver aqui, y el queryset siempre se filtra por `recipient=request.user` ademas del
-permiso. Un superusuario no puede leer los avisos de otro aunque los dos sean
-administradores: cada fila tiene un destinatario concreto.
+Cada fila tiene un destinatario concreto y el queryset **siempre** se filtra por
+`recipient=request.user`, así que un superusuario no puede leer los avisos de
+otro administrador ni un cliente los de nadie más. Desde el cambio 030 el cliente
+tiene sus propios avisos (facturas y servicios) y entra a las mismas vistas: el
+permiso es «tener sesión», no «ser superusuario», porque el aislamiento lo da la
+consulta y no el rol.
 """
 
 from django.contrib import messages
@@ -56,7 +56,7 @@ class NotificationListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
     raise_exception = True
 
     def test_func(self):
-        return self.request.user.is_superuser
+        return self.request.user.is_authenticated
 
     def get_queryset(self):
         return visible_for(self.request.user)
@@ -77,7 +77,7 @@ class NotificationReadView(LoginRequiredMixin, UserPassesTestMixin, View):
     http_method_names = ['post']
 
     def test_func(self):
-        return self.request.user.is_superuser
+        return self.request.user.is_authenticated
 
     def post(self, request, uuid):
         notification = get_object_or_404(Notification, uuid=uuid, recipient=request.user)
@@ -105,7 +105,7 @@ class NotificationReadAllView(LoginRequiredMixin, UserPassesTestMixin, View):
     http_method_names = ['post']
 
     def test_func(self):
-        return self.request.user.is_superuser
+        return self.request.user.is_authenticated
 
     def post(self, request):
         updated = Notification.objects.filter(recipient=request.user, read_at__isnull=True).update(
@@ -131,7 +131,7 @@ class NotificationDeleteView(LoginRequiredMixin, UserPassesTestMixin, View):
     http_method_names = ['post']
 
     def test_func(self):
-        return self.request.user.is_superuser
+        return self.request.user.is_authenticated
 
     def post(self, request, uuid):
         notification = get_object_or_404(Notification, uuid=uuid, recipient=request.user)
@@ -151,7 +151,7 @@ class NotificationDeleteAllView(LoginRequiredMixin, UserPassesTestMixin, View):
     http_method_names = ['post']
 
     def test_func(self):
-        return self.request.user.is_superuser
+        return self.request.user.is_authenticated
 
     def post(self, request):
         deleted, _ = Notification.objects.filter(recipient=request.user).delete()

@@ -92,5 +92,10 @@
       con su propia consulta. Un superusuario no puede silenciar sus avisos
       internos con una fila de preferencia: el filtro no lo toca.
 
-- [ ] **T13. Verificación y cierre del PR B.** Misma batería que T9 más las
+- [x] **T13. Verificación y cierre del PR B.** Misma batería que T9 más las
       pruebas de aislamiento entre roles.
+      `manage.py check` sin problemas; `makemigrations --check --dry-run` sin
+      cambios; `ruff check`/`format --check` en verde; `djlint . --lint` 0
+      errores; suite completa (1708) en verde. La campana y las cinco vistas de
+      avisos piden solo sesión; el aislamiento lo da `recipient=request.user`,
+      con pruebas de cliente contra admin en lista, marcado, borrado y contador.

@@ -277,9 +277,17 @@ preferencias para fuentes de cliente; el admin no las tiene.
 
 ### 7.3 UI por rol
 
-El icono de la fase 3 de 026 ya está en `dev`. Cambia solo la consulta:
-`visible_for(user)` no distingue rol (ya filtra por `recipient`), y las rutas de
-administración siguen exigiendo permiso. Un cliente ve su lista y nada más.
+El icono de la fase 3 de 026 ya está en `dev` y no cambia de forma. Lo que
+cambia es quién lo ve: la campana y las cinco vistas de avisos dejan de exigir
+`is_superuser` y piden solo sesión iniciada. El aislamiento no lo da el rol sino
+la consulta: `visible_for(user)` filtra por `recipient` y cada vista resuelve
+con `get_object_or_404(..., recipient=request.user)`, así que un cliente ve su
+lista y nada más, y un admin no puede leer el aviso de otro. El contador
+`/notificaciones/sin-leer/` sigue el mismo criterio.
+
+Las rutas realmente administrativas —monitoreo de tareas, petición de
+despliegue— siguen exigiendo superusuario. Lo que se abrió es la bandeja
+personal, no el panel.
 
 ## 8. Configuración nueva
 

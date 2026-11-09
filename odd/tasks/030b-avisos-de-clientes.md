@@ -186,3 +186,12 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   Migración `core.0006_notificationpreference` (tabla nueva, sin datos previos).
   La UI para mover los interruptores no está en la lista de tareas de 030; queda
   fuera de este PR y se reporta al cierre.
+- **L15** (2026-11-09) T13 abrió la campana y las cinco vistas de avisos a
+  cualquier usuario con sesión; el aislamiento lo da `recipient=request.user` en
+  el queryset y en cada `get_object_or_404`, no el rol. Las rutas de
+  administración (monitoreo de tareas, despliegue) siguen en superusuario. Se
+  actualizaron las pruebas que afirmaban el 403 de un no-superusuario: ahora un
+  cliente entra a su lista, y tocar el aviso de otro devuelve 404 (no 403, que
+  delataría que la fila existe). Verificación: `check` OK, `makemigrations
+  --check` sin cambios, `ruff` y `djlint` en verde, suite completa **1708 OK**
+  (15 pruebas nuevas sobre las 1693 de T7).

@@ -31,10 +31,10 @@ def _etag_for(payload):
 class NotificationUnreadView(LoginRequiredMixin, UserPassesTestMixin, View):
     """`GET /notificaciones/sin-leer/` -> `{"unread": n}`.
 
-    Solo superusuario, igual que las demas vistas de 026: hoy los avisos son
-    operativos y un usuario normal no tiene nada que ver aqui. El permiso vive
-    en la vista y no en `unread_for`, para que el cambio 030 solo tenga que
-    cambiar este `test_func`.
+    Desde el cambio 030 lo consulta también la campana del cliente, así que
+    entra cualquiera con sesión: el conteo es suyo y `unread_for` filtra por
+    destinatario. No hay permiso de rol que comprobar; lo que no puede pasar es
+    que alguien vea el número de otra persona, y eso lo impide la consulta.
 
     `ETag` + `304` no ahorran la peticion; ahorran el cuerpo. Con un intervalo
     de refresco de 20 s la mayoria de las respuestas no cambia, y devolver 0
@@ -46,7 +46,7 @@ class NotificationUnreadView(LoginRequiredMixin, UserPassesTestMixin, View):
     http_method_names = ['get']
 
     def test_func(self):
-        return self.request.user.is_superuser
+        return self.request.user.is_authenticated
 
     def get(self, request, *args, **kwargs):
         payload = json.dumps({'unread': unread_for(request.user)}, separators=(',', ':'))
