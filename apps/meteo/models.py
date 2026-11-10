@@ -4,8 +4,27 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
+from django.utils import timezone
 
 from apps.core.models import FileHandlerMixin, pdf_upload_path
+
+
+def _fecha_local(value):
+    """Fecha legible en la zona horaria del portal, no en ISO.
+
+    Los `__str__` de estos modelos alimentan el registro de actividad y los
+    selectores del admin: un `2026-11-09 13:43:04.827701+00:00` ahí no se lee.
+    """
+    if not value:
+        return 'sin fecha'
+    return timezone.localtime(value).strftime('%d/%m/%Y %H:%M')
+
+
+def _dia_local(value):
+    """Igual que `_fecha_local`, para los campos que solo guardan el día."""
+    if not value:
+        return 'sin fecha'
+    return value.strftime('%d/%m/%Y')
 
 
 class Forecasts(models.Model):
@@ -219,7 +238,7 @@ class ForecastExtendedDay(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'Día {self.day_number} - {self.date}'
+        return f'Día {self.day_number} - {_dia_local(self.date)}'
 
     @property
     def weather_icon(self):
@@ -276,7 +295,7 @@ class WeatherReport(FileHandlerMixin, models.Model):
 
     def __str__(self):
         labels = dict(self.TYPE_CHOICES)
-        return f'{labels.get(self.report_type, self.report_type)} - {self.date}'
+        return f'{labels.get(self.report_type, self.report_type)} - {_fecha_local(self.date)}'
 
 
 class Warning(FileHandlerMixin, models.Model):
@@ -315,7 +334,7 @@ class Warning(FileHandlerMixin, models.Model):
 
     def __str__(self):
         labels = dict(self.WARNING_TYPES)
-        return f'{labels.get(self.warning_type, self.warning_type)} - {self.date}'
+        return f'{labels.get(self.warning_type, self.warning_type)} - {_fecha_local(self.date)}'
 
 
 class Province(models.Model):
