@@ -1,7 +1,7 @@
 from django.core.mail.backends.base import BaseEmailBackend
 from django.test import TestCase, override_settings
 
-from apps.core.models import TaskExecutionLog
+from apps.core.models import CompanySettings, TaskExecutionLog
 from apps.core.tasks import generate_invoice_pdf_and_email_task, send_email_task
 from config.huey import huey
 
@@ -18,6 +18,42 @@ class FailingEmailBackend(BaseEmailBackend):
 @huey.task()
 def _boom_task():
     raise RuntimeError('fallo forzado para monitoreo')
+
+
+class TaskExecutionLogUuidTests(TestCase):
+    def test_uuid_is_generated_and_unique(self):
+        first = TaskExecutionLog.objects.create(task_id='uuid-a', task_name='send_email_task')
+        second = TaskExecutionLog.objects.create(task_id='uuid-b', task_name='send_email_task')
+        self.assertIsNotNone(first.uuid)
+        self.assertNotEqual(first.uuid, second.uuid)
+
+
+class CustomPermissionLabelTests(TestCase):
+    """Los permisos custom van en español, salvo el codename que ya existe.
+
+    Cambiar el codename rompería los permisos ya asignados en producción; la
+    etiqueta sí se puede corregir y es lo que ve el administrador.
+    """
+
+    def test_task_execution_log_permissions_are_labelled_in_spanish(self):
+        labels = dict(TaskExecutionLog._meta.permissions)
+        self.assertEqual(labels['view_taskExecutionLog'], 'Ver')
+        self.assertEqual(labels['add_taskExecutionLog'], 'Añadir')
+        self.assertEqual(labels['change_taskExecutionLog'], 'Editar')
+        self.assertEqual(labels['delete_taskExecutionLog'], 'Eliminar')
+
+    def test_company_settings_declares_four_custom_permissions(self):
+        codenames = {codename for codename, _ in CompanySettings._meta.permissions}
+        self.assertEqual(
+            codenames,
+            {
+                'view_companysettings',
+                'add_companysettings',
+                'change_companysettings',
+                'delete_companysettings',
+            },
+        )
+        self.assertEqual(CompanySettings._meta.default_permissions, ())
 
 
 class TaskMonitoringTests(TestCase):

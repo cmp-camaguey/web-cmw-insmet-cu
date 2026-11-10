@@ -253,7 +253,9 @@ class CompanySettings(models.Model):
         default_permissions = ()
         permissions = [
             ('view_companysettings', 'Ver'),
+            ('add_companysettings', 'Añadir'),
             ('change_companysettings', 'Editar'),
+            ('delete_companysettings', 'Eliminar'),
         ]
 
     def __str__(self):
@@ -337,6 +339,7 @@ class TaskExecutionLog(models.Model):
         (STATUS_REVOKED, 'Revoked'),
     ]
 
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     task_id = models.CharField(max_length=255, db_index=True)
     task_name = models.CharField(max_length=255)
     logical_key = models.CharField(max_length=255, blank=True, default='', db_index=True)
@@ -357,10 +360,10 @@ class TaskExecutionLog(models.Model):
         indexes = [models.Index(fields=['status', 'enqueued_at'])]
         default_permissions = ()
         permissions = [
-            ('view_taskExecutionLog', 'Can view task execution log'),
-            ('add_taskExecutionLog', 'Can add task execution log'),
-            ('change_taskExecutionLog', 'Can change task execution log'),
-            ('delete_taskExecutionLog', 'Can delete task execution log'),
+            ('view_taskExecutionLog', 'Ver'),
+            ('add_taskExecutionLog', 'Añadir'),
+            ('change_taskExecutionLog', 'Editar'),
+            ('delete_taskExecutionLog', 'Eliminar'),
         ]
 
     def __str__(self):

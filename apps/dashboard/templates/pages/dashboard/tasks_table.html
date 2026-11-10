@@ -64,7 +64,7 @@
               <button type="button"
                       class="btn btn-icon btn-outline-primary btn-sm"
                       data-bs-toggle="modal"
-                      data-bs-target="#tb-{{ execution.id }}"
+                      data-bs-target="#tb-{{ execution.uuid }}"
                       aria-label="Ver traceback"
                       data-bs-original-title="Ver traceback">
                 <i class="icon ti ti-code"></i>
@@ -72,7 +72,7 @@
               {% if execution.func_name and execution.func_args %}
                 <button type="submit"
                         class="btn btn-icon btn-outline-info btn-sm"
-                        form="retry-{{ execution.pk }}"
+                        form="retry-{{ execution.uuid }}"
                         data-bs-toggle="tooltip"
                         data-bs-placement="bottom"
                         aria-label="Reintentar"
@@ -84,7 +84,7 @@
             <button type="button"
                     class="btn btn-icon btn-outline-danger btn-sm action-btn"
                     data-action="eliminar"
-                    data-pk="{{ execution.pk }}"
+                    data-uuid="{{ execution.uuid }}"
                     data-name="{{ execution.task_name }}"
                     data-bs-toggle="tooltip"
                     data-bs-placement="bottom"
@@ -94,8 +94,8 @@
             </button>
           </div>
           {% if execution.status == 'ERROR' and execution.func_name and execution.func_args %}
-            <form id="retry-{{ execution.pk }}"
-                  action="{% url 'dashboard:tasks_action' execution.pk %}"
+            <form id="retry-{{ execution.uuid }}"
+                  action="{% url 'dashboard:tasks_action' execution.uuid %}"
                   method="post"
                   class="d-none">
               {% csrf_token %}
@@ -110,7 +110,7 @@
 <div data-tasks-modals>
   {% for execution in executions %}
     {% if execution.status == 'ERROR' %}
-      <div class="modal fade" id="tb-{{ execution.id }}" tabindex="-1">
+      <div class="modal fade" id="tb-{{ execution.uuid }}" tabindex="-1">
         <div class="modal-dialog modal-dialog-scrollable modal-lg">
           <div class="modal-content">
             <div class="modal-header">

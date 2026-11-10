@@ -539,7 +539,7 @@ class TaskMonitoringActionView(LoginRequiredMixin, UserPassesTestMixin, View):
 
         from apps.core.apps import RETRYABLE_TASKS
 
-        execution = get_object_or_404(TaskExecutionLog, pk=self.kwargs['pk'])
+        execution = get_object_or_404(TaskExecutionLog, uuid=self.kwargs['uuid'])
         action = request.POST.get('action')
 
         if action == 'retry':
