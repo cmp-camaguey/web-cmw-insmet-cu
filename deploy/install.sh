@@ -17,7 +17,7 @@
 #   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
 #      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
 #  10. /etc/webcmp/deploy.env con el destino del health check que corresponde
-#  11. andamiaje de deploy automatico (usuario, keypair, sudoers, webcmp-deploy)
+#  11. andamiaje de deploy automatico (usuario, sudoers, webcmp-deploy, autodeploy)
 #  12. superusuario, por systemd-run con la ENCRYPTION_KEY
 #
 # AUTO-CONTENIDO, y por que importa: este archivo se ejecuta por un pipe, sin
@@ -63,10 +63,6 @@ SERVICE_USER=${SERVICE_USER:-webcmp}
 SERVICE_GROUP=${SERVICE_GROUP:-$SERVICE_USER}
 SERVICE_SHELL=${SERVICE_SHELL:-/usr/sbin/nologin}
 DEPLOY_LOGIN_USER=${DEPLOY_LOGIN_USER:-deploy}
-# Home del usuario de despliegue. `useradd --create-home` lo pone en /home/<user>
-# y el authorized_keys tiene que ir ahi: sshd lo busca en el home real del
-# usuario, no en una ruta que el instalador elija a gusto.
-DEPLOY_HOME=${DEPLOY_HOME:-/home/$DEPLOY_LOGIN_USER}
 SCRIPT_PATH=${SCRIPT_PATH:-/usr/local/sbin/webcmp-deploy}
 # Ejecutor del boton "Actualizar" del panel (change 025-update-web-deploy).
 AUTODEPLOY_SCRIPT=${AUTODEPLOY_SCRIPT:-/usr/local/sbin/webcmp-autodeploy}
@@ -89,7 +85,6 @@ DEPLOY_LOCKFILE=${DEPLOY_LOCKFILE:-/var/lock/webcmp-deploy.lock}
 PIP_CACHE_DIR=${PIP_CACHE_DIR:-/var/cache/webcmp-pip}
 MPLCONFIGDIR=${MPLCONFIGDIR:-$APP_DIR/.cache/matplotlib}
 VENV_DIR=${VENV_DIR:-$APP_DIR/.venv}
-DEPLOY_SSH_KEY=${DEPLOY_SSH_KEY:-$CONFIG_DIR/deploy_key}
 DEPLOY_SUDOERS=${DEPLOY_SUDOERS:-/etc/sudoers.d/webcmp-deploy}
 NGINX_AVAILABLE=${NGINX_AVAILABLE:-/etc/nginx/sites-available/webcmp.conf}
 NGINX_ENABLED=${NGINX_ENABLED:-/etc/nginx/sites-enabled/webcmp.conf}
@@ -153,7 +148,6 @@ trap 'cleanup_generated_flags; command -v spinner_stop >/dev/null && spinner_sto
 # no haya pasado. Ver C.13.
 STEPS_TOTAL=0
 STEPS_DONE=0
-DEPLOY_SSH_KEY_CREATED=0
 SUPERUSER_CREATED=0
 GUNICORN_ENABLED=0
 INSTALL_STARTED_AT=$(date +%s)
@@ -241,9 +235,9 @@ SPINNER_PID=
 SPINNER_MSG=
 ELAPSED_START=
 
-# Frames ASCII, no Unicode: el instalador corre por SSH a un servidor donde el
-# locale puede ser POSIX y un braille UTF-8 sale como "??????". Un spinner que
-# se ve roto en el servidor es peor que uno sin spinner.
+# Frames ASCII, no Unicode: el instalador puede correr en una consola donde el
+# locale es POSIX y un braille UTF-8 sale como "??????". Un spinner que se ve
+# roto en el servidor es peor que uno sin spinner.
 SPINNER_FRAMES=('|' '-' '\' '/')
 
 spinner_render() {
@@ -486,7 +480,11 @@ Instalador de webcmp. Un solo archivo, sin checkout previo:
 
 Uso:
   sudo bash install.sh [opciones]
-  curl -fsSL <raw-url>/deploy/install.sh | sudo bash -s -- [opciones]
+  curl -fsSL -o install.sh <raw-url>/deploy/install.sh && sudo bash install.sh [opciones]
+
+El pipe (`curl ... | sudo bash -s`) solo sirve para `--help` y para
+`--non-interactive`: en la corrida interactiva el stdin del script es la
+tuberia, no hay TTY, y el instalador aborta antes de tocar nada.
 
 Opciones:
   --non-interactive   No preguntar nada: cada valor sale de la variable de
@@ -498,8 +496,9 @@ Opciones:
                       superusuario y NO arranca los servicios: avisa de que el
                       sitio queda sin levantar.
   --skip-deploy-scaffold
-                      No instalar el usuario de despliegue, su keypair ni el
-                      sudoers: para un servidor donde el deploy va a correr a mano.
+                      No instalar el usuario de despliegue, el sudoers ni los
+                      ejecutores de deploy: para un servidor donde el deploy va
+                      a correr a mano.
   --dry-run, -n      Imprimir el plan y no ejecutar nada.
   --help, -h         Esto. Sale 0 sin exigir root ni TTY y sin tocar nada.
 
@@ -872,7 +871,15 @@ ask_secret() {
         else
             answer=$(gen_secret)
             [ -n "$ASK_GENERATED_FILE" ] && printf '%s\n' "$key" >>"$ASK_GENERATED_FILE"
-            printf '  [dry-run] %s=<generada, escrita en el .env, no impresa>\n' "$key" >&2
+            # El destino cambia por clave y el mensaje lo dice: DB_PASS termina
+            # en el .env, pero SUPERUSER_PASSWORD no se escribe en NINGUN
+            # archivo (solo queda el hash en la base, ver `recover_env_password`).
+            # Un mensaje unico para las dos afirmaba algo falso para la segunda.
+            if [ "$key" = SUPERUSER_PASSWORD ]; then
+                printf '  [dry-run] %s=<generada, no impresa, no se guarda en ningun archivo>\n' "$key" >&2
+            else
+                printf '  [dry-run] %s=<generada, escrita en el .env, no impresa>\n' "$key" >&2
+            fi
             printf '%s' "$answer"
             return 0
         fi
@@ -1590,8 +1597,8 @@ fi
 # como sustitucion de comandos. Con `<<EOF` crudo, `createsuperuser --noinput`
 # se intentaba correr como comando del shell y el dry-run imprimia
 # "linea 1462: createsuperuser: command not found" en el medio de la seccion de
-# superusuario. Los otros dos backticks del archivo (location / y ssh-keyscan)
-# ya van escapados con `\`; este delimiter era el que faltaba.
+# superusuario. El otro backtick del archivo (location /) ya va escapado con
+# `\`; este delimiter era el que faltaba.
 cat >&2 <<'EOF'
 
   Superusuario de Django. La cuenta se crea con `createsuperuser --noinput` por
@@ -1727,6 +1734,11 @@ APT_PACKAGES=(
     libcairo2-dev
     libpango1.0-dev
     redis-server
+    # pg_dump NO es opcional: `webcmp-deploy` respalda la base antes de aplicar
+    # migraciones, y sin el binario el deploy se niega a migrar (falla cerrado, a
+    # proposito). En un contenedor minimo no viene, y descubrirlo en el primer
+    # deploy con migraciones es descubrirlo con el sitio a medio actualizar.
+    postgresql-client
 )
 # Nginx se instala en LOS DOS modos. La diferencia no es "con Nginx o sin
 # Nginx", es quien termina TLS:
@@ -3125,6 +3137,11 @@ PYTHON=$VENV_DIR/bin/python
 # como override de una palabra.
 PIP_CACHE_DIR=$PIP_CACHE_DIR
 MPLCONFIGDIR=$MPLCONFIGDIR
+# Respaldo de la base antes de migrar. Se escribe aunque coincida con el default
+# de deploy.sh: un archivo que dice de donde salen los respaldos se lee; un
+# default que vive solo en el script no.
+DB_BACKUP_DIR=/var/backups/webcmp/db
+DB_BACKUP_KEEP=10
 PUBLIC_HOSTNAME=$EXTERNAL_HOSTNAME
 PROXY_MODE=$PROXY_MODE
 EOF
@@ -3165,72 +3182,26 @@ fi
 # --- C.11 Andamiaje de deploy automatico ---------------------------------
 
 # El andamiaje que el README anterior hacia a mano: usuario de despliegue,
-# keypair, sudoers validado y webcmp-deploy en /usr/local/sbin.
+# sudoers validado y webcmp-deploy en /usr/local/sbin. Ya no genera keypair: el
+# update es pull y no hay clave privada que sacar del servidor.
 setup_deploy_scaffold() {
-    local tmp pubkey
+    local tmp
 
     log "Andamiaje de deploy automatico (usuario $DEPLOY_LOGIN_USER)"
 
     if id "$DEPLOY_LOGIN_USER" >/dev/null 2>&1; then
         echo "  el usuario $DEPLOY_LOGIN_USER ya existe."
     else
-        # -m: home propio, porque la clave publica que hay que copiar a GitHub
-        # vive ahi y el operador no tiene por que hacer sudo cat de un 600. NO es
-        # el usuario de servicio: este tiene shell y sudo acotado, aquel tiene
-        # nologin y ninguna capacidad.
+        # -m: home propio, porque el ejecutor del boton corre git con este HOME.
+        # NO es el usuario de servicio: aquel tiene shell nologin y ninguna
+        # capacidad; este invoca webcmp-deploy por sudo, y ese es todo su poder.
+        #
+        # No se genera ninguna credencial de despliegue: el update es pull. El
+        # boton "Actualizar" resuelve refs/heads/main desde este servidor y
+        # aplica el commit localmente (ver C.11b), asi que no hay clave privada
+        # que viaje dentro de la imagen ni que rotar en cada copia.
         run useradd --create-home --shell /bin/bash "$DEPLOY_LOGIN_USER"
         echo "  creado con shell /bin/bash."
-    fi
-
-    # La clave NUNCA se regenera si ya existe: quien la tiene publicada en GitHub
-    # como secret dejaria de poder conectarse, y el sintoma (workflow en rojo por
-    # "Permission denied (publickey)") no dice "rotaron la clave del servidor".
-    if [ -f "$DEPLOY_SSH_KEY" ]; then
-        echo "  $DEPLOY_SSH_KEY ya existe (NO se regenera)."
-    else
-        run ssh-keygen -t ed25519 -N '' -C "$DEPLOY_LOGIN_USER@$(hostname -s)" \
-            -f "$DEPLOY_SSH_KEY" \
-            || die "No se pudo generar el keypair en $DEPLOY_SSH_KEY."
-        DEPLOY_SSH_KEY_CREATED=1
-        echo "  keypair ed25519 generado en $DEPLOY_SSH_KEY."
-    fi
-    # La privada la lee ssh como el usuario de despliegue, asi que su dueno es ese
-    # usuario y el modo 600. No se usa install_if_changed porque el origen y el
-    # destino son el mismo archivo y `install` se niega ("are the same file").
-    # El `-f` no es defensivo: en dry-run `ssh-keygen` no corre y el archivo no
-    # existe, asi que `stat` fallaba con "cannot statx" en medio del plan. Un
-    # error real en el dry-run es ruido que tapa los de verdad.
-    if [ -f "$DEPLOY_SSH_KEY" ] \
-        && [ "$(stat -c '%U:%G %a' "$DEPLOY_SSH_KEY")" != "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER 600" ]; then
-        run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY"
-        run chmod 0600 "$DEPLOY_SSH_KEY"
-    fi
-    run chown "$DEPLOY_LOGIN_USER:$DEPLOY_LOGIN_USER" "$DEPLOY_SSH_KEY.pub" 2>/dev/null || true
-    run chmod 0644 "$DEPLOY_SSH_KEY.pub" 2>/dev/null || true
-
-    # La clave publica tiene que quedar en el authorized_keys del usuario de
-    # despliegue. El par se genera ACA y no en la maquina de quien despliega, asi
-    # que si nadie instala el `.pub`, sshd no tiene contra que comparar y el
-    # workflow falla con "Permission denied (publickey)" aunque el secret tenga
-    # la clave correcta. El mensaje del final pedia pegar la PUBLICA en el
-    # secret, que es al reves: GitHub se autentica con la privada y el servidor
-    # compara con la publica.
-    if [ -f "$DEPLOY_SSH_KEY.pub" ]; then
-        local auth_keys="$DEPLOY_HOME/.ssh/authorized_keys"
-        ensure_dir "$DEPLOY_HOME/.ssh" 0700 "$DEPLOY_LOGIN_USER" "$DEPLOY_LOGIN_USER"
-        if [ ! -f "$auth_keys" ]; then
-            run install -o "$DEPLOY_LOGIN_USER" -g "$DEPLOY_LOGIN_USER" \
-                -m 0600 /dev/null "$auth_keys"
-        fi
-        # `grep -qxF` compara la linea entera: re-correr el instalador no puede
-        # dejar la misma clave repetida, y una clave que sea prefijo de otra no
-        # cuenta como presente.
-        if grep -qxF "$(cat "$DEPLOY_SSH_KEY.pub")" "$auth_keys" 2>/dev/null; then
-            echo "  la clave publica ya esta en $auth_keys."
-        else
-            run_sh "cat '$DEPLOY_SSH_KEY.pub' >> '$auth_keys'"
-            echo "  clave publica agregada a $auth_keys."
-        fi
     fi
 
     # El script de deploy va a /usr/local/sbin, propiedad de root, y NO a
@@ -3258,28 +3229,14 @@ setup_deploy_scaffold() {
         echo "  sudoers en $DEPLOY_SUDOERS, validado con visudo -c."
     fi
 
-    if [ -f "$DEPLOY_SSH_KEY" ]; then
-        echo "  la clave PRIVADA esta en $DEPLOY_SSH_KEY (no se imprime: es el secret)."
-    fi
     cat <<EOF
 
-  Clave PRIVADA del usuario de despliegue. Es lo que va al secret
-  DEPLOY_SSH_KEY de GitHub (Settings > Environments > production); la publica
-  ya quedo instalada en $DEPLOY_HOME/.ssh/authorized_keys de este servidor.
+  El boton "Actualizar" del panel resuelve refs/heads/main desde este servidor
+  y aplica el commit localmente; GitHub nunca se conecta aca. Lo unico que
+  necesita es salida HTTPS a github.com (443) y DNS que resuelva. Sin eso el
+  boton no puede resolver el commit y el panel lo muestra como fallo.
 
-    sudo cat $DEPLOY_SSH_KEY
-
-  OJO: esa es la privada, no la publica. Pegar $DEPLOY_SSH_KEY.pub en el secret
-  es el error natural y falla con "Permission denied (publickey)", que no dice
-  cual de las dos claves esta mal. La privada no se imprime aca a proposito: el
-  scrollback de una sesion SSH es un lugar donde no conviene dejarla.
-
-  Para una instalacion real conviene generar el par en la maquina desde la que
-  se despliega y dejar aca solo la publica: una privada que nacio en el servidor
-  es una llave mas que hay que rotar si el servidor se ve comprometido.
-
-  Si se pega con DEPLOY_HOST, DEPLOY_USER y DEPLOY_SSH_KNOWN_HOSTS, el workflow
-  puede conectarse. Ver deploy/README-deploy.md.
+  Ver el andamiaje del boton y deploy/README-deploy.md.
 EOF
 }
 
@@ -3460,7 +3417,6 @@ else
 
 EOF
     [ "$CHANGED" -eq 0 ] && printf '  No habia nada que cambiar: todo ya estaba como debia.\n'
-    [ "$DEPLOY_SSH_KEY_CREATED" -eq 1 ] && printf '  Se creo la clave del usuario de despliegue (%s).\n' "$DEPLOY_SSH_KEY.pub"
     [ "$SUPERUSER_CREATED" -eq 1 ] && printf '  Superusuario %s creado.\n' "$SUPERUSER_USERNAME"
     [ "$GUNICORN_ENABLED" -eq 1 ] && printf '  webcmp habilitado y arrancado.\n'
     [ -f "$ENV_FILE" ] && printf '  Configuracion en %s.\n' "$ENV_FILE"
@@ -3499,27 +3455,24 @@ cat <<EOF
   QUE FALTA (esta parte NO la automatiza ningun script)
   ======================================================================
 
-  1. Secrets de GitHub (Settings > Environments > production):
+  1. Actualizaciones (boton "Actualizar" del panel):
 
-       DEPLOY_HOST              IP o hostname de este servidor
-       DEPLOY_USER              $DEPLOY_LOGIN_USER
-       DEPLOY_SSH_KEY           contenido de $DEPLOY_SSH_KEY (la privada; la
-                                publica ya esta en $DEPLOY_HOME/.ssh/authorized_keys)
-       DEPLOY_SSH_KNOWN_HOSTS   una linea, con el puerto si no es 22:
+       El servidor necesita salida HTTPS a github.com (443) y DNS. El boton
+       despliega refs/heads/main, no dev: la promocion dev -> main sigue siendo
+       el gate de release.
 
-           ssh-keyscan -p 22 -H <host> 2>/dev/null | sed 's/^/|1 h=|/' > known_hosts
+       Probar el boton una vez y revisar:
 
-     A mano, DESPUES de un deploy de prueba:
+           systemctl status webcmp-autodeploy.path
+           journalctl -u webcmp-autodeploy -n 50
+           cat /var/lib/webcmp/deploy-status.json
 
-           ssh-keyscan -H <host> 2>/dev/null | ssh-keygen -lf -
-
-     Comparar ese fingerprint con el del del servidor. Un \`ssh-keyscan\` sin
-     verificar devuelve lo que conteste ese puerto, incluido el de un atacante.
+       Antes de aplicar migraciones pendientes, webcmp-deploy respalda la base
+       en /var/backups/webcmp/db/ (se conservan las ultimas 10).
 
   2. Verificar el sitio y el deploy:
 
        sudo $SCRIPT_PATH --check
-       sudo $SCRIPT_PATH \$(git -C $APP_DIR rev-parse HEAD)
 
      El rollback automatico no se conoce hasta que se lo vio funcionar una vez:
      probalo desplegando un commit anterior y confirmando que el sitio vuelve.

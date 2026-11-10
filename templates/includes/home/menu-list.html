@@ -90,7 +90,8 @@
     </div>
   </li>
   <!-- Modelos -->
-  <li class="nav-item dropdown
+  {% comment "" %}
+   <li class="nav-item dropdown
              {% if 'modelos' in parent %}active{% endif %}">
     <a class="nav-link dropdown-toggle"
        data-bs-toggle="dropdown"
@@ -118,6 +119,7 @@
       <a class="dropdown-item disabled" href="#" rel="noopener">Boletín aerológico</a>
     </div>
   </li>
+  {% endcomment %}
   <!-- Servicios -->
   <li class="nav-item dropdown
              {% if 'servicios' in parent %}active{% endif %}">

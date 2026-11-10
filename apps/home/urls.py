@@ -12,10 +12,6 @@ from apps.home.views.landing.views import LandingView
 from apps.home.views.modelos.views import (
     DescargarGifView,
     ImageProxyModeloView,
-    MapaView,
-    MeteogramView,
-    SoundingExportView,
-    SoundingView,
 )
 from apps.home.views.pago.views import PagoView
 from apps.home.views.satelites.views import ProxyImageView, SateliteView
@@ -106,14 +102,14 @@ urlpatterns = [
     path('aviso/ciclon_tropical/', TropicalCycloneListView.as_view(), name='warnings_tropical'),
     path('aviso/tormenta/', StormListView.as_view(), name='warnings_storm'),
     # Modelos
-    path('modelo/mapas/', MapaView.as_view(), name='models_maps'),
-    path('modelo/meteogram/', MeteogramView.as_view(), name='models_meteogram'),
-    path('modelo/sounding/', SoundingView.as_view(), name='models_sounding'),
-    path(
-        'modelo/sounding/export/<str:fmt>/',
-        SoundingExportView.as_view(),
-        name='models_sounding_export',
-    ),
+    # path('modelo/mapas/', MapaView.as_view(), name='models_maps'),
+    # path('modelo/meteogram/', MeteogramView.as_view(), name='models_meteogram'),
+    # path('modelo/sounding/', SoundingView.as_view(), name='models_sounding'),
+    # path(
+    #    'modelo/sounding/export/<str:fmt>/',
+    #    SoundingExportView.as_view(),
+    #    name='models_sounding_export',
+    # ),
     # Servicios Públicos
     path('servicios/publicos/', PublicServicesListView.as_view(), name='services_public'),
     # Servicios Comerciales

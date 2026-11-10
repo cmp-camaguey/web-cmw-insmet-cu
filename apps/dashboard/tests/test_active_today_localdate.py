@@ -1,12 +1,15 @@
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.core.models import SiteConfiguration
+from apps.core.utils import local_day_window
 
 
 def disable_maintenance_mode():
@@ -71,3 +74,57 @@ class ActiveTodayLocaldateTests(TestCase):
         stats = response.context['user_stats']
         # Two users logged in on the local day; the UTC-day user is not one of them.
         self.assertEqual(stats['active_today'], 2)
+
+    def test_el_conteo_recorta_el_dia_local_por_sus_bordes(self):
+        """El conteo usa la ventana [inicio, fin) del dia local.
+
+        `last_login__date=timezone.localdate()` resuelve America/Havana dentro
+        de PostgreSQL con el tzdata de la base. Con una ventana de instantes la
+        frontera la decide Python. La prueba fija la semantica semiabierta: el
+        primer instante del dia cuenta, la medianoche del dia siguiente no.
+        """
+        inicio, fin = local_day_window(self.LOCAL_DATE)
+        bordes = {
+            'antes': inicio - timedelta(seconds=1),
+            'primero': inicio,
+            'ultimo': fin - timedelta(seconds=1),
+            'siguiente': fin,
+        }
+
+        with patch('django.utils.timezone.now', return_value=self.FIXED_UTC):
+            self.client.force_login(self.staff)
+            self.staff.last_login = None
+            self.staff.save(update_fields=['last_login'])
+
+            for nombre, instante in bordes.items():
+                user = User.objects.create_user(nombre, f'{nombre}@example.com', 'pass')
+                user.last_login = instante
+                user.save(update_fields=['last_login'])
+
+            # Guard the premise: the frozen instant really is in this window.
+            self.assertEqual(timezone.localdate(), self.LOCAL_DATE)
+
+            response = self.client.get(reverse('dashboard:index'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['user_stats']['active_today'], 2)
+
+    def test_el_conteo_no_delega_la_zona_en_la_base(self):
+        """La consulta del conteo no resuelve la zona dentro de PostgreSQL.
+
+        `last_login__date=...` compila a `(last_login AT TIME ZONE
+        'America/Havana')::date`: la zona se resuelve con el tzdata de la imagen
+        de la base y el conteo se corre un dia cuando discrepa del de Python.
+        Esta prueba mira el SQL real, que es el unico lugar donde la diferencia
+        se ve sin depender del entorno.
+        """
+        with patch('django.utils.timezone.now', return_value=self.FIXED_UTC):
+            self.client.force_login(self.staff)
+            with CaptureQueriesContext(connection) as capturadas:
+                self.client.get(reverse('dashboard:index'))
+
+        consultas = [q['sql'] for q in capturadas.captured_queries]
+        del_conteo = [sql for sql in consultas if 'last_login' in sql]
+        self.assertTrue(del_conteo, 'el conteo no emitio ninguna consulta')
+        for sql in del_conteo:
+            self.assertNotIn('AT TIME ZONE', sql)

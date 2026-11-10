@@ -93,7 +93,7 @@ Ciclo normal:
 1. Rama corta desde `dev`: `feat/nnn-descripcion`, `fix/nnn-descripcion`, `chore/descripcion`.
 2. PR **a `dev`**. No necesita aprobación: el gate son los required status checks de `ci.yml` + `security.yml`. Cada uno mergea lo suyo sin esperar al otro.
 3. Al fusionarse, `cleanup` borra la rama corta.
-4. **Promoción por lote**: PR `dev` → `main` cuando `dev` está verde. No se promociona feature por feature; `dev` acumula y `main` recibe un bloque cerrado.
+4. **Promoción por lote**: PR `dev` → `main` cuando `dev` está verde. No se promociona feature por feature; `dev` acumula y `main` recibe un bloque cerrado. **La promoción va con merge commit (`--merge`), NUNCA con squash (`--squash`).** El squash crea un commit nuevo sin relación con los de `dev`, así que los commits originales nunca llegan a `main` y GitHub los sigue contando como *"dev is N commits ahead of main"*, un número que crece en cada release y no significa nada. Con merge commit, `dev` queda contenida en `main` y el contador se queda en 0. El squash sí es lo correcto para las features que entran a `dev`.
 5. **La promoción sí necesita una persona.** `.github/CODEOWNERS` + `require_code_owner_review` en `Protect main` exigen la aprobación de `@orl92` o `@yoelvismr`; la de un bot no cuenta, porque un bot no puede ser code owner. Es **una** aprobación por release, no por PR.
 6. Al fusionarse la promoción, CI corre en `main` y `deploy-production.yml` intenta desplegar. **Hoy no despliega nada**: el job tiene `if: vars.DEPLOY_ENABLED == 'true'` y esa variable no existe mientras no haya servidor, así que termina en gris (`skipped`). Etiquetar el commit de merge del release: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`.
 7. **Inmediatamente después, mergear `main` de vuelta a `dev`** (PR `main` → `dev`). El merge de release crea en `main` un commit que `dev` no tiene, y con `strict_required_status_checks_policy: true` la siguiente promoción saldría `BEHIND` aunque el contenido sea idéntico: la comprobación es de ascendencia de commits, no de árboles. Este paso aplica a **cada release**, no solo a los hotfixes.
@@ -107,8 +107,32 @@ Secuencia de activación (el orden importa):
 
 - `require_code_owner_review` en `Protect main` **sólo protege cuando `.github/CODEOWNERS` ya está en `main`**, porque GitHub lee ese archivo de la rama base del PR. Activarlo antes no rompe nada (sin archivo no hay code owners que exigir), pero tampoco protege. Orden: mergear a `dev` → promover a `main` con una aprobación humana → activar la regla.
 - Los `required_status_checks` están activos en **las dos** ramas, con los mismos 8 contextos: `Detect affected apps`, `Tests (Django)`, `Lint (Ruff)`, `Templates (djlint)`, `Pre-commit hooks`, `Bandit SAST`, `Security (pip-audit + migrations)`, `Deploy check (check --deploy)`. Si un PR renombra o borra un job, el check requerido nunca reporta y el merge queda bloqueado: **fail-closed**.
+- En `main` hay un noveno contexto obligatorio: `Migrations safety (dev -> main)`. Sólo corre cuando `github.base_ref == 'main'`, así que en un PR a `dev` reporta *skipped* (que cuenta como éxito). Bloquea el merge si el PR agrega una migración destructiva o no reconocida, o si edita, borra o renombra una migración ya publicada; el escape auditado es `# data-safety: reviewed: <motivo>` en el propio archivo. `deploy.sh` es la otra mitad: si el deploy tiene migraciones pendientes, respalda la base en `/var/backups/webcmp/db` antes de migrar y aborta si el respaldo falla.
 - `strict_required_status_checks_policy`: **`true` en `main`, `false` en `dev`**. En `main` el release tiene que haberse probado contra lo último que hay en la rama. En `dev` no: con PRs semanales de Dependabot y `allow_update_branch: false`, exigir ponerse al día deja cada bump `BEHIND` esperando una actualización manual.
 - Que `dev` tenga required checks **no es opcional aunque no exigiera aprobación**: GitHub sólo permite habilitar auto-merge (`enablePullRequestAutoMerge`) en un PR cuya rama base tenga reglas de protección con required status checks. Sin ellos, `gh pr merge --auto` falla con `Pull request Branch does not have required protected branch rules` y `dependabot-auto-merge.yml` termina en rojo.
+
+## Concurrencia entre sesiones
+
+Este repo se trabaja a veces con más de un agente a la vez sobre la misma copia.
+`git commit` commitea en la rama que está checked out, no en la que la sesión cree
+estar usando, y `git checkout` arrastra los cambios sin commitear a la rama
+destino. Así fue como el commit de una tarea aterrizó en la rama de otra y
+contaminó el candidato de una revisión con archivos ajenos.
+
+- Cada sesión que va a escribir usa su propio worktree, fuera del repo:
+  `git worktree add ../<repo>-worktrees/<nombre> -b <tipo>/<descripcion> dev`.
+- Antes de commitear: `git branch --show-current`, y confirmar que es la rama propia.
+- No cambiar de rama en un checkout compartido con el árbol sucio.
+- Al terminar: `git worktree remove <ruta>`.
+- En un worktree no existe `.venv/` (está ignorado por git), así que el hook falla
+  con `pre-commit: not found`. Al commitear ahí, prestar el venv del checkout
+  principal: `PATH=<checkout-principal>/.venv/bin:$PATH git commit ...`.
+- Con squash merge, `git merge-base --is-ancestor <rama> dev` **miente**: el squash
+  crea un commit nuevo y la rama original nunca pasa a ser ancestro. Tampoco alcanza
+  comparar contenido: `git diff <rama> dev` marca como "le falta a dev" las líneas
+  que dev **reemplazó después**, así que una rama vieja y ya mergeada parece tener
+  trabajo propio. La fuente autoritativa es el PR: `gh pr list --head <rama> --state
+  all`. `MERGED` es borrado seguro; `CLOSED` sin merge y "sin PR" se miran a mano.
 
 ## CI — tests selectivos
 
@@ -281,6 +305,11 @@ Lo que gentle-ai **no** cubre es la verificación funcional (`review validate --
 | Solo docs / markdown | nada |
 
 `python manage.py check` es barato (~1s): correlo siempre.
+
+**Frontera de revisión.** `gentle-ai review` con `--base-ref dev` compara de dos
+puntos: una rama que salió de un `dev` anterior aparece *revirtiendo* los commits
+que entraron después, y el reviewer revisa trabajo ajeno. Usar el punto de rama
+como frontera: `--base-ref $(git merge-base dev <rama>)`.
 
 ## API + Deploy + Locale
 

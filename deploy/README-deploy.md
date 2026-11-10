@@ -3,9 +3,10 @@
 Como pasar de `sudo systemctl restart webcmp` a un deploy que se dispara solo
 cuando el CI de `main` esta en verde, con gates y rollback.
 
-La logica vive en [`deploy.sh`](deploy.sh), que corre **en el servidor**. El
-workflow `.github/workflows/deploy-production.yml` solo se conecta por SSH y lo
-invoca.
+La logica vive en [`deploy.sh`](deploy.sh), que corre **en el servidor**. Lo
+dispara el boton **"Actualizar"** del panel: el servidor resuelve `refs/heads/main`
+contra GitHub por HTTPS y aplica el commit localmente. No hace falta ningun puerto
+entrante ni ningun runner conectandose.
 Una sola fuente de verdad: si el procedimiento esta en los dos lados, el dia que
 uno cambie el deploy hace cosas distintas segun por donde entro.
 
@@ -21,10 +22,11 @@ El orden no es estetico, es la garantia:
 | 4 | `pip install -r requirements/prod.txt` | Antes de los gates, que importan las deps |
 | 5 | `makemigrations --check --dry-run` | Falla si un cambio de modelo no trae su migracion. Ver la nota de abajo |
 | 6 | Gate: `check --deploy` con la config real | Ver la nota de abajo |
-| 7 | `migrate` y `migrate --check` | Antes de que el codigo nuevo atienda un request. El `--check` confirma que no queda nada sin aplicar |
-| 8 | `collectstatic` | Antes de que el codigo nuevo emita HTML que los referencia |
-| 9 | `systemctl restart` de ambos units | `reload` NO alcanza, ver la nota de abajo |
-| 10 | Health check contra Nginx local | Atraviesa Nginx, TLS y el socket: el camino completo |
+| 7 | `pg_dump` **si hay migraciones pendientes** | Es la unica vuelta atras de un esquema destructivo. Falla cerrado. Ver **Respaldo antes de migrar** |
+| 8 | `migrate` y `migrate --check` | Antes de que el codigo nuevo atienda un request. El `--check` confirma que no queda nada sin aplicar |
+| 9 | `collectstatic` | Antes de que el codigo nuevo emita HTML que los referencia |
+| 10 | `systemctl restart` de ambos units | `reload` NO alcanza, ver la nota de abajo |
+| 11 | Health check contra Nginx local | Atraviesa Nginx, TLS y el socket: el camino completo |
 
 ### Por que `makemigrations --check` y no `makemigrations`
 
@@ -42,6 +44,86 @@ Versionar las migraciones es lo que vuelve revisable un cambio de esquema: un
 siendo cierto que **el rollback del codigo no deshace el esquema**: Django no
 genera migraciones inversas, y una migracion destructiva ya aplicada deja la
 base con el esquema nuevo.
+
+### Respaldo antes de migrar
+
+Con el update por boton nadie mira el deploy: un superusuario aprieta, el commit
+se aplica y `migrate` corre solo. Por eso `deploy.sh` toma un `pg_dump` **antes**
+de migrar, y solo cuando hay algo que migrar:
+
+```bash
+# Se pregunta sin aplicar nada. Sale 1 si queda algo pendiente.
+manage migrate --check
+```
+
+- Hay pendientes → `pg_dump --format=custom` en `DB_BACKUP_DIR`
+  (`/var/backups/webcmp/db`), `root:root` 0600 dentro de un directorio 0700. Ni
+  `webcmp` ni `deploy` pueden leer un respaldo completo de la base.
+- Si `pg_dump` falla, **el deploy aborta sin migrar**. Un dump a medias se borra;
+  no queda un archivo con fecha de hoy que no sirve.
+- Se conservan `DB_BACKUP_KEEP` (10 por defecto); los mas viejos se borran en cada
+  deploy que respalda.
+- Sin migraciones pendientes no se respalda: un deploy que solo cambia HTML no
+  llena el disco.
+
+Restaurar, con el sitio parado y **como root** (el dump es `root:root 0600`
+dentro de un directorio `0700`; otro usuario no puede leerlo):
+
+```bash
+sudo systemctl stop webcmp webcmp-huey
+sudo pg_restore -h 127.0.0.1 -U <usuario-de-la-base> -W -d <base> \
+    --clean --if-exists /var/backups/webcmp/db/<archivo>.dump
+sudo systemctl start webcmp webcmp-huey
+```
+
+`--clean` borra los objetos antes de recrearlos: sobre una base que ya tiene el
+esquema nuevo, sin `--clean` el restore falla a mitad.
+
+`webcmp-deploy --check` avisa si no hay `pg_dump` en el `PATH`. Lo instala
+`install.sh` (`postgresql-client`); si se saca a mano, el proximo deploy con
+migraciones se niega a correr.
+
+### Gate de migraciones en el merge a `main`
+
+El respaldo es la red; el gate es no necesitarla. El job
+**`Migrations safety (dev -> main)`** corre en cada PR cuya base es `main` y
+analiza el AST de las migraciones nuevas con
+[`scripts/check_migrations.py`](../scripts/check_migrations.py):
+
+| Caso | Resultado |
+| --- | --- |
+| `RemoveField`, `DeleteModel`, `RunSQL`, `RunPython`, `SeparateDatabaseAndState` | **Bloquea** |
+| Operacion que el gate no conoce | **Bloquea** (falla cerrado) |
+| `AddField`, `AlterField`, `RenameField`, `RenameModel`, indices y constraints | Aviso |
+| Modificar, borrar o renombrar una migracion ya publicada | **Bloquea, sin escape** |
+| Migracion nueva con sintaxis rota o sin `operations` | **Bloquea** |
+
+Una operacion destructiva revisada a proposito se declara en el propio archivo:
+
+```python
+class Migration(migrations.Migration):
+    dependencies = [('meteo', '0011_anterior')]
+    operations = [
+        # data-safety: reviewed: la columna se migro a 0012 y se verifico en produccion
+        migrations.RemoveField(model_name='Municipio', name='poblacion'),
+    ]
+```
+
+El motivo tiene que estar: un marcador vacio no cuenta. Editar historia ya
+aplicada **no** tiene escape, porque el servidor que la corrio y el que no quedan
+con esquemas distintos y el mismo `django_migrations`; eso se corrige hacia
+adelante con otra migracion.
+
+Local:
+
+```bash
+python scripts/check_migrations.py --base origin/main --head HEAD
+```
+
+Sale 0 sin bloqueos, 1 con alguno y 2 si no pudo analizar (clon shallow sin
+merge-base). El 2 tambien es rojo: un gate que no puede comparar no puede
+aprobar. En GitHub, el job se agrega a los *required status checks* de
+`Protect main`; en un PR a `dev` aparece como *skipped*.
 
 ### Por que el `check --deploy` del servidor y no solo el del CI
 
@@ -75,8 +157,8 @@ con las credenciales del entorno en vez de con las de produccion, y el deploy
 
 Automatico: si algo falla **despues** de `migrate`, el script vuelve al commit
 anterior, reinstala dependencias, recoloca estaticos y reinicia los units. Sale
-con codigo 1, asi que el workflow lo marca fallido aunque el sitio haya quedado
-sirviendo la version anterior.
+con codigo 1, asi que el panel y `deploy-status.json` lo marcan fallido aunque el
+sitio haya quedado sirviendo la version anterior.
 
 La trampa que lo dispara es `trap rollback EXIT`, no `ERR`. No es indistinto:
 `trap ... ERR` no corre cuando el script hace `exit`, y `die()` -que es como
@@ -87,9 +169,10 @@ Lo que **no** hace, y hay que saber antes de confiar en el:
 
 - **No revierte la base de datos.** Django no genera migraciones inversas y una
   operacion destructiva (`DROP COLUMN`, `AddField` con `default` + `NOT NULL`) no
-  tiene hacia atras. El script avisa por pantalla cuando ya migro; si el fallo
-  fue post-migracion, la base quedo con el esquema nuevo y hay que revisarla a
-  mano antes de volver a exponer el sitio.
+  tiene hacia atras. El script avisa por pantalla cuando ya migro y nombra el
+  respaldo que tomo antes de migrar; si el fallo fue post-migracion, la base quedo
+  con el esquema nuevo y hay que revisarla a mano antes de volver a exponer el
+  sitio.
 - **No toca `media/`.** Los archivos que subio la gente no se deshacen.
 
 Manual:
@@ -199,12 +282,13 @@ estaticos que `collectstatic` reescribe en cada deploy.
 | Disco | 60 GB | 30 GB |
 
 Con 2 vCPU el primer `collectstatic` (hashear y comprimir en gzip+brotli) tarda
-varios minutos y el deploy se acerca al timeout de 30 min del workflow. No es
-solo lentitud: es margen que se pierde.
+varios minutos y el deploy se acerca al `TimeoutStartSec=45min` de
+`webcmp-autodeploy.service`. No es solo lentitud: es margen que se pierde.
 
-El disco crece con `media/`, los PDFs que sube la gente y los backups de
-PostgreSQL. 60 GB no es capricho, es el punto donde un dump mensual todavia no
-duele.
+El disco crece con `media/`, los PDFs que sube la gente y los respaldos de
+PostgreSQL de `/var/backups/webcmp/db` (10 como maximo, uno por deploy con
+migraciones). 60 GB no es capricho: un dump completo de esta base entra sin
+problema en ese margen, pero no entra en 30 GB junto con todo lo demas.
 
 ### Sistema y red
 
@@ -236,29 +320,32 @@ tarde. Requiere storage con soporte de snapshots (ver arriba); si el tuyo no lo
 tiene, el equivalente es `vzdump 120 --mode snapshot --compress zstd` a un
 storage de backup.
 
-### El punto que hay que decidir antes de encender el deploy
+### Conectividad: solo salida HTTPS
 
-Un runner hospedado de GitHub hace `ssh` **desde internet** al puerto 22 del
-servidor. Si el contenedor vive en la red de Proxmox, detras del firewall del
-CMT, el deploy automatico **no llega** — y eso no es un bug que se arregla en el
-workflow.
+La actualizacion **la tira el servidor**. El boton "Actualizar" del panel escribe
+un archivo de peticion, un `.path` de systemd lo recoge y `webcmp-autodeploy`
+resuelve `refs/heads/main` con `git ls-remote` contra GitHub. No hay ningun runner
+de GitHub conectandose al contenedor: el deploy no necesita un solo puerto
+entrante.
 
-Antes de crear `DEPLOY_ENABLED=true`, comprueba que existe el camino:
+Lo que si hace falta:
 
 ```bash
-# desde una maquina fuera de la red del CMT
-nc -vz <host> 22
-ssh -p 22 deploy@<host> 'echo ok'
+# como el usuario deploy, sin credenciales: el repo es publico
+sudo -u deploy env GIT_TERMINAL_PROMPT=0 \
+    git ls-remote https://github.com/cmp-camaguey/webcmp.git refs/heads/main
 ```
 
-Si eso no responde, las opciones son las de **Lo que el workflow NO puede
-hacer**, y la buena noticia es que no bloquean nada: `webcmp-deploy` corre a
-mano en el servidor y hace exactamente el mismo procedimiento, con los mismos
-gates y el mismo rollback. Lo unico que pierdes es que se dispare solo.
+Si eso devuelve un SHA, el boton funciona. Si no:
 
-Por eso el orden es: **primero el sitio arriba y desplegable a mano; despues,
-si hay conectividad, el automatico.** Al reves se depura el sitio y el CI al
-mismo tiempo, que es la forma mas rapida de no saber cual de los dos esta roto.
+| Sintoma | Causa |
+| --- | --- |
+| `Could not resolve host` | DNS. Sin resolucion no hay `ls-remote` |
+| timeout / `Connection refused` | Sin salida al 443. Pedirla al proveedor |
+| `Authentication failed` | El repo no es legible sin credenciales: el ejecutor no tiene token |
+
+El servidor solo necesita **salida** a `github.com:443`. Nada de puertos
+entrantes.
 
 ### Topologia con Nginx Proxy Manager externo
 
@@ -370,17 +457,22 @@ migraciones, estaticos, las dos unidades systemd, el vhost de Nginx y el
 Primero, ver que va a hacer, sin tocar nada:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
-    | sudo bash -s -- --dry-run
+curl -fsSL -o /tmp/install.sh https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
+    && sudo bash /tmp/install.sh --dry-run
 ```
 
-Despues, la corrida real. **Sin terminal el script aborta**: un instalador que
-adivina en un pipe escribe el `.env` equivocado y nadie lo ve hasta que el sitio
-responde `DisallowedHost`.
+Despues, la corrida real. **Necesita una terminal**: el script aborta si el
+`stdin` no es un TTY, porque un instalador que adivina en un pipe escribe el
+`.env` equivocado y nadie lo ve hasta que el sitio responde `DisallowedHost`.
+
+Por eso se descarga y se ejecuta en vez de encadenar `curl ... | sudo bash -s`:
+en el pipe el `stdin` del script es la tuberia, y el guard de `-t 0` lo rechaza
+antes de tocar nada. El pipe queda reservado para `--help` (sale antes del
+guard) y para `--non-interactive`, donde no hay preguntas que responder.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
-    | sudo bash -s
+curl -fsSL -o /tmp/install.sh https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
+    && sudo bash /tmp/install.sh
 ```
 
 Opciones que importan:
@@ -390,7 +482,7 @@ Opciones que importan:
 | `--dry-run`, `-n` | Imprime el plan y no ejecuta nada. Es el primer paso siempre |
 | `--non-interactive` | Sin preguntas: cada valor sale de la variable de entorno del mismo nombre o del default. Sin terminal esto es obligatorio |
 | `--allow-incomplete-env` | Deja los `CHANGE_ME` que sobren (por ejemplo, si el SMTP todavia no existe). NO migra, NO crea el superusuario y NO arranca los servicios |
-| `--skip-deploy-scaffold` | No crea el usuario de despliegue, su keypair ni el sudoers: para servidores donde el deploy se corre a mano |
+| `--skip-deploy-scaffold` | No crea el usuario de despliegue, el sudoers ni los ejecutores de deploy: para servidores donde el deploy se corre a mano |
 
 `sudo bash -s -- --help` imprime el uso y sale 0 sin exigir root ni terminal.
 
@@ -411,10 +503,15 @@ falta (por ejemplo, el `encryption.env` de la instalacion a la que pertenece ese
 
 `deploy/tests/` cubre la sintaxis de todos los scripts y la logica que se puede
 aislar del sistema operativo: el validador del par `SECRET_KEY`/`ENCRYPTION_KEY`,
-el lock, el respaldo previo a regenerar el `.env` y la escritura de
-`/etc/webcmp/deployed`. Los bloques se extraen del propio `install.sh` entre
+el lock, el respaldo previo a regenerar el `.env`, la escritura de
+`/etc/webcmp/deployed`, la decision de si hay migraciones pendientes y la
+rotacion de los respaldos de base. Los bloques se extraen del propio script entre
 marcadores `# >>> TEST-BLOCK: <nombre>`, asi que se prueba el codigo que se
 ejecuta y no una copia.
+
+El gate de migraciones se prueba aparte, como proceso, en
+`apps/core/tests/test_check_migrations_script.py` (repos git temporales, sin tocar
+el del proyecto).
 
 ```bash
 make test-deploy          # o: bash deploy/tests/run.sh
@@ -443,12 +540,11 @@ si la genero el. Las claves Django se pueden rotar despues con
 `manage.py rotatekeys`; la contrasena de la base esta en el `.env` y se edita
 alla.
 
-Al final queda el keypair de despliegue. Lo que va al secret `DEPLOY_SSH_KEY`
-de GitHub es la **privada** (`/etc/webcmp/deploy_key`, modo `0600`); la publica
-queda instalada en `/home/deploy/.ssh/authorized_keys`, que es contra lo que sshd
-la compara (ver **Secrets de GitHub**). Pegar la publica en el secret es el error
-natural y falla con `Permission denied (publickey)`, un mensaje que no dice cual
-de las dos claves esta mal.
+Al final queda el andamiaje del boton "Actualizar": el usuario `deploy`, el
+sudoers acotado a un comando, `/usr/local/sbin/webcmp-deploy` y el ejecutor
+`webcmp-autodeploy` con su `.path` de systemd. **No se genera ninguna credencial
+de despliegue**: la actualizacion es pull, asi que no hay clave privada que sacar
+del servidor ni secret que cargar en GitHub. Ver **El boton "Actualizar"**.
 
 Re-correr el script es seguro: cada pregunta muestra el valor actual como
 default, no regenera claves, no borra la base y no pisa ni `/etc/webcmp/deploy.env`
@@ -460,16 +556,15 @@ ni un `.env` afinado a mano sin confirmarlo.
 
 ### Camino manual (alternativa)
 
-El despliegue por workflow **no** es autocontenido: sin el instalador hay que
-dejar el usuario, el script, la config y el sudoers a mano. Despues de eso, el
-deploy es automatico. Es exactamente lo que hace `install.sh`, paso por paso:
+Sin el instalador hay que dejar el usuario, el script, la config y el sudoers a
+mano. Despues de eso, el boton funciona igual. Es exactamente lo que hace
+`install.sh`, paso por paso:
 
 ```bash
-# 1. Usuario de despliegue. Distinto de webcmp, que tiene shell /bin/false a
-#    proposito: existe para correr Gunicorn, no para que alguien se loguee.
+# 1. Usuario de despliegue. Distinto de webcmp, que no tiene shell a proposito:
+#    existe para correr Gunicorn, no para que alguien se loguee. No tiene
+#    credenciales: se usa unicamente para correr el ejecutor del boton.
 sudo useradd -m -s /bin/bash deploy
-sudo install -d -m 0700 -o deploy -g deploy /home/deploy/.ssh
-sudo -u deploy ssh-keygen -t ed25519 -C "github-actions-deploy" -N ""
 
 # 2. Script FUERA del checkout.
 sudo install -o root -g root -m 0755 deploy/deploy.sh /usr/local/sbin/webcmp-deploy
@@ -490,6 +585,12 @@ sudo usermod -aG webcmp www-data
 sudo systemctl restart nginx     # reinicio, no reload: los grupos se leen al
                                   # crear los workers
 ```
+
+El paso 6 es el ejecutor del boton (`webcmp-autodeploy` y su `.path`), que es
+[`setup_autodeploy()`](../deploy/install.sh) y no vale la pena copiar a mano: son
+dos unidades de systemd, el directorio de estado con setgid y el script que
+resuelve el SHA. Si se dejo `--skip-deploy-scaffold`, el deploy sigue disponible
+a mano con `webcmp-deploy`.
 
 El `deploy.env` del camino manual sale de `deploy.env.example`, que **no define
 ninguna `HEALTHCHECK_*`**. Sin ellas el health check va al 443 de `127.0.0.1`
@@ -520,6 +621,7 @@ falla y `manage.py` no llega a importar.
 | `build-essential` | En Python 3.14 no hay ruedas para varios pins (`pycairo` entre otros) y hay que compilar. Sin el, pip muere con `Running cc --version gave "No such file or directory: 'cc'"` |
 | `libpango1.0-dev` (ojo: el nombre en Ubuntu 26.04 **no** es `libpango-1.0-dev`) | WeasyPrint lo necesita para renderizar PDF. Sin el, `manage.py check` muere con `ffi.dlopen('libpango-1.0.so.0')` |
 | `redis-server` | El `.env` generado trae `USE_REDIS_CACHE=True` aunque el README diga que Redis es opcional. O se instala Redis o se pone `False` |
+| `postgresql-client` | `pg_dump` para el respaldo previo a migrar. Sin el, un deploy con migraciones pendientes se niega a correr |
 | `libcairo2-dev pkg-config python3-dev` | Los que si lista el README, para `pycairo` |
 
 ### Un paso del README del proyecto que no funciona como esta escrito
@@ -564,48 +666,11 @@ trivial: alcanza con editar el archivo para ejecutar root.
 
 ## Secrets de GitHub
 
-Mientras no exista un servidor real, el deploy esta **apagado a proposito**: el
-job tiene `if: vars.DEPLOY_ENABLED == 'true'`, asi que sin esa variable de repo
-el workflow se salta (gris) en vez de fallar por secrets que todavia no existen.
-Cuando el servidor exista, cargar primero los cuatro secrets y **despues** crear
-la variable `DEPLOY_ENABLED=true`: al reves, el primer merge verde intentaria
-desplegar contra un host vacio.
-
-En **Settings > Environments > production** (no en el repo: asi el environment
-puede pedir aprobacion humana y las credenciales de produccion no se ven desde
-cualquier workflow):
-
-| Secret | Que es |
-| --- | --- |
-| `DEPLOY_HOST` | IP o hostname del servidor |
-| `DEPLOY_USER` | `deploy` |
-| `DEPLOY_SSH_KEY` | Clave privada ed25519, en formato PEM con el `BEGIN`/`END` |
-| `DEPLOY_SSH_KNOWN_HOSTS` | Salida de `ssh-keyscan -p 22 <host>` |
-
-`DEPLOY_SSH_KNOWN_HOSTS` no es opcional ni decorativo: el workflow usa
-`StrictHostKeyChecking=yes`, asi que sin ese secret el deploy falla. Va ahi, y no
-con `accept-new`, porque `accept-new` acepta cualquier clave la primera vez: un
-deploy que no verifica a quien se conecta le entrega la clave de despliegue a
-cualquiera que responda ese puerto.
-
-Con el par que genera el instalador, la publica ya esta del lado del servidor y
-lo unico que hay que sacar de alla es la privada:
-
-```bash
-sudo cat /etc/webcmp/deploy_key    # -> DEPLOY_SSH_KEY (la PRIVADA)
-```
-
-Para un servidor real conviene el camino inverso: generar el par en la maquina
-desde la que se despliega y subir solo la publica. Una privada que nacio en el
-servidor es una llave mas que hay que rotar si el servidor se ve comprometido.
-
-```bash
-ssh-keygen -t ed25519 -C "github-actions-deploy@webcmp" -f ~/.ssh/webcmp_deploy
-ssh-copy-id -i ~/.ssh/webcmp_deploy.pub deploy@<host-del-servidor>
-ssh-keyscan -p 22 <host-del-servidor> > ~/.ssh/known_hosts_webcmp
-cat ~/.ssh/webcmp_deploy           # -> DEPLOY_SSH_KEY (la PRIVADA)
-cat ~/.ssh/known_hosts_webcmp      # -> DEPLOY_SSH_KNOWN_HOSTS
-```
+**No hay ninguno que cargar.** El deploy no se autentica contra GitHub para
+desplegar: `webcmp-autodeploy` resuelve `refs/heads/main` con `git ls-remote`
+sobre el repositorio publico, sin credenciales y sin tocar el checkout. Tampoco
+existe una clave privada de despliegue en el servidor: el instalador ya no la
+genera.
 
 ## Correr un deploy a mano
 
@@ -615,7 +680,8 @@ Sin PR, sin CI. Para un fix caliente o un reintento:
 sudo /usr/local/sbin/webcmp-deploy <sha-o-rama>
 ```
 
-Desde GitHub, el boton **Run workflow** hace lo mismo y deja registro en Actions.
+Desde el panel, el boton **Actualizar** hace exactamente lo mismo y deja registro
+en `/var/lib/webcmp/deploy-status.json` y en el journal.
 
 ## El boton "Actualizar" del panel
 
@@ -687,7 +753,7 @@ sudo rm -f /var/lib/webcmp/deploy-request
 ```
 
 A partir de ahi el dashboard sigue mostrando el aviso, pero la peticion queda en
-disco y nadie la recoge. El deploy por workflow y el manual no se tocan.
+disco y nadie la recoge. El deploy manual (`webcmp-deploy`) no se toca.
 
 ### Diagnosticar
 
@@ -854,20 +920,6 @@ EMERGENCY_BANNER_ENABLED=False
 
 Apagarla no toca el contenido publicado: las paginas de avisos y los badges del
 menu siguen igual.
-
-
-## Lo que el workflow NO puede hacer
-
-Un runner hospedado de GitHub Actions hace `ssh` por el puerto 22. Si el servidor
-esta atras de un firewall que solo deja entrar por VPN o por un bastion, el deploy
-automatico no llega. Opciones, de peor a mejor:
-
-1. Correr el deploy a mano (el script esta ahi para eso).
-2. Self-hosted runner en la red interna.
-3. Abrir el 22 restringido a las IP de GitHub.
-
-Este caso es relevante: el host es un `.cu` de red interna. **Probalo antes de
-confiar en el** con un deploy de prueba.
 
 ## Errores que solo aparecen en produccion
 

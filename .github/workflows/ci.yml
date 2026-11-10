@@ -241,6 +241,36 @@ jobs:
           python manage.py makemigrations --check --dry-run
           python manage.py migrate
 
+  migrations-safety:
+    name: Migrations safety (dev -> main)
+    # Solo en la promocion a produccion. Es el unico merge que despues dispara el
+    # boton "Actualizar" del servidor sin nadie mirando: el `migrate` corre solo y
+    # el rollback del deploy revierte el codigo, no el esquema. En un PR a `dev`
+    # todavia hay margen para corregir; en `main` la migracion ya es la que va a
+    # correr en la base real.
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # El gate compara contra el merge-base (`base...head`). Con el clon
+          # shallow por defecto, git no encuentra el merge-base y el gate sale en
+          # rojo por no poder analizar, no por lo que trae el PR.
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: |
+          git fetch --no-tags origin \
+            "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      # Sin `setup-python` ni `pip install`: el gate es stdlib puro a proposito.
+      # Si algun dia necesita Django para decidir, deja de poder correr antes de
+      # instalar dependencias y eso hay que pensarlo dos veces.
+      - name: Analyze migrations
+        run: |
+          python scripts/check_migrations.py \
+            --base "origin/${{ github.base_ref }}" --head HEAD
+
   templates:
     name: Templates (djlint)
     runs-on: ubuntu-26.04
