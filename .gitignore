@@ -262,6 +262,9 @@ tmp/
 ### CodeGraph + dirs de trabajo temporales ###
 .codegraph/
 squashfs-root/
+# Logbooks ODD: notas de trabajo locales de una sesión de agente. El documento
+# de la feature que sí viaja con el repo es `openspec/changes/`.
+odd/
 .gentle-ai-instance
 # gentle-ai local state: records the previous OpenCode default agent so
 # `gentle-ai uninstall` can restore it. Per-installation, never shared.

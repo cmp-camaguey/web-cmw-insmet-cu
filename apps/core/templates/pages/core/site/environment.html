@@ -1,0 +1,187 @@
+{% extends 'layouts/dashboard.html' %}
+{% block content %}
+  <div class="row row-cards">
+    <div class="col-12">
+      <div class="alert alert-info" role="alert">
+        <div class="d-flex">
+          <div class="me-2">
+            <i class="icon ti ti-info-circle"></i>
+          </div>
+          <div>
+            Los cambios se aplican cuando se reinicie el servicio. Mientras no se reinicie,
+            el sitio sigue usando los valores de <strong>En ejecución</strong>.
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if not can_write %}
+      <div class="col-12">
+        <div class="alert alert-danger" role="alert">
+          <div class="d-flex">
+            <div class="me-2">
+              <i class="icon ti ti-alert-triangle"></i>
+            </div>
+            <div>
+              El proceso web no puede guardar la configuración. Los parámetros quedan en solo
+              lectura hasta que un operador revise los permisos del servidor.
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+    <div class="col-12">
+      <form method="post" action=".">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+          <div class="alert alert-danger" role="alert">
+            {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+          </div>
+        {% endif %}
+        {% for section in editable_sections %}
+          <div class="card mb-3">
+            <div class="card-header">
+              <h3 class="card-title">
+                <i class="icon ti ti-{{ section.icon }} me-1"></i>{{ section.title }}
+              </h3>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                {% for row in section.rows %}
+                  <div class="col-md-6 mb-3">
+                    {% if row.is_secret %}
+                      <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                      <div class="input-group">
+                        {{ row.field }}
+                        <span class="input-group-text">
+                          {% if row.configured %}
+                            <span class="badge bg-success-lt">Configurada</span>
+                          {% else %}
+                            <span class="badge bg-secondary-lt">Sin configurar</span>
+                          {% endif %}
+                        </span>
+                      </div>
+                      <small class="text-muted d-block mt-1">
+                        Dejar en blanco para no cambiarla. El valor guardado nunca se muestra.
+                      </small>
+                    {% elif row.spec.kind == 'bool' %}
+                      <div class="form-check form-switch">
+                        {{ row.field }}
+                        <label class="form-check-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                      </div>
+                      <small class="text-muted d-block mt-1">
+                        En ejecución: <code>{{ row.display }}</code>
+                        {% if row.pending %}
+                          <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
+                        {% endif %}
+                      </small>
+                    {% else %}
+                      <label class="form-label{% if row.field.field.required %}
+                                      required{% endif %}"
+                             for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                      {{ row.field }}
+                      <small class="text-muted d-block mt-1">
+                        En ejecución: <code>{{ row.display }}</code>
+                        {% if row.pending %}
+                          <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
+                        {% endif %}
+                      </small>
+                    {% endif %}
+                    {% if row.field.help_text and not row.is_secret %}
+                      <small class="text-muted d-block mt-1">{{ row.field.help_text }}</small>
+                    {% endif %}
+                    {% if row.field.errors %}
+                      <div class="invalid-feedback d-block">{{ row.field.errors.0 }}</div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% if section.readonly %}
+              <div class="card-footer">
+                <div class="text-muted small mb-1">Solo lectura</div>
+                <div class="row">
+                  {% for item in section.readonly %}
+                    <div class="col-md-6 py-1">
+                      <span class="text-muted">{{ item.label }}:</span>
+                      <code class="text-break">{{ item.value }}</code>
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+        <div class="d-flex justify-content-end gap-2 mb-3">
+          <a href="{% url 'core:environment_config' %}"
+             class="btn btn-outline-secondary">Descartar cambios</a>
+          <button type="submit"
+                  class="btn btn-primary"
+                  {% if not can_write %}disabled{% endif %}>
+            <i class="icon ti ti-device-floppy"></i> Guardar
+          </button>
+        </div>
+      </form>
+    </div>
+    {% for group in groups %}
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-{{ group.icon }} me-1"></i>{{ group.title }}
+            </h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-vcenter card-table">
+              <tbody>
+                {% for item in group.items %}
+                  <tr>
+                    <td class="text-muted w-50">{{ item.label }}</td>
+                    <td>
+                      <code class="text-break">{{ item.value }}</code>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="icon ti ti-lock me-1"></i>Secretos fuera del panel
+          </h3>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-0">
+            Estas claves no se administran desde acá. Solo se informa si están configuradas;
+            ningún valor se envía al navegador.
+          </p>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-vcenter card-table">
+            <tbody>
+              {% for secret in secrets %}
+                <tr>
+                  <td class="text-muted">{{ secret.label }}</td>
+                  <td>
+                    <code>{{ secret.key }}</code>
+                  </td>
+                  <td class="text-end">
+                    {% if secret.configured %}
+                      <span class="badge bg-success-lt">Configurada</span>
+                    {% else %}
+                      <span class="badge bg-secondary-lt">Sin configurar</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

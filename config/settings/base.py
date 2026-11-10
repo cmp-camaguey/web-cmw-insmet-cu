@@ -24,7 +24,12 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-load_dotenv(BASE_DIR / '.env')
+# Archivo de entorno. Es una constante y no un literal repetido porque el panel
+# de "Entorno del servidor" escribe sobre el mismo archivo que se carga acá: si
+# divergen, el panel guarda en un lugar y Django lee de otro.
+ENV_FILE_PATH = BASE_DIR / '.env'
+
+load_dotenv(ENV_FILE_PATH)
 
 IS_PRODUCTION = 'PRODUCTION' in os.environ
 
@@ -508,8 +513,27 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
 EMAIL_FILE_PATH = os.getenv('EMAIL_FILE_PATH', BASE_DIR / 'tmp' / 'emails')
 
+
 # LDAP
-if os.getenv('LDAP_SERVER_URI'):
+def resolve_ldap_enabled(environ):
+    """¿Se agrega el backend LDAP a la autenticación?
+
+    `LDAP_ENABLED` manda cuando existe, porque es el interruptor que administra
+    el panel. Sin la variable se mantiene la regla anterior —LDAP activo si hay
+    `LDAP_SERVER_URI`— para que un `.env` viejo siga arrancando igual. La
+    lectura es tolerante a mayúsculas y a `yes`/`on`: si alguien escribe
+    `LDAP_ENABLED=true` a mano, apagar la autenticación del directorio por eso
+    sería un error caro.
+    """
+    raw = environ.get('LDAP_ENABLED')
+    if raw is None:
+        return bool(environ.get('LDAP_SERVER_URI'))
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+LDAP_ENABLED = resolve_ldap_enabled(os.environ)
+
+if LDAP_ENABLED:
     AUTHENTICATION_BACKENDS = [
         'apps.user_auth.backends.LDAP3Backend',
         'django.contrib.auth.backends.ModelBackend',
