@@ -238,7 +238,7 @@ class LandingRenderTests(TestCase):
             self.assertNotIn(marker, self.html, msg=marker)
 
     def test_newsletter_cta_renders(self):
-        self.assertIn('Suscríbase al boletín del Centro', self.html)
+        self.assertIn('Manténgase informado', self.html)
         self.assertIn('Reciba en su correo los avisos, pronósticos y novedades', self.html)
         self.assertIn('Suscribirse', self.html)
 
@@ -335,7 +335,7 @@ class LandingMarketingRedesignEmptyTests(TestCase):
         response = self.client.get('/')
         self.assertEqual(200, response.status_code)
         self.assertIn(
-            'Suscríbase al boletín del Centro',
+            'Manténgase informado',
             response.content.decode(),
         )
 
@@ -358,7 +358,7 @@ class LandingEmptyStateTests(TestCase):
         html = response.content.decode()
         self.assertNotIn('Traceback', html)
         self.assertNotIn('Avisos meteorológicos activos', html)
-        self.assertIn('Suscríbase al boletín del Centro', html)
+        self.assertIn('Manténgase informado', html)
 
 
 class LandingNavbarTests(TestCase):

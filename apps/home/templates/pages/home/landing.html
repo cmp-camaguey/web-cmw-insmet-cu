@@ -77,6 +77,17 @@
       color: var(--tblr-dark) !important;
       background-color: var(--tblr-secondary) !important;
     }
+
+    /* ─── AYUDA BAJO EL FORMULARIO: legible sobre azul y sobre oscuro ───
+       `.form-hint` trae el gris de Tabler, que sobre el azul del boletín no se
+       lee. En claro hereda el blanco atenuado del párrafo; en oscuro conserva
+       el texto secundario, que es el que contrasta con la superficie. */
+    [data-bs-theme="light"] .section-boletin .form-hint {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+    [data-bs-theme="dark"] .section-boletin .form-hint {
+      color: var(--tblr-secondary-color) !important;
+    }
   </style>
 {% endblock %}
 {% block hero_content %}
@@ -292,7 +303,7 @@
   <section class="section section-boletin py-8 pt-0">
     <div class="container mt-6">
       <div class="section-header mb-6">
-        <h2 class="section-title">Suscríbase al boletín del Centro</h2>
+        <h2 class="section-title">Manténgase informado</h2>
         <p>Reciba en su correo los avisos, pronósticos y novedades del Centro Meteorológico Provincial de Camagüey.</p>
       </div>
     </div>
@@ -317,7 +328,7 @@
             </button>
           </div>
         </div>
-        <small class="form-hint mt-2">Le enviaremos un correo para confirmar la suscripción. Cada mensaje lleva un enlace de baja.</small>
+        <small class="form-hint mt-2 d-block text-center">Le enviaremos un correo para confirmar la suscripción.</small>
       </form>
     </div>
   </section>
