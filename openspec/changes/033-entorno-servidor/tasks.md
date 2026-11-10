@@ -30,10 +30,20 @@
 - [x] Validación de TLS+SSL, puerto 465 sin TLS implícito, host sin puerto y LDAP sin base de búsqueda.
 - [x] Textos de la página sin nombrar el archivo de entorno.
 
+## Fase 3c — Presentación del formulario
+
+- [x] Placeholders con prefijo `Ej.:` en todos los campos de texto y numéricos.
+- [x] `LDAP_ENABLED` editable, con la regla anterior como respaldo.
+- [x] Sin rutas absolutas del servidor en la página.
+- [x] Catálogo reordenado por afinidad y ancho por campo (`col-12` / `col-md-6`).
+- [x] Ayuda del campo antes del valor en ejecución.
+- [x] Etiquetas y motores en castellano: sin identificadores de variables ni rutas de módulo.
+
 ## Fase 4 — Verificación
 
 - [x] `python manage.py check`.
 - [x] `python manage.py test apps.core`.
+- [x] `python manage.py test` (suite completa, 1689 tests).
 - [x] `ruff check apps config` y `ruff format --check`.
 - [x] `djlint --check` y `djlint --lint` sobre las plantillas tocadas.
-- [ ] Commit en `feat/033-entorno-servidor` (sin push).
+- [x] Commits en `feat/033-entorno-servidor` (sin push).
