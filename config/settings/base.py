@@ -229,6 +229,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'apps.core.middleware.CheckUserProfileMiddleware',
     'apps.core.middleware.MaintenanceModeMiddleware',
+    'apps.core.middleware.SiteTimezoneMiddleware',
 ]
 
 # ---------------------------------------------------------------------------

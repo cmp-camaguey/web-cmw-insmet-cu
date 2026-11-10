@@ -10,7 +10,10 @@ from apps.core.views.email_recipients import (
     EmailRecipientListUpdateView,
 )
 from apps.core.views.serve_file import PublicServeFileView, ServeModelFileView
-from apps.core.views.site_configuration import SiteConfigurationUpdateView
+from apps.core.views.site_configuration import (
+    SiteConfigurationUpdateView,
+    TimezoneConfigurationUpdateView,
+)
 
 __all__ = [
     'ActivityLogListView',
@@ -23,4 +26,5 @@ __all__ = [
     'PublicServeFileView',
     'ServeModelFileView',
     'SiteConfigurationUpdateView',
+    'TimezoneConfigurationUpdateView',
 ]

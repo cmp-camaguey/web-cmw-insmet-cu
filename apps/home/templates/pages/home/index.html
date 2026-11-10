@@ -117,7 +117,7 @@
                      loading="lazy" />
                 <div class="time-details">
                   <div class="time-item">
-                    <span class="time-value" id="sunrise-value">{{ latest_forecast.sunrise|time:'g:i A' }}</span>
+                    <span class="time-value" id="sunrise-value">{{ latest_forecast.sunrise|local_time }}</span>
                     <span class="time-label">Amanecer</span>
                   </div>
                 </div>
@@ -133,7 +133,7 @@
                      loading="lazy" />
                 <div class="time-details">
                   <div class="time-item">
-                    <span class="time-value" id="sunset-value">{{ latest_forecast.sunset|time:'g:i A' }}</span>
+                    <span class="time-value" id="sunset-value">{{ latest_forecast.sunset|local_time }}</span>
                     <span class="time-label">Puesta de sol</span>
                   </div>
                 </div>

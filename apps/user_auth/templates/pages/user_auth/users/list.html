@@ -51,7 +51,7 @@
   </td>
   <td>
     {% if object.last_login %}
-      {{ object.last_login|date:"d/m/Y h:i A" }}
+      {{ object.last_login|local_datetime:"d/m/Y" }}
     {% else %}
       <span class="text-secondary">Nunca</span>
     {% endif %}

@@ -1,4 +1,5 @@
 {% extends 'layouts/list.html' %}
+{% load my_filters %}
 {% load static %}
 {% block columns %}
   <th>Fecha</th>
@@ -8,7 +9,7 @@
 {% endblock %}
 {% block row %}
   <td>{{ object.date|date:'j \d\e F \d\e Y' }}</td>
-  <td>{{ object.date|time:'h:i A' }}</td>
+  <td>{{ object.date|local_time }}</td>
   <td>{{ object.user.get_full_name|default:object.user.username }}</td>
   <td class="text-end">
     <a href="{% url 'meteo:reporte_download' object.uuid %}"
@@ -26,10 +27,8 @@
             data-bs-target="#documentPdfModal"
             data-pdf-url="{% url 'meteo:reporte_download' object.uuid %}?inline=1"
             data-pdf-title="Tiempo para Hoy {{ object.date|date:'d/m/Y' }}"
-            data-bs-toggle="tooltip"
-            data-bs-placement="bottom"
             aria-label="Ver PDF"
-            data-bs-original-title="Ver PDF">
+            title="Ver PDF">
       <i class="icon ti ti-file-type-pdf"></i>
     </button>
     <a href="{% url 'meteo:tiempo_hoy_update' object.uuid %}"

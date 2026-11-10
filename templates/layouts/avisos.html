@@ -8,7 +8,7 @@
         <div class="row row-deck gy-4">
           {% for warning in objects %}
             <div class="col-md-6">
-              {% with valid_hasta=warning.valid_until|date:'d/m/Y h:i A' %}
+              {% with valid_hasta=warning.valid_until|local_datetime:'d/m/Y' %}
                 {% if warning.file %}
                   {% url 'home:warning_pdf' warning.uuid as warning_pdf_url %}
                   {% include 'includes/home/document_card.html' with title=warning.title|default:warning.summary publisher=warning.user.get_full_name publisher_avatar=warning.user.profile.get_avatar date='Válido hasta: '|add:valid_hasta pdf_url=warning_pdf_url|add:'?inline=1' pdf_title=warning.get_warning_type_display %}

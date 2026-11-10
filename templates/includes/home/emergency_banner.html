@@ -1,3 +1,4 @@
+{% load my_filters %}
 {% if emergency_banner %}
   {% with warning=emergency_banner.warning %}
     {% comment %}
@@ -25,7 +26,7 @@
             <div class="emergency-banner__meta">
               <span class="emergency-banner__date">
                 <i class="icon ti ti-clock" aria-hidden="true"></i>
-                Válido hasta {{ warning.valid_until|date:'d/m/Y H:i' }}
+                Válido hasta {{ warning.valid_until|local_datetime:'d/m/Y' }}
               </span>
               <a class="emergency-banner__cta"
                  href="{% url emergency_banner.url_name %}">

@@ -1,4 +1,5 @@
-<td class="text-nowrap">{{ object.action_time|date:'d/m/Y H:i' }}</td>
+{% load my_filters %}
+<td class="text-nowrap">{{ object.action_time|local_datetime:'d/m/Y' }}</td>
 <td>{{ object.user|default:'—' }}</td>
 <td>
   {% if object.action_flag == 1 %}

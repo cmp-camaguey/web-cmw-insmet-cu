@@ -2,8 +2,10 @@ from django.contrib import messages
 from django.contrib.auth.middleware import get_user
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.core.models import SiteConfiguration
+from apps.core.timezone_utils import reset_request_time_format, set_request_time_format
 from apps.user_auth.models import Profile
 
 
@@ -73,3 +75,27 @@ class MaintenanceModeMiddleware:
             # maintenance page (503), not the public content.
             return render(request, self.template_name, status=503)
         return self.get_response(request)
+
+
+class SiteTimezoneMiddleware:
+    """Activa la zona horaria configurada en `SiteConfiguration`.
+
+    Va después de `MaintenanceModeMiddleware` para reutilizar el singleton que
+    ese middleware ya consultó (`request.site_config`): una sola lectura por
+    request. `timezone.activate` es thread-local, y el `finally` la desactiva
+    para que el valor no se filtre al siguiente request del mismo hilo.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        site_config = getattr(request, 'site_config', None)
+        if site_config is not None:
+            timezone.activate(site_config.get_timezone())
+            set_request_time_format(site_config.get_time_format())
+        try:
+            return self.get_response(request)
+        finally:
+            timezone.deactivate()
+            reset_request_time_format()

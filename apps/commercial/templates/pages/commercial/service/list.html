@@ -20,7 +20,7 @@
       {{ object.price|format_cup }} CUP
     {% endif %}
   </td>
-  <td>{{ object.date|date:"d/m/Y h:i A" }}</td>
+  <td>{{ object.date|local_datetime:"d/m/Y" }}</td>
   <td>{{ object.user.get_full_name|default:object.user.username }}</td>
   <td>
     {% if object.service_type == 'commercial' %}

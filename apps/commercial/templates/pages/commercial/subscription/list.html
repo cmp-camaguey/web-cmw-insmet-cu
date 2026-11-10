@@ -25,7 +25,7 @@
     <td data-bs-toggle="tooltip"
         data-bs-placement="bottom"
         title="{{ subscription.service.title }}">{{ subscription.service.title|truncatechars:30 }}</td>
-    <td>{{ subscription.start_date|date:"d/m/Y h:i A" }}</td>
+    <td>{{ subscription.start_date|local_datetime:"d/m/Y" }}</td>
     <td data-uuid="{{ subscription.uuid }}"
         data-live-status
         {% if subscription.payment_status == 'pending' and subscription.latest_invoice_uuid and not subscription.latest_invoice_pdf_ready %}data-live-pending="1"{% endif %}>

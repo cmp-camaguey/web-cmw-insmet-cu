@@ -1,4 +1,5 @@
 {% extends 'layouts/list.html' %}
+{% load my_filters %}
 {% load static %}
 {% block columns %}
   <th>Resumen</th>
@@ -14,8 +15,8 @@
          data-bs-placement="bottom"
          title="{{ object.summary }}">{{ object.summary|truncatechars:60 }}</div>
   </td>
-  <td>{{ object.date|date:"d/m/Y h:i A" }}</td>
-  <td>{{ object.valid_until|date:"d/m/Y h:i A" }}</td>
+  <td>{{ object.date|local_datetime:"d/m/Y" }}</td>
+  <td>{{ object.valid_until|local_datetime:"d/m/Y" }}</td>
   <td>
     {% if object.valid_until >= now %}
       <span class="badge badge-outline text-green">Vigente</span>
@@ -41,10 +42,8 @@
               data-bs-target="#documentPdfModal"
               data-pdf-url="{% url 'meteo:alerta_download' object.uuid %}?inline=1"
               data-pdf-title="Alerta: {{ object.summary|truncatechars:40 }}"
-              data-bs-toggle="tooltip"
-              data-bs-placement="bottom"
               aria-label="Ver PDF"
-              data-bs-original-title="Ver PDF">
+              title="Ver PDF">
         <i class="icon ti ti-file-type-pdf"></i>
       </button>
     {% endif %}
