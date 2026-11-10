@@ -143,6 +143,7 @@ class EnvironmentConfigView(LoginRequiredMixin, UserPassesTestMixin, TemplateVie
                 {
                     'spec': spec,
                     'field': form[spec.key],
+                    'width_class': 'col-12' if spec.width == 'full' else 'col-md-6',
                     'is_secret': spec.secret,
                     'configured': bool(effective),
                     # Un secreto nunca viaja al template, ni siquiera en el

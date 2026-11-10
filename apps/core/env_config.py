@@ -45,6 +45,11 @@ class EnvField:
     default: str = ''
     # Texto de ejemplo del input. Vacío en los checkboxes, donde no aplica.
     placeholder: str = ''
+    # Ancho en la grilla del panel: 'half' (media columna) o 'full' (fila
+    # completa). Los valores largos —URLs, DN, remitentes— van a lo ancho para
+    # que se lean sin desplazarse; los números y los interruptores comparten
+    # fila. Se declara acá para que la plantilla no tenga una lista paralela.
+    width: str = 'half'
     # De dónde sale el valor en ejecución. Casi todo son atributos de
     # `settings`; LDAP se lee del entorno en cada autenticación.
     source: str = 'settings'
@@ -60,6 +65,7 @@ EDITABLE_FIELDS = (
         label='URL pública del sitio',
         kind='url',
         group='app',
+        width='full',
         placeholder='Ej.: https://cmp.camaguey.cu/',
         help_text=('Es la que viaja en los enlaces de los correos. Se normaliza con barra final.'),
     ),
@@ -88,6 +94,16 @@ EDITABLE_FIELDS = (
         default='10',
     ),
     EnvField(
+        key='NOTIFICATIONS_WARNING_HORIZON_HOURS',
+        label='Antelación del aviso de vencimiento (horas)',
+        kind='int',
+        group='notifications',
+        placeholder='Ej.: 48',
+        min_value=1,
+        max_value=720,
+        default='48',
+    ),
+    EnvField(
         key='NOTIFICATIONS_RETENTION_READ',
         label='Retención de avisos leídos (días)',
         kind='int',
@@ -108,16 +124,6 @@ EDITABLE_FIELDS = (
         default='90',
     ),
     EnvField(
-        key='NOTIFICATIONS_WARNING_HORIZON_HOURS',
-        label='Antelación del aviso de vencimiento (horas)',
-        kind='int',
-        group='notifications',
-        placeholder='Ej.: 48',
-        min_value=1,
-        max_value=720,
-        default='48',
-    ),
-    EnvField(
         key='INVOICE_PENDING_REMINDER_DAYS',
         label='Recordatorio de factura pendiente (días)',
         kind='int',
@@ -132,6 +138,7 @@ EDITABLE_FIELDS = (
         label='Servidor SMTP',
         kind='text',
         group='email',
+        width='full',
         placeholder='Ej.: smtp.cmp.cu',
         required=False,
         help_text='Nombre o IP del servidor de correo saliente.',
@@ -148,6 +155,14 @@ EDITABLE_FIELDS = (
         help_text='El 587 usa STARTTLS y el 465 usa TLS implícito.',
     ),
     EnvField(
+        key='EMAIL_HOST_USER',
+        label='Usuario SMTP',
+        kind='text',
+        group='email',
+        placeholder='Ej.: avisos@cmp.cu',
+        required=False,
+    ),
+    EnvField(
         key='EMAIL_USE_TLS',
         label='STARTTLS',
         kind='bool',
@@ -162,18 +177,11 @@ EDITABLE_FIELDS = (
         help_text='Cifra desde el primer byte. Es el modo del puerto 465.',
     ),
     EnvField(
-        key='EMAIL_HOST_USER',
-        label='Usuario SMTP',
-        kind='text',
-        group='email',
-        placeholder='Ej.: avisos@cmp.cu',
-        required=False,
-    ),
-    EnvField(
         key='EMAIL_HOST_PASSWORD',
         label='Contraseña SMTP',
         kind='password',
         group='email',
+        width='full',
         placeholder='Ej.: contraseña nueva',
         required=False,
         secret=True,
@@ -183,6 +191,7 @@ EDITABLE_FIELDS = (
         label='Remitente por defecto',
         kind='text',
         group='email',
+        width='full',
         placeholder='Ej.: Centro Meteorológico Camagüey <avisos@cmp.cu>',
         required=False,
         help_text='Lo que ve el destinatario, por ejemplo Centro Meteorológico <avisos@cmp.cu>.',
@@ -199,37 +208,42 @@ EDITABLE_FIELDS = (
         ),
     ),
     EnvField(
-        key='LDAP_SERVER_URI',
-        label='Servidor LDAP',
-        kind='text',
-        group='ldap',
-        placeholder='Ej.: ldap://dc.cmp.cu:389',
-        required=False,
-        source='environ',
-        help_text='Vacío desactiva la autenticación contra el directorio al reiniciar.',
-    ),
-    EnvField(
         key='LDAP_START_TLS',
         label='STARTTLS en LDAP',
         kind='bool',
         group='ldap',
         source='environ',
         default='True',
+        help_text='Cifra la conexión con el directorio después del saludo.',
+    ),
+    EnvField(
+        key='LDAP_SERVER_URI',
+        label='Servidor LDAP',
+        kind='text',
+        group='ldap',
+        width='full',
+        placeholder='Ej.: ldap://dc.cmp.cu:389',
+        required=False,
+        source='environ',
+        help_text='Host del directorio, con esquema y puerto.',
     ),
     EnvField(
         key='LDAP_BIND_DN',
         label='DN de bind',
         kind='text',
         group='ldap',
+        width='full',
         placeholder='Ej.: cn=admin,dc=cmp,dc=cu',
         required=False,
         source='environ',
+        help_text='Cuenta con la que se consulta el directorio.',
     ),
     EnvField(
         key='LDAP_BIND_PASSWORD',
         label='Contraseña de bind',
         kind='password',
         group='ldap',
+        width='full',
         placeholder='Ej.: contraseña nueva',
         required=False,
         source='environ',
@@ -240,6 +254,7 @@ EDITABLE_FIELDS = (
         label='Base de búsqueda de usuarios',
         kind='text',
         group='ldap',
+        width='full',
         placeholder='Ej.: ou=users,dc=cmp,dc=cu',
         required=False,
         source='environ',
@@ -249,6 +264,7 @@ EDITABLE_FIELDS = (
         label='Base de búsqueda de grupos',
         kind='text',
         group='ldap',
+        width='full',
         placeholder='Ej.: ou=groups,dc=cmp,dc=cu',
         required=False,
         source='environ',
@@ -258,6 +274,7 @@ EDITABLE_FIELDS = (
         label='Grupo de staff',
         kind='text',
         group='ldap',
+        width='full',
         placeholder='Ej.: cn=staff,ou=groups,dc=cmp,dc=cu',
         required=False,
         source='environ',
@@ -267,6 +284,7 @@ EDITABLE_FIELDS = (
         label='Grupo de superusuarios',
         kind='text',
         group='ldap',
+        width='full',
         placeholder='Ej.: cn=superuser,ou=groups,dc=cmp,dc=cu',
         required=False,
         source='environ',
@@ -276,24 +294,27 @@ EDITABLE_FIELDS = (
         label='Repositorio de actualizaciones',
         kind='text',
         group='updates',
+        width='full',
         placeholder='Ej.: https://github.com/cmp-camaguey/webcmp.git',
         help_text='Origen que consulta el panel para detectar versiones nuevas.',
-    ),
-    EnvField(
-        key='UPDATE_BRANCH_REF',
-        label='Rama desplegada',
-        kind='text',
-        group='updates',
-        placeholder='Ej.: refs/heads/main',
-        help_text='Qué rama se considera la versión publicada.',
     ),
     EnvField(
         key='UPDATE_REPO_API',
         label='API del repositorio',
         kind='url',
         group='updates',
+        width='full',
         placeholder='Ej.: https://api.github.com/repos/cmp-camaguey/webcmp',
         help_text='Endpoint que lista los commits pendientes de desplegar.',
+    ),
+    EnvField(
+        key='UPDATE_BRANCH_REF',
+        label='Rama desplegada',
+        kind='text',
+        group='updates',
+        width='full',
+        placeholder='Ej.: refs/heads/main',
+        help_text='Qué rama se considera la versión publicada.',
     ),
     EnvField(
         key='UPDATE_CHECK_TTL',
@@ -324,6 +345,16 @@ EDITABLE_FIELDS = (
         required=False,
     ),
     EnvField(
+        key='FTP_OBS_PORT',
+        label='Puerto FTP de observaciones',
+        kind='int',
+        group='ftp',
+        placeholder='Ej.: 990',
+        min_value=1,
+        max_value=65535,
+        default='990',
+    ),
+    EnvField(
         key='FTP_OBS_USER',
         label='Usuario FTP de observaciones',
         kind='text',
@@ -339,16 +370,6 @@ EDITABLE_FIELDS = (
         placeholder='Ej.: contraseña nueva',
         required=False,
         secret=True,
-    ),
-    EnvField(
-        key='FTP_OBS_PORT',
-        label='Puerto FTP de observaciones',
-        kind='int',
-        group='ftp',
-        placeholder='Ej.: 990',
-        min_value=1,
-        max_value=65535,
-        default='990',
     ),
 )
 
@@ -502,7 +523,7 @@ def _readonly_groups(settings_obj, environ) -> dict[str, list[dict]]:
     return {
         'app': [
             _item('Perfil de configuración', _profile(settings_obj)),
-            _item('DEBUG', _yes_no(getattr(settings_obj, 'DEBUG', False))),
+            _item('Modo de depuración', _yes_no(getattr(settings_obj, 'DEBUG', False))),
             _item('Idioma', getattr(settings_obj, 'LANGUAGE_CODE', '—')),
             _item('Zona horaria', getattr(settings_obj, 'TIME_ZONE', '—')),
             _item('Python', platform.python_version()),
@@ -510,30 +531,31 @@ def _readonly_groups(settings_obj, environ) -> dict[str, list[dict]]:
         ],
         'domain': [
             # No es un atributo de `settings`: los perfiles lo leen del entorno y
-            # lo inyectan en ALLOWED_HOSTS/CSRF_TRUSTED_ORIGINS. Se muestra acá
-            # porque es la causa de que esas dos listas tengan entradas extra.
+            # lo inyectan en las listas de hosts y orígenes de confianza. Se
+            # muestra acá porque es la causa de que esas dos listas tengan
+            # entradas extra.
             _item('Host externo', environ.get('EXTERNAL_HOSTNAME') or '—'),
-            _item('ALLOWED_HOSTS', _join(getattr(settings_obj, 'ALLOWED_HOSTS', ()))),
+            _item('Hosts permitidos', _join(getattr(settings_obj, 'ALLOWED_HOSTS', ()))),
             _item(
-                'CSRF_TRUSTED_ORIGINS',
+                'Orígenes de confianza para CSRF',
                 _join(getattr(settings_obj, 'CSRF_TRUSTED_ORIGINS', ())),
             ),
             _item(
-                'CORS_ALLOWED_ORIGINS',
+                'Orígenes permitidos para CORS',
                 _join(getattr(settings_obj, 'CORS_ALLOWED_ORIGINS', ())),
             ),
         ],
         'database': [
-            _item('Motor', _last_segment(db.get('ENGINE'))),
+            _item('Motor', _friendly_engine(db.get('ENGINE'))),
             _item('Nombre', db.get('NAME') or '—'),
             _item('Usuario', db.get('USER') or '—'),
             _item('Host', db.get('HOST') or '—'),
             _item('Puerto', db.get('PORT') or '—'),
             _item('Modo SSL', options.get('sslmode') or options.get('ssl_mode') or '—'),
-            _item('CONN_MAX_AGE', db.get('CONN_MAX_AGE') or '—'),
+            _item('Vida máxima de la conexión (s)', db.get('CONN_MAX_AGE') or '—'),
         ],
         'cache': [
-            _item('Backend', _last_segment(cache.get('BACKEND'))),
+            _item('Motor', _friendly_backend(cache.get('BACKEND'))),
             _item('Redis habilitado', _yes_no(getattr(settings_obj, 'USE_REDIS_CACHE', False))),
             _item('URL de Redis', strip_url_credentials(getattr(settings_obj, 'REDIS_URL', ''))),
         ],
@@ -552,7 +574,7 @@ def _section_notes(settings_obj, environ) -> dict[str, list[dict]]:
     """
     return {
         'email': [
-            _item('Backend', _last_segment(getattr(settings_obj, 'EMAIL_BACKEND', ''))),
+            _item('Motor de envío', _friendly_backend(getattr(settings_obj, 'EMAIL_BACKEND', ''))),
         ],
     }
 
@@ -577,6 +599,53 @@ def _last_segment(value) -> str:
     if not value:
         return '—'
     return str(value).rsplit('.', 1)[-1]
+
+
+# El panel no muestra identificadores del código (`smtp.EmailBackend`,
+# `django.db.backends.postgresql`): quien opera el sitio reconoce el motor por su
+# nombre, no por la ruta del módulo. Un valor desconocido cae al último segmento
+# para que un backend propio siga siendo legible en vez de desaparecer.
+_BACKEND_NAMES = {
+    'smtp.EmailBackend': 'SMTP',
+    'console.EmailBackend': 'Consola (no envía)',
+    'filebased.EmailBackend': 'Archivos en disco',
+    'locmem.EmailBackend': 'Memoria (solo pruebas)',
+    'dummy.EmailBackend': 'Descartado (solo pruebas)',
+    'RedisCache': 'Redis',
+    'LocMemCache': 'Memoria local',
+    'FileBasedCache': 'Archivos en disco',
+    'DatabaseCache': 'Base de datos',
+    'DummyCache': 'Descartado',
+    'PyLibMCCache': 'Memcached',
+}
+
+_ENGINE_NAMES = {
+    'postgresql': 'PostgreSQL',
+    'mysql': 'MySQL',
+    'sqlite3': 'SQLite',
+    'oracle': 'Oracle',
+}
+
+
+def _friendly_backend(value) -> str:
+    """Nombre legible del motor de correo o de caché.
+
+    La clave se busca con dos segmentos (`smtp.EmailBackend`) y, si no aparece,
+    con el último (`RedisCache`): los dos estilos existen en Django y en
+    backends de terceros.
+    """
+    if not value:
+        return '—'
+    parts = str(value).rsplit('.', 2)
+    for candidate in ('.'.join(parts[-2:]), parts[-1]):
+        if candidate in _BACKEND_NAMES:
+            return _BACKEND_NAMES[candidate]
+    return parts[-1]
+
+
+def _friendly_engine(value) -> str:
+    segment = _last_segment(value)
+    return _ENGINE_NAMES.get(segment, segment)
 
 
 def _profile(settings_obj) -> str:

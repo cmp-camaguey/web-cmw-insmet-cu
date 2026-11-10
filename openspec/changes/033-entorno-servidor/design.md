@@ -100,7 +100,7 @@ puede tumbar el sitio. La página:
 - Acceso solo para superusuarios (`UserPassesTestMixin`), mismo criterio que
   `TaskMonitoringView` y `UpdateStatusView`.
 - Los secretos nunca se renderizan: `secret_status()` devuelve únicamente
-  `key`, `label` y `configured`.
+  `key`, `label` y `configured`; la plantilla muestra solo `label` y el estado.
 - `REDIS_URL` se muestra con las credenciales sustituidas por `***`.
 - Los tests verifican que el HTML no contiene ni `SECRET_KEY` ni la contraseña
   de la base usada en el archivo de prueba.
@@ -112,3 +112,22 @@ puede tumbar el sitio. La página:
 Cada guardado con cambios crea una fila de `ActivityLog` con `action_flag=2`
 (cambio), `object_repr='Entorno del servidor'`, IP y User-Agent, y el mensaje con
 las claves modificadas. Los valores no se registran.
+
+## 7. Presentación
+
+La página habla el idioma de quien la usa, no el del código: las etiquetas y los
+valores de solo lectura son nombres en castellano. Ni `DEBUG`, ni
+`ALLOWED_HOSTS`, ni `django.core.mail.backends.smtp.EmailBackend` aparecen en el
+HTML; el motor se muestra como `SMTP`, `Redis` o `PostgreSQL`, y un backend
+desconocido cae a su último segmento para no quedar en blanco.
+
+La grilla es una sola: `EnvField.width` declara `'full'` o `'half'` en el
+catálogo y la vista lo traduce a `col-12` / `col-md-6`. Los valores largos (URLs,
+DN, remitente, secretos) ocupan la fila; los números y los interruptores
+comparten columna. El orden de los campos dentro de cada tarjeta es el del
+catálogo, agrupado por afinidad: los dos interruptores de correo juntos, el par
+de retención de avisos junto, y las dos palancas de LDAP antes de sus datos de
+conexión.
+
+Cada campo sigue el mismo orden de lectura: etiqueta, control, texto de ayuda y
+por último `En ejecución`, que es el dato que el operador no puede cambiar.

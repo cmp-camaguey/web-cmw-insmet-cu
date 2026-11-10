@@ -8,7 +8,6 @@ en la ruta `/config/entorno/` (`core:environment_config`).
 - Visible y accesible solo para superusuarios.
 - Aceptación: el superusuario recibe 200 y ve la entrada del menú; un usuario
   autenticado no superusuario recibe 403 y no ve la entrada.
-
 ## S2 — Configuración efectiva
 
 La sección DEBE mostrar los valores en ejecución leídos de
@@ -17,8 +16,7 @@ agrupados en: Aplicación, Dominio y orígenes, Base de datos, Caché, Correo,
 LDAP y Actualizaciones del panel.
 
 - Aceptación: con `CACHES` apuntando a Redis, la tarjeta de Caché informa
-  `RedisCache`; el perfil informa Producción o Desarrollo según `IS_PRODUCTION`.
-
+  `Redis`; el perfil informa Producción o Desarrollo según `IS_PRODUCTION`.
 ## S3 — Secretos no expuestos
 
 La página NO DEBE renderizar el valor de `SECRET_KEY`, `ENCRYPTION_KEY`,
@@ -26,14 +24,12 @@ La página NO DEBE renderizar el valor de `SECRET_KEY`, `ENCRYPTION_KEY`,
 
 - Solo se informa `Configurada` o `Sin configurar`.
 - Aceptación: el HTML no contiene el valor de ninguno de esos secretos.
-
 ## S4 — Credenciales en URLs
 
 `REDIS_URL` DEBE mostrarse sin usuario ni contraseña.
 
 - Aceptación: `redis://:secreto@host:6379/1` se muestra como
   `redis://***@host:6379/1`; una URL sin credenciales se muestra igual.
-
 ## S5 — Parámetros editables
 
 La sección DEBE permitir editar y escribir en el archivo de entorno únicamente:
@@ -55,7 +51,6 @@ La sección DEBE permitir editar y escribir en el archivo de entorno únicamente
 
 - Aceptación: guardar `NOTIFICATIONS_MAX_VISIBLE=25` agrega esa línea y deja el
   resto del archivo intacto.
-
 ## S6 — Parámetros de solo lectura
 
 DEBEN mostrarse en solo lectura y no DEBEN poder modificarse desde el
@@ -73,7 +68,34 @@ archivos sin aportar nada a la operación.
 `ImproperlyConfigured` si apunta a un backend que descarta correo o no verifica
 el certificado: un error ahí deja el sitio sin arrancar y sin panel con el que
 corregirlo.
+## S7 — Escritura segura del archivo
 
+La escritura DEBE preservar comentarios, líneas en blanco, orden y claves ajenas
+al formulario, DEBE ser atómica (temporal en el mismo directorio +
+`os.replace`), DEBE conservar el modo del archivo y DEBE serializarse con
+`flock`.
+
+- Aceptación: un archivo con comentarios y claves desconocidas conserva ambos
+  tras un guardado; un valor con salto de línea se rechaza con `ValueError` y el
+  archivo no cambia.
+## S8 — Archivo no escribible
+
+Si el proceso web no puede escribir el archivo, el formulario DEBE quedar
+deshabilitado con un aviso explícito y el POST NO DEBE modificar el archivo ni
+registrar actividad.
+## S9 — Aplicación diferida
+
+Los cambios NO DEBEN aplicarse en caliente. La página DEBE advertir que se
+aplican al reiniciar el servicio y DEBE marcar como `Pendiente de reinicio` los
+parámetros cuyo valor en archivo difiere del valor en ejecución. El panel NO
+DEBE reiniciar el servicio.
+## S10 — Auditoría
+
+Cada guardado con cambios DEBE registrar una fila en `ActivityLog` con el
+usuario, la IP, el User-Agent y las claves modificadas, sin los valores.
+
+- Aceptación: tras guardar `NOTIFICATIONS_MAX_VISIBLE=25` existe una entrada con
+  la clave en el mensaje y sin el número `25`.
 ## S11 — Contraseñas editables
 
 Los campos `EMAIL_HOST_PASSWORD`, `LDAP_BIND_PASSWORD` y `FTP_OBS_PASS` DEBEN
@@ -83,7 +105,6 @@ renderizarse como campos de contraseña siempre vacíos, con un indicador
 - Un campo vacío NO DEBE modificar ni borrar el valor guardado.
 - Aceptación: guardar el formulario sin escribir la contraseña conserva el valor
   anterior; escribir una nueva lo reemplaza; el HTML nunca contiene el valor.
-
 ## S12 — Combinaciones que impiden arrancar
 
 El formulario NO DEBE aceptar una combinación que `config/settings` rechace al
@@ -97,13 +118,11 @@ iniciar:
 
 - Aceptación: cada caso devuelve un error de formulario y no modifica el
   archivo.
-
 ## S13 — Textos sin referencia al archivo
 
 La página NO DEBE nombrar el archivo de entorno en sus textos visibles. La
 advertencia DEBE decir que los cambios se aplican al reiniciar el servicio y que
 mientras tanto el sitio sigue usando los valores de **En ejecución**.
-
 ## S14 — Placeholders
 
 Cada campo de texto o numérico DEBE mostrar un placeholder que empiece por
@@ -116,34 +135,16 @@ placeholder.
 - Aceptación: el HTML contiene los placeholders de ejemplo y ningún placeholder
   coincide con un valor guardado.
 
-## S7 — Escritura segura del archivo
+## S15 — Nombres legibles
 
-La escritura DEBE preservar comentarios, líneas en blanco, orden y claves ajenas
-al formulario, DEBE ser atómica (temporal en el mismo directorio +
-`os.replace`), DEBE conservar el modo del archivo y DEBE serializarse con
-`flock`.
+La página NO DEBE mostrar identificadores del código, ni como etiqueta ni como
+valor: ni nombres de variables (`SECRET_KEY`, `ENCRYPTION_KEY`, `DB_PASS`,
+`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`,
+`CONN_MAX_AGE`, `EMAIL_BACKEND`), ni rutas de módulo
+(`django.core.mail.backends.smtp.EmailBackend`).
 
-- Aceptación: un archivo con comentarios y claves desconocidas conserva ambos
-  tras un guardado; un valor con salto de línea se rechaza con `ValueError` y el
-  archivo no cambia.
-
-## S8 — Archivo no escribible
-
-Si el proceso web no puede escribir el archivo, el formulario DEBE quedar
-deshabilitado con un aviso explícito y el POST NO DEBE modificar el archivo ni
-registrar actividad.
-
-## S9 — Aplicación diferida
-
-Los cambios NO DEBEN aplicarse en caliente. La página DEBE advertir que se
-aplican al reiniciar el servicio y DEBE marcar como `Pendiente de reinicio` los
-parámetros cuyo valor en archivo difiere del valor en ejecución. El panel NO
-DEBE reiniciar el servicio.
-
-## S10 — Auditoría
-
-Cada guardado con cambios DEBE registrar una fila en `ActivityLog` con el
-usuario, la IP, el User-Agent y las claves modificadas, sin los valores.
-
-- Aceptación: tras guardar `NOTIFICATIONS_MAX_VISIBLE=25` existe una entrada con
-  la clave en el mensaje y sin el número `25`.
+- Las etiquetas DEBEN estar en castellano y describir el parámetro.
+- El motor de correo, el de caché y el de base de datos DEBEN mostrarse por su
+  nombre (`SMTP`, `Redis`, `PostgreSQL`), no por la ruta del módulo.
+- Aceptación: el HTML no contiene ninguno de esos identificadores y la tarjeta de
+  secretos lista solo nombres como `Clave secreta de Django`.

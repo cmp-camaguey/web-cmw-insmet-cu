@@ -254,7 +254,7 @@ class EnvConfigTests(SimpleTestCase):
         environment = build_environment(environ={}, file_values={})
         cache = next(group for group in environment['groups'] if group['key'] == 'cache')
         values = {item['label']: item['value'] for item in cache['items']}
-        self.assertEqual(values['Backend'], 'RedisCache')
+        self.assertEqual(values['Motor'], 'Redis')
 
     def test_effective_value_renders_bools_and_ints(self):
         self.assertEqual(effective_value('NOTIFICATIONS_ENABLED'), 'True')
@@ -509,6 +509,68 @@ class EnvironmentConfigViewTests(TestCase):
         response = self.client.get(self.url)
         self.assertContains(response, 'placeholder="Ej.: contraseña nueva"')
         self.assertNotContains(response, 'claveSmtpSecreta')
+
+    def test_page_does_not_render_variable_names(self):
+        """La página habla en castellano: no publica identificadores de `settings`."""
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        for name in (
+            'SECRET_KEY',
+            'ENCRYPTION_KEY',
+            'DB_PASS',
+            'ALLOWED_HOSTS',
+            'CSRF_TRUSTED_ORIGINS',
+            'CORS_ALLOWED_ORIGINS',
+            'CONN_MAX_AGE',
+            'EMAIL_BACKEND',
+        ):
+            self.assertNotIn(name, html)
+        self.assertContains(self.client.get(self.url), 'Clave secreta de Django')
+
+    def test_readonly_labels_are_not_identifiers(self):
+        environment = build_environment(environ={}, file_values={})
+        for group in environment['groups']:
+            for item in group['items']:
+                self.assertNotRegex(item['label'], r'^[A-Z0-9_]+$')
+
+    def test_engine_names_are_not_module_paths(self):
+        environment = build_environment(environ={}, file_values={})
+        groups = {group['key']: group for group in environment['groups']}
+        for key in ('database', 'cache'):
+            values = {item['label']: item['value'] for item in groups[key]['items']}
+            self.assertNotIn('.', values['Motor'])
+
+    def test_field_width_follows_the_catalog(self):
+        """Los valores largos ocupan la fila; los cortos comparten columna."""
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        self.assertEqual(self._column_of(html, 'SITE_URL'), 'col-12')
+        self.assertEqual(self._column_of(html, 'LDAP_SERVER_URI'), 'col-12')
+        self.assertEqual(self._column_of(html, 'EMAIL_PORT'), 'col-md-6')
+        self.assertEqual(self._column_of(html, 'UPDATE_CHECK_TTL'), 'col-md-6')
+
+    def test_help_text_comes_before_the_running_value(self):
+        """El orden es etiqueta, campo, ayuda y por último el valor en ejecución.
+
+        Con la ayuda debajo del valor, el operador lee primero un dato que no
+        puede cambiar y después la explicación del campo que sí edita.
+        """
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        start = html.index('id="id_EMAIL_PORT"')
+        block = html[start : html.index('id="id_', start + 1)]
+        self.assertIn('El 587 usa STARTTLS', block)
+        self.assertLess(block.index('El 587 usa STARTTLS'), block.index('En ejecución'))
+
+    @staticmethod
+    def _column_of(html: str, key: str) -> str:
+        """Clase del contenedor de grilla que envuelve al campo `key`."""
+        index = html.index(f'id="id_{key}"')
+        start = html.rindex('class="col-', 0, index) + len('class="')
+        return html[start : html.index('"', start)]
 
     def test_page_does_not_render_server_paths(self):
         self.client.force_login(self.superuser)
