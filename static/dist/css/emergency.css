@@ -55,6 +55,14 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+.emergency-banner[hidden] {
+  /* El include deja visibles todas las franjas y el script en línea esconde
+     las que no tocan. Se declara aquí y no se confía solo en el `[hidden]` del
+     navegador: la hoja de autor gana al UA, así que cualquier `display` futuro
+     en `.emergency-banner` rompería el ocultado sin avisar. */
+  display: none;
+}
+
 .emergency-banner--tropical_cyclone {
   --em-accent: var(--tblr-danger);
 }
