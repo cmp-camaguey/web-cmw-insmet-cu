@@ -193,6 +193,39 @@ class NotificationListTests(TestCase):
         )
         self.assertNotContains(response, 'return confirm(')
 
+    def test_la_fecha_del_aviso_se_muestra_en_relativo(self):
+        """`09/11/2026 09:41` obliga a calcular; el panel usa «hace …»."""
+        aviso = _notification(self.admin, title='Mia')
+        Notification.objects.filter(pk=aviso.pk).update(
+            created_at=timezone.now() - timedelta(hours=11, minutes=20)
+        )
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        aviso.refresh_from_db()
+        absoluta = timezone.localtime(aviso.created_at).strftime('%d/%m/%Y %H:%M')
+        # `timesince` traduce con espacios duros (nbsp): se afirma el prefijo
+        # estable, no la cadena completa.
+        self.assertContains(response, 'hace 11')
+        self.assertNotContains(response, absoluta)
+
+    def test_los_botones_de_accion_son_de_icono_con_tooltip(self):
+        aviso = _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertContains(response, 'btn btn-icon btn-outline-success btn-sm')
+        self.assertContains(response, 'btn btn-icon btn-outline-danger btn-sm')
+        self.assertContains(response, 'ti ti-check')
+        self.assertContains(
+            response,
+            f'action="{reverse("dashboard:notification_read", args=[aviso.uuid])}"',
+        )
+        # El tooltip va en el icono: el boton de eliminar ya usa
+        # `data-bs-toggle="modal"` y un elemento no puede llevar los dos.
+        self.assertContains(response, 'data-bs-toggle="tooltip"')
+        self.assertContains(response, 'title="Marcar como leída"')
+
     def test_el_submit_del_modal_nace_deshabilitado(self):
         """Sin accion el formulario heredaria la URL del historial y daria 405.
 
