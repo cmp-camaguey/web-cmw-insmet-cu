@@ -116,3 +116,16 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   nadie real. Se mantiene tal cual. Las migraciones no transportan datos entre
   entornos: cada una corre contra la base donde se aplica, y ninguna contiene
   correos hardcodeados.
+
+- **L8** (2026-11-09) Sincronización con `dev`/`main`. `main` ya corre el
+  rediseño público de orl92 (#178), la limpieza de estáticos (#174) y el deploy
+  con respaldo y comprobación de migraciones. Se **fusionó** `origin/dev` en
+  lugar de rebasar: los 32 commits de 030 estaban revisados y reescribirlos no
+  aporta nada. Respaldo en `backup/030-antes-de-merge-dev` (10f5043).
+  Conflictos: `landing.html` y `test_landing.py` se quedaron en la versión de la
+  rama (diseño de orl92 **con** el formulario real); `test_activity_log.py`
+  conserva las dos partes (ventana de día local de `dev` + contexto de petición,
+  usuario borrado e IP de la rama). «Modelos» sigue oculto en
+  `menu-list.html` y el layout del landing mantiene `severe_only=True`.
+  Verificado: `manage.py check`, `makemigrations --check --dry-run`, suite
+  completa (1719 pruebas) y `make test-deploy` (107/107).
