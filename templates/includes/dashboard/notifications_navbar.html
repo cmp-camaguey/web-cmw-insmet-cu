@@ -25,7 +25,7 @@
           contador: el estado de despliegue no lo lleva, porque leer archivos y
           consultar el remoto no es algo que pueda pedir cada cliente.
         {% endcomment %}
-        <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
+        <span class="badge bg-red-lt badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
                        d-none{% endif %}"
               id="notifications-navbar-badge"
               aria-hidden="true">{{ badge }}</span>
