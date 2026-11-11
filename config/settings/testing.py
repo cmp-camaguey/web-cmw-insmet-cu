@@ -43,3 +43,8 @@ if external_hostname := os.getenv('EXTERNAL_HOSTNAME', ''):
 
 OBS_LOCAL_ONLY_DEFAULT = False
 OBS_LOCAL_ONLY = resolve_obs_local_only(OBS_LOCAL_ONLY_DEFAULT)
+
+# El monitoreo mide trafico real: en tests no hay trafico que medir y una fila
+# INSERT por peticion descuadraria los `assertNumQueries` de la suite. Los tests
+# del propio monitoreo lo activan con `override_settings(MONITORING_ENABLED=True)`.
+MONITORING_ENABLED = False

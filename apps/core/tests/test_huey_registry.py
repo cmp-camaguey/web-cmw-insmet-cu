@@ -43,6 +43,9 @@ EXPECTED_TASKS = {
     # 026 (huecos): recordatorio de facturas pendientes. Se registra por
     # `CommercialConfig.ready()`.
     'apps.commercial.tasks.recordar_facturas_pendientes',
+    # 034: poda diaria de métricas de monitoreo. Se registra por
+    # `MonitoringConfig.ready()`.
+    'apps.monitoring.tasks.podar_monitoreo',
 }
 
 # Lo que hace `huey_consumer config.huey_consumer_entry.huey`, reducido a lo que

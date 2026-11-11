@@ -14,6 +14,7 @@ perfil ya no podría imponer el suyo. Ver odd/tasks/split-config-settings.md.
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -212,6 +213,7 @@ INSTALLED_APPS = [
     'apps.meteo.apps.MeteoConfig',
     'apps.commercial.apps.CommercialConfig',
     'apps.dashboard.apps.DashboardConfig',
+    'apps.monitoring.apps.MonitoringConfig',
 ]
 
 whitenoise_middleware = 'whitenoise.middleware.WhiteNoiseMiddleware'
@@ -220,6 +222,9 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     whitenoise_middleware,
+    # Mide cada petición del stack Django. Va justo después de WhiteNoise:
+    # los estáticos salen antes y no ensucian la muestra.
+    'apps.monitoring.middleware.RequestMetricsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -567,3 +572,21 @@ UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '15'))
 # (ver `pending_commits`). 60 peticiones por hora sin autenticar: con 5 minutos
 # de cache, un panel abierto todo el dia gasta 12.
 UPDATE_REPO_API = os.getenv('UPDATE_REPO_API', 'https://api.github.com/repos/cmp-camaguey/webcmp')
+
+
+# --- Monitoreo del sitio (feature 034) --------------------------------------
+# Interruptor único: apagado, el middleware no registra peticiones y el beacon
+# no se inyecta. Los datos ya guardados se siguen mostrando y se siguen podando.
+#
+# `manage.py test` se apaga acá y no solo en `testing.py`: con `DEBUG=True` en
+# `.env` la suite corre bajo el perfil `dev`, y una fila INSERT por petición
+# descuadraría los `assertNumQueries` de la suite. Los tests del propio
+# monitoreo lo reactivan con `override_settings(MONITORING_ENABLED=True)`.
+MONITORING_ENABLED = os.getenv('MONITORING_ENABLED', 'True') == 'True' and 'test' not in sys.argv
+# Días que se conservan las filas de `PageView`, `WebVital` y `JavaScriptError`.
+MONITORING_RETENTION_DAYS = int(os.getenv('MONITORING_RETENTION_DAYS', '30'))
+# Días que se conserva una fila por petición. Es más corto a propósito: es la
+# tabla que más crece y las ventanas del panel son de minutos u horas.
+MONITORING_HTTP_RETENTION_DAYS = int(os.getenv('MONITORING_HTTP_RETENTION_DAYS', '14'))
+# Sistema de archivos que se reporta como "disco".
+MONITORING_DISK_PATH = os.getenv('MONITORING_DISK_PATH', '/')
