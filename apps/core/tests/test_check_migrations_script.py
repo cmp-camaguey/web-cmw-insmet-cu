@@ -363,6 +363,77 @@ class CheckMigrationsTests(unittest.TestCase):
         self.assertEqual(resultado.returncode, 0, resultado.stdout)
         self.assertIn('NOT NULL sin default', resultado.stdout)
 
+    def test_addfield_con_default_falso_no_avisa(self):
+        """`default=False` es un default: la columna se llena al crearse.
+
+        El parser miraba el `default` del `AddField`, que no existe, y no el del
+        `Field`, que es donde Django lo escribe. Un booleano con `default=False`
+        salia como «columna NOT NULL sin default» aunque no hubiera riesgo.
+        """
+        self.repo.rama('feat')
+        self.repo.escribir(
+            'apps/meteo/migrations/0002_agrega.py',
+            migracion(
+                'migrations.AddField(\n'
+                "    model_name='Municipio',\n"
+                "    name='activo',\n"
+                '    field=models.BooleanField(default=False),\n'
+                '),',
+            ).replace(
+                'from django.db import migrations\n', 'from django.db import migrations, models\n'
+            ),
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 0, resultado.stdout)
+        self.assertNotIn('NOT NULL sin default', resultado.stdout)
+
+    def test_addfield_con_default_cero_no_avisa(self):
+        """Mismo caso con un entero: `default=0` tambien es falsy."""
+        self.repo.rama('feat')
+        self.repo.escribir(
+            'apps/meteo/migrations/0002_agrega.py',
+            migracion(
+                'migrations.AddField(\n'
+                "    model_name='Municipio',\n"
+                "    name='orden',\n"
+                '    field=models.IntegerField(default=0),\n'
+                '),',
+            ).replace(
+                'from django.db import migrations\n', 'from django.db import migrations, models\n'
+            ),
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 0, resultado.stdout)
+        self.assertNotIn('NOT NULL sin default', resultado.stdout)
+
+    def test_addfield_con_default_none_si_avisa(self):
+        """`default=None` no llena una columna NOT NULL: el aviso sigue en pie."""
+        self.repo.rama('feat')
+        self.repo.escribir(
+            'apps/meteo/migrations/0002_agrega.py',
+            migracion(
+                'migrations.AddField(\n'
+                "    model_name='Municipio',\n"
+                "    name='codigo',\n"
+                '    field=models.CharField(default=None),\n'
+                '),',
+            ).replace(
+                'from django.db import migrations\n', 'from django.db import migrations, models\n'
+            ),
+        )
+        self.repo.commit()
+
+        resultado = self.gate_en_rama()
+
+        self.assertEqual(resultado.returncode, 0, resultado.stdout)
+        self.assertIn('NOT NULL sin default', resultado.stdout)
+
     def test_createmodel_no_bloquea(self):
         self.repo.rama('feat')
         self.repo.escribir(

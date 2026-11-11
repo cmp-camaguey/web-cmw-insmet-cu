@@ -1,5 +1,8 @@
 """Garantiza la lista principal y da de alta a quien ya aceptó por perfil.
 
+# data-safety: reviewed: solo crea la lista principal y rellena suscripciones
+# desde Profile.newsletter; no borra ni reescribe filas existentes.
+
 El fallo que corrige: en una base sin listas de correo, `resolve_audience`
 devolvía cero y `mail_send` avisaba al admin «no llegó a nadie». El operador no
 tenía forma de saber que faltaba la lista principal, y marcar «recibir
