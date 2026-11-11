@@ -633,6 +633,40 @@ check_healthcheck() {
     fi
 }
 
+# Corre un comando en una unidad transitoria y vuelca su salida al log.
+#
+# Por que NO se usa `--pipe` (que es lo que hacia esto antes): `--pipe` le pide
+# al gestor que pase descriptores por D-Bus al arrancar la unidad, y en systemd
+# 259 eso falla de forma INTERMITENTE con
+#
+#     Failed to start transient service unit: Connection reset by peer
+#
+# En el deploy del 2026-11-11 funciono tres veces (makemigrations, check
+# --deploy, pg_dump) y murio en la cuarta: `migrate`. Un fallo intermitente en el
+# paso que no admite "casi" es peor que uno limpio, porque el deploy ya hizo
+# checkout y ya respaldo la base antes de morir.
+#
+# La salida se captura con `append:` a un archivo y se vuelca despues: el
+# operador la sigue viendo en el log del deploy, que es el unico sitio donde se
+# mira un deploy fallido, sin pasar descriptores por D-Bus. El archivo lo abre
+# el gestor como root, asi que el drop a DEPLOY_USER no cambia nada.
+#
+# Devuelve el codigo del COMANDO, no el de `cat`: un `migrate` que falla tiene
+# que seguir abortando el deploy.
+# >>> TEST-BLOCK: run-in-unit
+run_in_unit() {
+    local out rc=0
+    out=$(mktemp "${TMPDIR:-/tmp}/webcmp-unit.XXXXXX") || return 1
+    systemd-run --quiet --wait \
+        -p "StandardOutput=append:$out" \
+        -p "StandardError=append:$out" \
+        "$@" || rc=$?
+    cat "$out" 2>/dev/null || true
+    rm -f "$out"
+    return "$rc"
+}
+# <<< TEST-BLOCK: run-in-unit
+
 check_django() {
     log "Configuracion de Django"
     if [ ! -x "$PYTHON" ]; then
@@ -646,7 +680,7 @@ check_django() {
     # check --deploy sin --fail-level: es un reporte, no un gate. El gate es el
     # punto 4 del deploy.
     local output status=0
-    output=$(systemd-run --quiet --pipe --wait \
+    output=$(run_in_unit \
         --uid="$DEPLOY_USER" --gid="$DEPLOY_USER" \
         -p "EnvironmentFile=$ENCRYPTION_ENV" \
         -p Environment=PRODUCTION=1 \
@@ -788,7 +822,7 @@ rollback() {
 
 # Corre `manage.py` en el MISMO contexto que corre Gunicorn.
 #
-# systemd-run --pipe --wait crea una unidad transitoria con el EnvironmentFile de
+# systemd-run crea una unidad transitoria con el EnvironmentFile de
 # la clave de descifrado y PRODUCTION=1, exactamente igual que webcmp.service. Sin
 # esto, un `manage.py` corrido a mano sin PRODUCTION cae en el perfil de DESARROLLO
 # (ver config/settings/__init__.py): migra con las credenciales del entorno en vez
@@ -812,7 +846,10 @@ manage() {
     # crea la cuenta con una contrasena inservible y sin avisar, porque la
     # variable se queda en la shell del operador. Para pasar algo, va con
     # -p Environment=NOMBRE=valor.
-    systemd-run --quiet --pipe --wait \
+    #
+    # `run_in_unit` y no `systemd-run` directo: ver el comentario de esa funcion
+    # (el pipe de systemd 259 tumba la unidad de forma intermitente).
+    run_in_unit \
         --uid="$DEPLOY_USER" --gid="$DEPLOY_USER" \
         -p "EnvironmentFile=$ENCRYPTION_ENV" \
         -p Environment=PRODUCTION=1 \
@@ -848,7 +885,12 @@ db_dump() {
     # arbol que es de DEPLOY_USER y que el proximo deploy tiene que poder
     # reemplazar con `git checkout -f`. Un respaldo no tiene por que dejar
     # huella en el codigo.
-    systemd-run --quiet --pipe --wait \
+    #
+    # `run_in_unit` y no `systemd-run` directo: ver el comentario de esa funcion.
+    # El respaldo no lee stdout, pero un `pg_dump` que falla escribe el motivo en
+    # stderr y sin captura ese texto se queda en el journal de la unidad, que es
+    # justo el que nadie mira cuando el deploy aborta aca.
+    run_in_unit \
         --uid=root --gid=root \
         -p "EnvironmentFile=$ENCRYPTION_ENV" \
         -p Environment=PRODUCTION=1 \

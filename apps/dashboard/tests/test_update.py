@@ -170,6 +170,46 @@ class UpdateStatusViewTest(UpdateTestCase):
         self.assertEqual(payload['state'], 'running')
         self.assertEqual(payload['last_run']['status'], 'running')
 
+    def test_intento_fallido_sobre_el_commit_pendiente_no_se_anuncia_como_disponible(self):
+        # El caso que rompio produccion el 2026-11-11: el deploy murio antes de
+        # escribir /etc/webcmp/deployed, asi que el commit siguio pendiente y el
+        # panel lo anunciaba como "actualizacion disponible". Con `available` de
+        # por medio el admin no ve nunca que el intento fallo: clica, el
+        # despliegue vuelve a fallar y el aviso reaparece identico. El fallo
+        # tiene que ser el estado, no una rama que el navegador nunca alcanza.
+        self.set_deployed()
+        self.set_remote()
+        self.set_run_status(
+            status='failed',
+            sha=SHA_LATEST,
+            started_at='2026-11-11T22:52:52+00:00',
+            finished_at='2026-11-11T22:53:06+00:00',
+        )
+        self.client.force_login(self.admin)
+
+        payload = self.client.get(self.status_url).json()
+
+        self.assertEqual(payload['state'], 'failed')
+        self.assertEqual(payload['last_run']['status'], 'failed')
+        # Sin rango que comparar: el commit pendiente es el que acaba de fallar.
+        # Pedir los mensajes seria una salida de red que no cambia nada.
+        self.assertIsNone(payload['commits'])
+
+    def test_intento_fallido_de_otro_commit_sigue_siendo_actualizacion_disponible(self):
+        # Un fallo viejo no mancha un commit nuevo: si main avanzo despues del
+        # intento fallido, lo pendiente no se intento todavia y el boton tiene
+        # que ofrecer la actualizacion.
+        self.set_deployed()
+        self.set_remote()
+        self.set_run_status(status='failed', sha='c' * 40)
+        self.client.force_login(self.admin)
+
+        with mock.patch.object(update_module, '_fetch_compare', return_value=None):
+            payload = self.client.get(self.status_url).json()
+
+        self.assertEqual(payload['state'], 'available')
+        self.assertEqual(payload['latest'], SHA_LATEST)
+
     def test_estado_ilegible_se_ignora(self):
         self.set_deployed()
         self.set_remote(sha=SHA_DEPLOYED)
@@ -294,6 +334,23 @@ class UpdateRequestViewTest(UpdateTestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertFalse(os.path.exists(self.request_file))
+
+    def test_estado_fallido_permite_reintentar(self):
+        # Si el panel dice "el despliegue fallo" y el boton no hace nada, el
+        # unico camino que queda es SSH. Reintentar es justo lo que hace falta
+        # despues de arreglar la causa, y el estado `failed` sigue siendo "hay
+        # un commit pendiente": lo que cambio es que ya se intento.
+        self.set_deployed()
+        self.set_remote()
+        self.set_run_status(status='failed', sha=SHA_LATEST)
+        self.client.force_login(self.admin)
+
+        response = self.client.post(self.request_url)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(os.path.exists(self.request_file))
+        with open(self.request_file, encoding='utf-8') as handle:
+            self.assertEqual(json.load(handle)['expected_sha'], SHA_LATEST)
 
     def test_sin_commit_desplegado_explica_el_motivo(self):
         # En desarrollo no existe el archivo del commit desplegado. El 409 tiene
