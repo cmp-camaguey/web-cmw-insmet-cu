@@ -3,9 +3,9 @@ from django.contrib import admin
 from apps.core.models import (
     ActivityLog,
     CompanySettings,
-    EmailRecipient,
     EmailRecipientList,
     SiteConfiguration,
+    Subscriber,
     TaskExecutionLog,
 )
 
@@ -20,15 +20,21 @@ class CompanySettingsAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'codigo_reeup', 'nit')
 
 
-class EmailRecipientInline(admin.TabularInline):
-    model = EmailRecipient
-    extra = 1
-
-
 @admin.register(EmailRecipientList)
 class EmailRecipientListAdmin(admin.ModelAdmin):
-    inlines = [EmailRecipientInline]
-    list_display = ('name',)
+    list_display = ('name', 'is_default')
+
+
+@admin.register(Subscriber)
+class SubscriberAdmin(admin.ModelAdmin):
+    list_display = ('email', 'source', 'confirmed_at', 'active')
+    list_filter = ('active', 'source')
+    search_fields = ('email',)
+
+    def has_delete_permission(self, request, obj=None):
+        # La baja pone `active=False`: borrar la fila destruye el consentimiento
+        # que la persona dio y el rastro de que lo retiró.
+        return False
 
 
 @admin.register(TaskExecutionLog)
@@ -41,6 +47,11 @@ class TaskExecutionLogAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # Mismo criterio que `ActivityLogAdmin`: un registro que se puede editar
+        # por partes no sirve como registro.
         return False
 
 

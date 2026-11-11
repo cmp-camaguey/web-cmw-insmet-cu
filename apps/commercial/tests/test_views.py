@@ -1581,10 +1581,20 @@ class SubscriptionCancelViewTests(TestCase):
         return invoice
 
     def _anular(self, sub):
+        # Anular avisa al cliente por correo: con la cola real el envío queda
+        # pendiente y ensucia a los tests que después cuentan la cola. En
+        # proceso sale por el backend de pruebas y no deja rastro.
+        from config.huey import huey
+
         self.client.force_login(self.admin)
-        return self.client.post(
-            reverse('commercial:suscripcion_cancel', args=[sub.uuid]),
-        )
+        old = huey.immediate
+        huey.immediate = True
+        try:
+            return self.client.post(
+                reverse('commercial:suscripcion_cancel', args=[sub.uuid]),
+            )
+        finally:
+            huey.immediate = old
 
     def test_rechaza_anular_una_suscripcion_pagada(self):
         # El pago aprobado es el punto sin retorno: anular aquí dejaría al

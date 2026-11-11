@@ -52,6 +52,19 @@ RULES_FILE="AGENTS.md"
 # Default: true
 STRICT_MODE="true"
 
+# How many lines of the provider response are searched for the verdict.
+# Default: 400
+# The reviewer runs commands (`ruff`, `djlint`, `manage.py test`, diffs) and
+# echoes their output, so a thorough review of a multi-file change easily
+# exceeds 400 lines and the verdict ends up past the window. gga then reports
+# "ambiguous" even though the review passed, and the only ways out were to
+# shrink the reviewed change or to turn STRICT_MODE off.
+#
+# Raising the window keeps the gate intact: the parser still requires exactly
+# one `STATUS:` line and still fails when PASSED and FAILED both appear. It
+# just reads the whole report instead of a truncated prefix.
+STATUS_SCAN_LINES="4000"
+
 # Timeout in seconds for AI provider response
 # Default: 300 (5 minutes)
 # Increase for large changesets or slow connections
@@ -65,8 +78,14 @@ TIMEOUT="300"
 # Keep this lightweight. Agent prompts can add significant token overhead.
 # MUST be set in this repo: `opencode.json` pins default_agent to
 # `gentle-orchestrator`, so an unset agent makes gga run the full ODD
-# orchestrator instead of a plain reviewer. `build` is the built-in agent.
-OPENCODE_AGENT="build"
+# orchestrator instead of a plain reviewer.
+#
+# `gga-reviewer` is a minimal agent defined in `opencode.json` whose only
+# purpose is to pin the review model. It was `build`, whose model is the
+# OpenCode default: when that model's free quota ran out, gga exited 1 and the
+# hook blocked every commit. The model now lives next to the agent instead of
+# depending on a global default nobody declared.
+OPENCODE_AGENT="gga-reviewer"
 
 # Base branch for --pr-mode (auto-detects main/master/develop if empty)
 # Default: auto-detect

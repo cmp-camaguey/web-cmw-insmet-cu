@@ -4,7 +4,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.core.models import EmailRecipient, EmailRecipientList, SiteConfiguration
+from apps.core.models import SiteConfiguration
+from apps.core.tests.base import add_confirmed_subscriber, get_default_list
 from apps.meteo.models import Warning
 from config.huey import huey
 
@@ -69,8 +70,8 @@ class WarningEmailLinkTests(TestCase):
             first_name='Admin',
             last_name='Correo',
         )
-        cls.recipient_list = EmailRecipientList.objects.create(name='Lista de avisos')
-        EmailRecipient.objects.create(email='aviso@example.com', recipient_list=cls.recipient_list)
+        cls.recipient_list = get_default_list()
+        add_confirmed_subscriber(cls.recipient_list, 'aviso@example.com')
 
     def _post_create(self, url_name, data):
         self.client.force_login(self.admin)
@@ -87,7 +88,7 @@ class WarningEmailLinkTests(TestCase):
             'title': 'Aviso de prueba',
             'summary': 'Resumen del aviso',
             'valid_until': '2027-01-01T10:00',
-            'email_recipient_list': self.recipient_list.pk,
+            'send_email': 'on',
         }
 
     @override_settings(SITE_URL='http://testserver/')
@@ -99,6 +100,15 @@ class WarningEmailLinkTests(TestCase):
         body = mail.outbox[0].body
         self.assertIn('http://testserver/aviso/alerta_temprana/', body)
         self.assertNotIn('href=""', body)
+
+    def test_sin_la_casilla_no_se_envia_correo(self):
+        data = self._warning_data()
+        data.pop('send_email')
+
+        response = self._post_create('meteo:alerta_temprana_create', data)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_el_correo_rellena_titulo_y_anio(self):
         self._post_create('meteo:alerta_temprana_create', self._warning_data())

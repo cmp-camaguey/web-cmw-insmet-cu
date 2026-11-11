@@ -122,10 +122,19 @@ class OperatorLogCustomerNameTests(FileHandlingTestCase):
         self._afirmar_nombre_en_los_logs()
 
     def test_log_de_suscripcion_desactivada(self):
+        from config.huey import huey
+
         self.client.force_login(self.admin)
-        self.client.post(
-            reverse('commercial:suscripcion_cancel', args=[self.subscription.uuid]),
-        )
+        # La anulación avisa al cliente por correo (S5): con la cola real el
+        # envío queda pendiente y rompe los tests que después cuentan la cola.
+        old = huey.immediate
+        huey.immediate = True
+        try:
+            self.client.post(
+                reverse('commercial:suscripcion_cancel', args=[self.subscription.uuid]),
+            )
+        finally:
+            huey.immediate = old
         self._afirmar_nombre_en_los_logs()
 
     def test_log_y_mensaje_de_suscripcion_eliminada_fisicamente(self):

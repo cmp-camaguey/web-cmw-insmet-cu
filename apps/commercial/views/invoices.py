@@ -39,6 +39,7 @@ from apps.commercial.models import (
     meses_de_la_linea,
     rango_desde_meses,
 )
+from apps.commercial.notifications import notificar_factura_emitida
 from apps.commercial.views.invoice_utils import (
     _centro_de_costo_de_codigo,
     _prefill_cost_allocations_from_items,
@@ -495,6 +496,7 @@ class InvoiceCreateView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
         site_url = settings.SITE_URL
         for factura in facturas:
             generate_invoice_pdf_and_email_task(str(factura.uuid), site_url)
+            notificar_factura_emitida(factura)
         return facturas
 
     def _facturar_grupo(
@@ -629,6 +631,7 @@ class InvoiceCreateView(LoginRequiredMixin, PermissionRequiredMixin, FormView):
         # no es el que el destinatario alcanza.
         site_url = settings.SITE_URL
         generate_invoice_pdf_and_email_task(str(invoice.uuid), site_url)
+        notificar_factura_emitida(invoice)
         messages.success(
             self.request,
             f'Factura manual generada del período {invoice.period_label} '

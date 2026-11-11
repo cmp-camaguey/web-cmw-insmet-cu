@@ -1,0 +1,57 @@
+{% extends 'layouts/base-auth.html' %}
+{% load static %}
+{% comment %}
+  La confirmación llega desde un enlace en un correo y se abre sin sesión, igual
+  que la baja. Por eso usa el mismo layout de autenticación y el mismo
+  componente `empty`: sin navbar ni menús, con una sola acción de salida. Las dos
+  páginas del flujo tienen que verse como el mismo trámite, no como dos sitios
+  distintos.
+{% endcomment %}
+{% block title %}
+  Confirmación de suscripción
+{% endblock %}
+{% block body %}
+  border-top-wide border-primary d-flex flex-column
+{% endblock %}
+{% block content %}
+  <div class="page page-center">
+    <div class="container-tight py-4">
+      <div class="empty">
+        <div class="empty-img">
+          {% if status == 'ok' %}
+            <img src="{% static 'dist/img/webp/good-news.webp' %}" height="128" alt="" />
+          {% elif status == 'expired' %}
+            <img src="{% static 'dist/img/webp/bad-news.webp' %}" height="128" alt="" />
+          {% else %}
+            <img src="{% static 'dist/img/webp/error.webp' %}" height="128" alt="" />
+          {% endif %}
+        </div>
+        {% if status == 'ok' %}
+          <p class="empty-title">Suscripción confirmada</p>
+          <p class="empty-subtitle text-muted">
+            Recibirá avisos, pronósticos y novedades del Centro en su correo. Cada envío
+            trae su propio enlace de baja, por si algún día quiere dejar de recibirlos.
+          </p>
+        {% elif status == 'expired' %}
+          <p class="empty-title">El enlace caducó</p>
+          <p class="empty-subtitle text-muted">
+            Los enlaces de confirmación valen 72 horas. Vuelva al formulario del inicio y
+            suscríbase de nuevo.
+          </p>
+        {% else %}
+          <p class="empty-title">Enlace no válido</p>
+          <p class="empty-subtitle text-muted">
+            Este enlace ya se usó o no existe. Si quiere suscribirse, use el formulario del
+            inicio.
+          </p>
+        {% endif %}
+        <div class="empty-action">
+          <a href="{% url 'home:landing' %}" class="btn btn-primary">
+            <i class="icon ti ti-arrow-left"></i>
+            Volver al inicio
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

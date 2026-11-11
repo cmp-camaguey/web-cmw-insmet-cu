@@ -66,9 +66,12 @@ class EmergencyBannerUiTests(TestCase):
         self.assertIn('Ver los 2 avisos', html)
 
     def test_sin_avisos_no_hay_franja(self):
-        self.assertNotIn('emergency-banner', self._html())
+        # `data-emergency-banner` es el atributo del `<aside>`: la cadena
+        # `emergency-banner` sola no sirve porque `scripts.html` carga
+        # `emergency-banner.js` en todas las páginas.
+        self.assertNotIn('data-emergency-banner', self._html())
 
     def test_un_aviso_vencido_no_pinta_la_franja(self):
         self._warning(hours=-1)
 
-        self.assertNotIn('emergency-banner', self._html())
+        self.assertNotIn('data-emergency-banner', self._html())

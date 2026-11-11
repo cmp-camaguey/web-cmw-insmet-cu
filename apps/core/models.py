@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
@@ -253,7 +254,9 @@ class CompanySettings(models.Model):
         default_permissions = ()
         permissions = [
             ('view_companysettings', 'Ver'),
+            ('add_companysettings', 'Añadir'),
             ('change_companysettings', 'Editar'),
+            ('delete_companysettings', 'Eliminar'),
         ]
 
     def __str__(self):
@@ -280,6 +283,18 @@ class EmailRecipientList(models.Model):
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, unique=True, verbose_name='Nombre')
     description = models.TextField(blank=True, verbose_name='Descripción')
+    # Marca estable de la lista principal. Antes se buscaba la lista por
+    # `name='newsletter'` y renombrarla rompía la sincronización en silencio.
+    # Es la audiencia automática de avisos, pronósticos y novedades: el operador
+    # no elige lista en ningún formulario.
+    is_default = models.BooleanField(
+        default=False,
+        verbose_name='Lista principal',
+        help_text=(
+            'Recibe todos los envíos automáticos (avisos, pronósticos y novedades). '
+            'Como máximo una lista puede ser la principal.'
+        ),
+    )
 
     class Meta:
         verbose_name = 'Lista de correo'
@@ -291,34 +306,140 @@ class EmailRecipientList(models.Model):
             ('change_emailrecipientlist', 'Editar'),
             ('delete_emailrecipientlist', 'Eliminar'),
         ]
+        constraints = [
+            # Parcial: solo restringe las filas marcadas. Sin la condición,
+            # la base permitiría una sola lista no principal en todo el sitio.
+            models.UniqueConstraint(
+                fields=['is_default'],
+                condition=models.Q(is_default=True),
+                name='uniq_default_list',
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
+    @classmethod
+    def get_default(cls):
+        """La lista principal, o `None` si nadie la marcó.
 
-class EmailRecipient(models.Model):
+        No lanza excepción a propósito: la ausencia de lista principal es un
+        estado válido (una instalación nueva) y quien llama decide qué hacer.
+        """
+        return cls.objects.filter(is_default=True).first()
+
+
+class Subscriber(models.Model):
+    """Una persona que aceptó recibir correo, con la prueba de su consentimiento.
+
+    Separado de la pertenencia a listas (`Subscription`) porque el
+    consentimiento pertenece a la persona: la misma dirección puede estar en
+    «avisos» y en «novedades» sin duplicar la fila ni mentir sobre lo que aceptó.
+
+    Un suscriptor confirmado no se borra nunca: la baja pone `active=False` para
+    conservar a quién se le escribió.
+    """
+
+    class Source(models.TextChoices):
+        LANDING = 'landing', 'Landing'
+        REGISTRO = 'registro', 'Registro'
+        PERFIL = 'perfil', 'Perfil'
+        ADMIN = 'admin', 'Administración'
+
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True, verbose_name='Correo electrónico')
-    recipient_list = models.ForeignKey(
-        EmailRecipientList,
-        on_delete=models.CASCADE,
-        related_name='recipients',
-        verbose_name='Lista de correo',
+    source = models.CharField(
+        max_length=10, choices=Source.choices, default=Source.ADMIN, verbose_name='Origen'
     )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Alta')
+    confirmed_at = models.DateTimeField(null=True, blank=True, verbose_name='Confirmado')
+    confirmation_token = models.UUIDField(
+        null=True, blank=True, unique=True, verbose_name='Token de confirmación'
+    )
+    confirmation_sent_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='Confirmación enviada'
+    )
+    # Marca del único recordatorio que se manda a quien no confirmó. Existe para
+    # que la tarea diaria no reenvíe el mismo correo cada noche: sin esta columna
+    # el filtro sería «sigue pendiente», y eso es cierto para siempre.
+    reminder_sent_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='Recordatorio enviado'
+    )
+    unsubscribe_token = models.UUIDField(
+        default=uuid4, unique=True, editable=False, verbose_name='Token de baja'
+    )
+    active = models.BooleanField(default=True, verbose_name='Activo')
 
     class Meta:
-        verbose_name = 'Correo'
-        verbose_name_plural = 'Correos'
+        verbose_name = 'Suscriptor'
+        verbose_name_plural = 'Suscriptores'
         default_permissions = ()
         permissions = [
-            ('view_emailrecipient', 'Ver'),
-            ('add_emailrecipient', 'Añadir'),
-            ('change_emailrecipient', 'Editar'),
-            ('delete_emailrecipient', 'Eliminar'),
+            ('view_subscriber', 'Ver'),
+            ('add_subscriber', 'Añadir'),
+            ('change_subscriber', 'Editar'),
+            ('delete_subscriber', 'Eliminar'),
         ]
+        indexes = [models.Index(fields=['active', 'confirmed_at'])]
 
     def __str__(self):
         return self.email
+
+    def save(self, *args, **kwargs):
+        # La dirección es la identidad del suscriptor: normalizarla aquí evita
+        # que `Juan@X.cu` y `juan@x.cu` creen dos personas distintas.
+        if self.email:
+            self.email = self.email.strip().lower()
+        super().save(*args, **kwargs)
+
+    @property
+    def is_confirmed(self):
+        return self.confirmed_at is not None
+
+
+class Subscription(models.Model):
+    """Pertenencia de un suscriptor a una lista de correo."""
+
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    subscriber = models.ForeignKey(
+        Subscriber,
+        on_delete=models.CASCADE,
+        related_name='subscriptions',
+        verbose_name='Suscriptor',
+    )
+    recipient_list = models.ForeignKey(
+        EmailRecipientList,
+        on_delete=models.CASCADE,
+        related_name='subscriptions',
+        verbose_name='Lista de correo',
+    )
+    source = models.CharField(
+        max_length=10,
+        choices=Subscriber.Source.choices,
+        default=Subscriber.Source.ADMIN,
+        verbose_name='Origen',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Alta')
+
+    class Meta:
+        verbose_name = 'Suscripción'
+        verbose_name_plural = 'Suscripciones'
+        default_permissions = ()
+        permissions = [
+            ('view_subscription', 'Ver'),
+            ('add_subscription', 'Añadir'),
+            ('change_subscription', 'Editar'),
+            ('delete_subscription', 'Eliminar'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['subscriber', 'recipient_list'],
+                name='uniq_subscription_membership',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.subscriber.email} → {self.recipient_list.name}'
 
 
 class TaskExecutionLog(models.Model):
@@ -357,10 +478,10 @@ class TaskExecutionLog(models.Model):
         indexes = [models.Index(fields=['status', 'enqueued_at'])]
         default_permissions = ()
         permissions = [
-            ('view_taskExecutionLog', 'Can view task execution log'),
-            ('add_taskExecutionLog', 'Can add task execution log'),
-            ('change_taskExecutionLog', 'Can change task execution log'),
-            ('delete_taskExecutionLog', 'Can delete task execution log'),
+            ('view_taskexecutionlog', 'Ver'),
+            ('add_taskexecutionlog', 'Añadir'),
+            ('change_taskexecutionlog', 'Editar'),
+            ('delete_taskexecutionlog', 'Eliminar'),
         ]
 
     def __str__(self):
@@ -494,3 +615,71 @@ class Notification(models.Model):
     @property
     def is_read(self):
         return self.read_at is not None
+
+    @property
+    def link(self):
+        """Ruta navegable del aviso.
+
+        Los avisos creados antes del arreglo guardaron el **nombre** de la URL
+        (`home:warnings_tropical_cyclone`), y en un `href` el navegador lo
+        interpreta como esquema propio y delega en `xdg-open`. Se resuelve al
+        vuelo para no dejar enlaces rotos en filas viejas.
+        """
+        from django.urls import NoReverseMatch, reverse
+
+        if not self.url:
+            return ''
+        if self.url.startswith('/'):
+            return self.url
+        try:
+            return reverse(self.url)
+        except NoReverseMatch:
+            return ''
+
+
+class NotificationPreference(models.Model):
+    """Interruptores del cliente por canal y por fuente (cambio 030, §7.2).
+
+    **Opt-out, no opt-in**: sin fila el aviso está activado. Un cliente nuevo no
+    tiene que configurar nada para recibir lo que le corresponde, y la ausencia
+    de fila es el estado normal.
+
+    Los dos canales son independientes a propósito: apagar el aviso in-app no
+    corta el correo, y apagar el correo no borra la campana. Son dos formas de
+    enterarse del mismo hecho y quien decide no ver una no está pidiendo perder
+    la otra.
+
+    Solo existen filas para fuentes de cliente. Los avisos internos de los
+    admins no pasan por aquí: `notify_superusers` no consulta preferencias.
+    """
+
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_preferences',
+        verbose_name='Usuario',
+    )
+    source = models.CharField(max_length=20, verbose_name='Origen')
+    in_app = models.BooleanField(default=True, verbose_name='Aviso en la campana')
+    email = models.BooleanField(default=True, verbose_name='Aviso por correo')
+
+    class Meta:
+        verbose_name = 'Preferencia de aviso'
+        verbose_name_plural = 'Preferencias de aviso'
+        default_permissions = ()
+        permissions = [
+            ('view_notificationpreference', 'Ver'),
+            ('add_notificationpreference', 'Añadir'),
+            ('change_notificationpreference', 'Editar'),
+            ('delete_notificationpreference', 'Eliminar'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'source'], name='uniq_notification_preference_user_source'
+            ),
+        ]
+        ordering = ['user', 'source']
+
+    def __str__(self):
+        return f'{self.user} · {self.source}'
