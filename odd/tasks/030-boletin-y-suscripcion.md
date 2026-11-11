@@ -61,7 +61,7 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
 - [x] **T5** Endpoint público (suscribir, confirmar, baja) · S5–S8, S12 · inline
 - [x] **T6** Landing operativo · S5, S7 · inline
 - [x] **T7** `Newsletter` + comando + pantalla · S13 · inline
-- [ ] **T8** Verificación completa · S1–S15 · inline
+- [x] **T8** Verificación completa · S1–S15 · inline
 
 ## Log
 
@@ -158,3 +158,16 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   en móvil baja los botones a su propia línea, con el icono a 1.5rem alineado
   al título. Verificado: `apps.dashboard` (111), `test_activity_log` +
   `test_model_strings` (28), `djlint` y capturas reales en 500px y 1280px.
+
+- **L10** (2026-11-11) Cierre de T8 (verificación completa S1–S15) sobre
+  `feat/030-boletin-y-suscripcion` con los tres arreglos visuales de L9 ya
+  commiteados (`c4bf151`, `66dfe65`, `8119bd7`):
+  - `python manage.py check` sin problemas y `makemigrations --check --dry-run`
+    sin cambios.
+  - Suite completa: **1734 pruebas OK** (456 s), sin `EXPECTED_FAILURE` ni
+    saltos nuevos.
+  - `ruff check .` y `ruff format --check .` en verde (407 archivos formateados);
+    `djlint --reformat --check` sin cambios y `djlint --lint` con 0 errores en
+    180 plantillas.
+  - La rama queda 67 commits por delante de `dev`, con el árbol limpio. El PR a
+    `dev` sigue pendiente de decisión del usuario.
