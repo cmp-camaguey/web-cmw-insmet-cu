@@ -27,7 +27,7 @@ permissions:
 jobs:
   detect:
     name: Detect affected apps
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     outputs:
       meteo: ${{ steps.paths.outputs.meteo }}
       api: ${{ steps.paths.outputs.api }}
