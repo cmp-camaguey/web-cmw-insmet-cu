@@ -17,8 +17,24 @@
 (function () {
   'use strict';
 
-  initReadOnClick();
-  initDeleteModal();
+  // El modal de borrado vive en `{% block modal %}` del layout base, y ese
+  // bloque se renderiza DESPUES del bloque de pagina donde se carga este
+  // archivo. Al ejecutarse el script el nodo todavia no existe, `initDeleteModal`
+  // salia temprano y el formulario quedaba con `action=""`: al confirmar, el
+  // navegador hacia POST a la pagina del historial, que solo acepta GET, y el
+  // usuario veia un 405. `DOMContentLoaded` llega con el documento completo y,
+  // de paso, despues de los `defer` del layout (tabler.min.js), asi que
+  // Bootstrap ya esta listo.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  function init() {
+    initReadOnClick();
+    initDeleteModal();
+  }
 
   function initReadOnClick() {
     var root = document.getElementById('notifications-navbar');
@@ -83,13 +99,21 @@
     }
 
     var text = document.getElementById('notification-delete-text');
+    var submit = form.querySelector('button[type="submit"]');
 
     modal.addEventListener('show.bs.modal', function (event) {
       var trigger = event.relatedTarget;
       if (!trigger) {
         return;
       }
-      form.setAttribute('action', trigger.getAttribute('data-delete-url') || '');
+      var url = trigger.getAttribute('data-delete-url') || '';
+      form.setAttribute('action', url);
+      // El boton nace deshabilitado: sin accion no hay nada que enviar, y
+      // habilitarlo es la unica forma de que el submit llegue a la vista de
+      // borrado en vez de a la pagina actual.
+      if (submit) {
+        submit.disabled = !url;
+      }
       if (text) {
         text.textContent =
           trigger.getAttribute('data-delete-message') || '¿Eliminar esta notificación?';

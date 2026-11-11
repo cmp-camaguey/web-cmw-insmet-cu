@@ -20,9 +20,14 @@ BADGE_CAP = 9
 def notifications_navbar(context):
     """Datos del icono de avisos, o `visible=False` para no renderizarlo.
 
-    Tres condiciones para verlo, y ninguna sobra: el sistema encendido (apagarlo
-    es una decision de operacion, no un permiso), sesion iniciada, y superusuario
-    (los destinatarios de 026 son los admins).
+    Desde el cambio 030 la campana es de cualquiera con sesión: los admins ven
+    sus avisos operativos y los clientes los de sus facturas y servicios. No hace
+    falta comprobar rol porque el queryset siempre filtra por `recipient`: un
+    usuario sin avisos ve el icono con el badge apagado, que es el estado
+    correcto y no una fuga.
+
+    Lo que sí se comprueba es el interruptor global del sistema: apagarlo es una
+    decisión de operación, no un permiso.
     """
     request = context.get('request')
     user = getattr(request, 'user', None)
@@ -30,8 +35,6 @@ def notifications_navbar(context):
     if not getattr(settings, 'NOTIFICATIONS_ENABLED', True):
         return {'visible': False}
     if user is None or not getattr(user, 'is_authenticated', False):
-        return {'visible': False}
-    if not user.is_superuser:
         return {'visible': False}
 
     # Import local: el tag se carga en el navbar de todas las paginas del panel,

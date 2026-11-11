@@ -1,6 +1,8 @@
 import re
+from datetime import UTC, datetime
 
 from django import template
+from django.utils import timezone
 from django.utils.html import escape, mark_safe
 from django.utils.safestring import SafeData
 from django.utils.timesince import timesince
@@ -56,6 +58,36 @@ def time_since(value):
     if not value:
         return ''
     return _('hace %(timesince)s') % {'timesince': timesince(value)}
+
+
+_ISO_DATETIME = re.compile(
+    r'\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?'
+)
+
+
+@register.filter
+def local_datetime_in_text(value):
+    """Reescribe las fechas ISO incrustadas en un texto a la hora local.
+
+    `ActivityLog.object_repr` guarda el `str(obj)` del momento, así que las
+    filas anteriores al arreglo de los `__str__` conservan
+    `2026-11-07 22:41:39.815152+00:00`. El registro es un histórico y no se
+    reescribe lo guardado: se presenta legible al leerlo.
+    """
+    if not value:
+        return ''
+
+    def _reemplazo(match):
+        texto = match.group(0).replace('Z', '+00:00')
+        try:
+            momento = datetime.fromisoformat(texto)
+        except ValueError:
+            return match.group(0)
+        if timezone.is_naive(momento):
+            momento = momento.replace(tzinfo=UTC)
+        return timezone.localtime(momento).strftime('%d/%m/%Y %H:%M')
+
+    return _ISO_DATETIME.sub(_reemplazo, str(value))
 
 
 @register.filter(name='remove_images_and_special_chars')

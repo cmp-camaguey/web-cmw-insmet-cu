@@ -25,7 +25,7 @@
           contador: el estado de despliegue no lo lleva, porque leer archivos y
           consultar el remoto no es algo que pueda pedir cada cliente.
         {% endcomment %}
-        <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
+        <span class="badge bg-red-lt badge-pill position-absolute top-0 start-100 translate-middle{% if not unread %}
                        d-none{% endif %}"
               id="notifications-navbar-badge"
               aria-hidden="true">{{ badge }}</span>
@@ -44,7 +44,7 @@
                 marca leida y navega (static/dist/js/notifications.js); el
                 `href` sigue siendo un enlace real para no romper ctrl+clic.
               {% endcomment %}
-              <a href="{% if notification.url %}{{ notification.url }}{% else %}#{% endif %}"
+              <a href="{% if notification.link %}{{ notification.link }}{% else %}#{% endif %}"
                  class="dropdown-item text-wrap py-2"
                  data-notification-read="{% url 'dashboard:notification_read' notification.uuid %}">
                 <span class="d-flex align-items-start gap-2">

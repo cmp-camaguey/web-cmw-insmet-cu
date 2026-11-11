@@ -194,11 +194,12 @@ Consecuencia útil: un colaborador futuro con `write` puede mergear en `dev`, pe
 
 - **UI Framework**: exclusivamente Tabler.io (Bootstrap 5). No usar otros frameworks CSS/UI.
 - **Permisos**: `default_permissions = ()` + 4 personalizados: `view_*`, `add_*`, `change_*`, `delete_*` (en español). NO asumas que existen por defecto.
-- **Middleware**: `CheckUserProfileMiddleware` → `MaintenanceModeMiddleware` (bloquea no-superusers excepto `/login/`)
+- **Middleware**: `CheckUserProfileMiddleware` → `MaintenanceModeMiddleware` (bloquea no-superusers excepto `/login/` y `/logout/`: sin la segunda, un usuario no-superuser que quedó con sesión abierta no puede cerrarla durante el mantenimiento)
 - **Auth**: LDAP opcional (`LDAP3Backend`) → fallback `ModelBackend`; Profile se crea por señal `post_save`; usuarios LDAP con `is_ldap=True`
 - **UUIDs** en URLs de modelos expuestos (no `pk`)
 - **FileHandlerMixin** obligatorio en todo modelo que tenga FileField/ImageField
-- **Soft delete** en modelos de negocio con datos sensibles (Customer, Service, ServiceSubscription, Invoice, Contract, Certificate, Warning). NO forzar en modelos auxiliares/transaccionales (InvoiceItem, ForecastRegions, EmailRecipient).
+- **Soft delete** en modelos de negocio con datos sensibles (Customer, Service, ServiceSubscription, Invoice, Contract, Certificate). NO forzar en modelos auxiliares/transaccionales (InvoiceItem, ForecastRegions, EmailRecipient).
+  - **`Warning` se borra físicamente, a propósito.** Estuvo en esta lista por error: el código nunca lo implementó así, y la decisión es que no lo haga. La protección contra un borrado accidental es el permiso `delete_warning` asignado por rol, no `record_active`. Si algún día hace falta historial de avisos, va en un modelo de auditoría, no reciclando el borrado lógico.
 - **Paginación**: `paginate_by = 10` (convención uniforme) en vistas SIN DataTables. Las vistas con DataTables cargan todos los registros y delegan la paginación al cliente — NO llevan `paginate_by`. Esto aplica por igual a listas públicas de servicios por cards (catálogo comercial y Mis Servicios), que usan `paginate_by = 10` para proteger la UX móvil; los tests codifican ese valor.
 - **Migrations** versionadas: `makemigrations` + commit en el mismo PR; el gate es `makemigrations --check --dry-run`
 - **Estáticos**: `static/` dev, `staticfiles/` prod con WhiteNoise

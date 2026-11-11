@@ -1,9 +1,9 @@
-"""UI y permisos de los avisos operativos (cambio 026, fase 3).
+"""UI y permisos de los avisos (cambio 026, fase 3; aislamiento por rol en 030).
 
 Lo que se prueba aqui no es el modelo —eso esta en `apps/core/tests`— sino las
 tres cosas que solo se rompen en la capa web: que el queryset no se escape del
-destinatario, que un no-superusuario no entre, y que el contador del navbar diga
-lo mismo que la lista.
+destinatario, que un cliente entre a sus avisos sin ver los de nadie mas, y que
+el contador del navbar diga lo mismo que la lista.
 """
 
 from datetime import timedelta
@@ -67,10 +67,16 @@ def _navbar_html(user):
 
 
 class NotificationListPermissionTests(TestCase):
-    def test_el_historial_es_solo_para_superusuarios(self):
-        self.client.force_login(_user(staff=True))
+    def test_un_cliente_entra_a_su_propio_historial(self):
+        """Desde 030 el cliente tiene avisos propios y su lista es la misma vista."""
+        cliente = _user('cliente-avisos')
+        _notification(cliente, title='Su factura')
+
+        self.client.force_login(cliente)
         response = self.client.get(reverse('dashboard:notifications'))
-        self.assertEqual(response.status_code, 403)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Su factura')
 
     def test_un_anonimo_no_entra(self):
         response = self.client.get(reverse('dashboard:notifications'))
@@ -89,12 +95,14 @@ class NotificationListPermissionTests(TestCase):
         response = self.client.get(reverse('dashboard:notifications_read_all'))
         self.assertEqual(response.status_code, 405)
 
-    def test_un_no_superusuario_no_puede_marcar_leida(self):
+    def test_un_usuario_no_puede_marcar_leida_la_de_otro(self):
         admin = _superuser()
         aviso = _notification(admin)
         self.client.force_login(_user('intruso'))
         response = self.client.post(reverse('dashboard:notification_read', args=[aviso.uuid]))
-        self.assertEqual(response.status_code, 403)
+        # 404 y no 403: la fila de otro destinatario no existe para este usuario,
+        # y decir «existe pero no puedes» ya filtraría que hay algo ahí.
+        self.assertEqual(response.status_code, 404)
         aviso.refresh_from_db()
         self.assertIsNone(aviso.read_at)
 
@@ -113,6 +121,18 @@ class NotificationListTests(TestCase):
 
         self.assertContains(response, 'Mio')
         self.assertNotContains(response, 'Ajeno')
+
+    def test_un_cliente_no_ve_los_avisos_del_admin(self):
+        """El rol no abre la bandeja: la abre el destinatario de cada fila."""
+        cliente = _user('cliente-lista')
+        _notification(cliente, title='Su factura')
+        _notification(self.admin, title='Aviso interno')
+
+        self.client.force_login(cliente)
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertContains(response, 'Su factura')
+        self.assertNotContains(response, 'Aviso interno')
 
     def test_no_muestra_avisos_vencidos_aunque_no_se_hayan_podado(self):
         _notification(self.admin, title='Vigente')
@@ -172,6 +192,55 @@ class NotificationListTests(TestCase):
             f'data-delete-url="{reverse("dashboard:notifications_delete_all")}"',
         )
         self.assertNotContains(response, 'return confirm(')
+
+    def test_la_fecha_del_aviso_se_muestra_en_relativo(self):
+        """`09/11/2026 09:41` obliga a calcular; el panel usa «hace …»."""
+        aviso = _notification(self.admin, title='Mia')
+        Notification.objects.filter(pk=aviso.pk).update(
+            created_at=timezone.now() - timedelta(hours=11, minutes=20)
+        )
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        aviso.refresh_from_db()
+        absoluta = timezone.localtime(aviso.created_at).strftime('%d/%m/%Y %H:%M')
+        # `timesince` traduce con espacios duros (nbsp): se afirma el prefijo
+        # estable, no la cadena completa.
+        self.assertContains(response, 'hace 11')
+        self.assertNotContains(response, absoluta)
+
+    def test_los_botones_de_accion_son_de_icono_con_tooltip(self):
+        aviso = _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        self.assertContains(response, 'btn btn-icon btn-outline-success btn-sm')
+        self.assertContains(response, 'btn btn-icon btn-outline-danger btn-sm')
+        self.assertContains(response, 'ti ti-check')
+        self.assertContains(
+            response,
+            f'action="{reverse("dashboard:notification_read", args=[aviso.uuid])}"',
+        )
+        # El tooltip va en el icono: el boton de eliminar ya usa
+        # `data-bs-toggle="modal"` y un elemento no puede llevar los dos.
+        self.assertContains(response, 'data-bs-toggle="tooltip"')
+        self.assertContains(response, 'title="Marcar como leída"')
+
+    def test_el_submit_del_modal_nace_deshabilitado(self):
+        """Sin accion el formulario heredaria la URL del historial y daria 405.
+
+        El modal se renderiza despues del script que lo configura: si el script
+        no llegara a engancharse, el boton deshabilitado es lo unico que impide
+        que el navegador haga POST a esta misma pagina, que solo acepta GET.
+        """
+        _notification(self.admin, title='Mia')
+
+        response = self.client.get(reverse('dashboard:notifications'))
+
+        html = response.content.decode()
+        form_start = html.index('id="notification-delete-form"')
+        submit = html.index('type="submit"', form_start)
+        self.assertIn('disabled', html[submit : submit + 200])
 
 
 class NotificationMarkReadTests(TestCase):
@@ -249,11 +318,14 @@ class NotificationNavbarTests(TestCase):
         self.assertIn('notifications-navbar', html)
         self.assertIn('Aviso visible', html)
 
-    def test_el_icono_no_aparece_para_un_usuario_normal(self):
-        self.assertEqual(_navbar_html(_user()).strip(), '')
+    def test_el_icono_aparece_para_un_cliente_sin_avisos(self):
+        """El icono no es un permiso: sin avisos se ve con el badge apagado."""
+        html = _navbar_html(_user())
 
-    def test_el_icono_no_aparece_para_un_staff_sin_superusuario(self):
-        self.assertEqual(_navbar_html(_user('staff', staff=True)).strip(), '')
+        self.assertIn('notifications-navbar', html)
+
+    def test_el_icono_aparece_para_un_staff(self):
+        self.assertIn('notifications-navbar', _navbar_html(_user('staff', staff=True)))
 
     @override_settings(NOTIFICATIONS_ENABLED=False)
     def test_el_icono_no_aparece_con_el_sistema_apagado(self):
@@ -388,11 +460,11 @@ class NotificationDeleteTests(TestCase):
         self.assertEqual(response.status_code, 405)
         self.assertEqual(Notification.objects.filter(recipient=self.admin).count(), 1)
 
-    def test_un_no_superusuario_no_puede_eliminar(self):
+    def test_un_usuario_no_puede_eliminar_la_de_otro(self):
         aviso = _notification(self.admin, title='Mia')
         self.client.force_login(_user('intruso'))
 
         response = self.client.post(reverse('dashboard:notification_delete', args=[aviso.uuid]))
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 404)
         self.assertTrue(Notification.objects.filter(pk=aviso.pk).exists())

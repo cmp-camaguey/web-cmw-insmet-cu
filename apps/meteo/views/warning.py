@@ -148,13 +148,14 @@ class WarningCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateView)
         messages.success(
             self.request, f'{cfg["title_create"]} ha sido creado con éxito.', extra_tags='success'
         )
-        mail_send(
-            self.request,
-            self.object,
-            cfg['subject_create'],
-            cfg['mail_url'],
-            attachment_name=f'alerta_{self.object.date.strftime("%Y-%m-%d")}.pdf',
-        )
+        if form.cleaned_data.get('send_email'):
+            mail_send(
+                self.request,
+                self.object,
+                cfg['subject_create'],
+                cfg['mail_url'],
+                attachment_name=f'alerta_{self.object.date.strftime("%Y-%m-%d")}.pdf',
+            )
 
         return response
 
@@ -202,11 +203,6 @@ class WarningUpdateView(
         return kwargs
 
     def form_valid(self, form):
-        original_object = self.get_object(queryset=None)
-        relevant_fields = ['summary', 'file', 'valid_until']
-        has_changes = any(
-            form.cleaned_data[field] != getattr(original_object, field) for field in relevant_fields
-        )
         cfg = self.get_config()
 
         response = super().form_valid(form)
@@ -218,7 +214,7 @@ class WarningUpdateView(
             message=f'Se actualizó {cfg["title_update"]}: {self.object.date.strftime("%d-%m-%Y")}.',
         )
 
-        if has_changes:
+        if form.cleaned_data.get('send_email'):
             mail_send(
                 self.request,
                 self.object,

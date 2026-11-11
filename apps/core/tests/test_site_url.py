@@ -21,7 +21,7 @@ from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
-from apps.core.models import EmailRecipient, EmailRecipientList
+from apps.core.tests.base import add_confirmed_subscriber, get_default_list
 from apps.core.utils import mail_send
 from apps.meteo.models import Warning
 
@@ -48,18 +48,14 @@ class MailSendUsesSiteUrlTests(TestCase):
             first_name='Ana',
             last_name='Norte',
         )
-        cls.recipient_list = EmailRecipientList.objects.create(name='Lista de SITE_URL')
-        EmailRecipient.objects.create(
-            email='destinatario@example.com',
-            recipient_list=cls.recipient_list,
-        )
+        cls.recipient_list = get_default_list()
+        add_confirmed_subscriber(cls.recipient_list, 'destinatario@example.com')
         cls.warning = Warning.objects.create(
             warning_type='early',
             title='Aviso de prueba',
             user=cls.admin,
             summary='Resumen del aviso',
             valid_until=timezone.now() + timedelta(days=1),
-            email_recipient_list=cls.recipient_list,
         )
 
     def _request_desde_la_red_interna(self):
