@@ -45,4 +45,6 @@
       `d5febab`
 - [x] 6.4 `.env` local apuntado a PostgreSQL, `add_stations_data` ejecutado (6
       estaciones) y superusuario creado por el desarrollador
-- [ ] 6.5 `gentle-ai sdd-archive` cuando esté en `main`
+- [x] 6.5 `gentle-ai sdd-archive` cuando esté en `main` — hecho: archivado el
+      2026-11-11 en `openspec/changes/archive/2026-11-11-028-dev-postgres-obligatorio/`,
+      con el spec promovido a `openspec/specs/dev-postgres-obligatorio/spec.md`
