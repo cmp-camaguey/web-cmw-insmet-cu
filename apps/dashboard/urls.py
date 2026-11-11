@@ -12,6 +12,10 @@ from apps.dashboard.views.dashboard.notifications import (
     NotificationReadAllView,
     NotificationReadView,
 )
+from apps.dashboard.views.dashboard.site_monitoring import (
+    SiteMonitoringDataView,
+    SiteMonitoringView,
+)
 from apps.dashboard.views.dashboard.update import UpdateRequestView, UpdateStatusView
 
 app_name = 'dashboard'
@@ -23,6 +27,17 @@ urlpatterns = [
     path('tasks/', TaskMonitoringView.as_view(), name='tasks'),
     # Acciones sobre un registro de tarea (reintentar/limpiar)
     path('tasks/<uuid:uuid>/action/', TaskMonitoringActionView.as_view(), name='tasks_action'),
+    # Monitoreo del sitio en tiempo real (feature 034)
+    path(
+        'monitoring/',
+        SiteMonitoringView.as_view(),
+        name='monitoring',
+    ),
+    path(
+        'monitoring/data/',
+        SiteMonitoringDataView.as_view(),
+        name='monitoring_data',
+    ),
     # Actualizaciones del servidor (estado y petición de despliegue)
     path('update/', UpdateStatusView.as_view(), name='update_status'),
     path('update/request/', UpdateRequestView.as_view(), name='update_request'),

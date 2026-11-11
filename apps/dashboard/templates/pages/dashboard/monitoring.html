@@ -1,0 +1,772 @@
+{% extends 'layouts/dashboard.html' %}
+{% load static monitoring_tags %}
+{% block extrastyle %}
+  <style>
+    .monitoring-spark {
+      width: 100%;
+      height: 44px;
+      display: block;
+    }
+
+    .monitoring-cores {
+      align-items: flex-end;
+      height: 26px;
+    }
+
+    .monitoring-core {
+      width: 8px;
+      height: 24px;
+      background: var(--tblr-border-color);
+      border-radius: 2px;
+      display: flex;
+      align-items: flex-end;
+      overflow: hidden;
+    }
+
+    .monitoring-core-bar {
+      width: 100%;
+      display: block;
+    }
+  </style>
+{% endblock %}
+{% block page_header %}
+  <div class="row g-2 align-items-center">
+    <div class="col">
+      <div class="page-pretitle">{{ parent }}</div>
+      <h2 class="page-title">{{ title }}</h2>
+    </div>
+    <div class="col-auto ms-auto d-print-none">
+      <div class="btn-list">
+        <span class="status status-{{ snapshot.status.level|state_class }} me-2"
+              data-status-dot
+              data-bs-toggle="tooltip"
+              title="Estado general del sitio"></span>
+        <span class="text-secondary small me-2">
+          Actualizado a las <span data-live="generated_at_display"
+                                  data-fmt="text">{{ snapshot.generated_at_display }}</span>
+        </span>
+        <span class="text-danger small d-none me-2" data-connection-error>Sin conexión con el panel</span>
+        <button type="button"
+                class="btn btn-outline-secondary btn-sm"
+                id="monitoringToggle"
+                data-refresh-ms="{{ refresh_ms }}">
+          <i class="icon ti ti-pause me-1"></i>
+          <span data-toggle-label>Pausar</span>
+        </button>
+        <button type="button"
+                class="btn btn-outline-secondary btn-sm"
+                id="monitoringRefresh">
+          <i class="icon ti ti-refresh me-1"></i>
+          Actualizar
+        </button>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block content %}
+  <div id="monitoringRoot"
+       data-url="{{ data_url }}"
+       data-refresh-ms="{{ refresh_ms }}">
+    {% if not snapshot.enabled %}
+      <div class="alert alert-warning d-flex align-items-center" role="alert">
+        <i class="icon ti ti-alert-triangle me-2"></i>
+        <div>
+          La captura de métricas está desactivada (<code>MONITORING_ENABLED=False</code>).
+          Se muestran los recursos del servidor y los datos ya guardados, pero no se
+          registra tráfico nuevo.
+        </div>
+      </div>
+    {% endif %}
+    <div class="alert alert-{% if snapshot.status.level == 'down' %}danger{% else %}warning{% endif %}
+                d-flex align-items-start{% if not snapshot.status.reasons %} d-none{% endif %}"
+         role="alert"
+         data-status-alert>
+      <i class="icon ti ti-alert-triangle me-2 mt-1"></i>
+      <div>
+        <h4 class="alert-title" data-status-alert-title>Estado {{ snapshot.status.label }}</h4>
+        <ul class="mb-0 ps-3" data-status-reasons>
+          {% for reason in snapshot.status.reasons %}<li>{{ reason }}</li>{% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="row row-cards">
+      <!-- Fila 1: las cuatro cifras que se miran primero -->
+      <div class="col-sm-6 col-lg-3">
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-3">
+              <div class="subheader">Estado del sitio</div>
+              <div class="ms-auto">
+                <i class="icon ti ti-traffic-lights text-secondary"></i>
+              </div>
+            </div>
+            <div class="d-flex align-items-baseline">
+              <div class="h1 mb-0 me-2" data-status-label>{{ snapshot.status.label }}</div>
+              <span class="badge bg-{{ snapshot.status.level|state_class }}-lt"
+                    data-status-badge>{{ snapshot.status.level }}</span>
+            </div>
+            <div class="text-secondary small mt-2">Base de datos, caché, cola de tareas y errores 5xx.</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-3">
+              <div class="subheader">Disponibilidad 24 h</div>
+              <div class="ms-auto">
+                <i class="icon ti ti-activity text-secondary"></i>
+              </div>
+            </div>
+            <div class="h1 mb-0" data-live="uptime.percent" data-fmt="pct">{{ snapshot.uptime.percent|pct }}</div>
+            <div class="text-secondary small mt-2">
+              <span data-live="uptime.samples" data-fmt="int">{{ snapshot.uptime.samples|num }}</span>
+              peticiones ·
+              <span data-live="uptime.errors" data-fmt="int">{{ snapshot.uptime.errors|num }}</span>
+              errores 5xx
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-3">
+              <div class="subheader">Tiempo de respuesta (p95)</div>
+              <div class="ms-auto">
+                <i class="icon ti ti-gauge text-secondary"></i>
+              </div>
+            </div>
+            <div class="h1 mb-0" data-live="http.p95_ms" data-fmt="ms">{{ snapshot.http.p95_ms|ms }}</div>
+            <div class="text-secondary small mt-2">
+              media <span data-live="http.avg_ms" data-fmt="ms">{{ snapshot.http.avg_ms|ms }}</span>
+              · máx <span data-live="http.max_ms" data-fmt="ms">{{ snapshot.http.max_ms|ms }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-3">
+              <div class="subheader">Visitantes activos</div>
+              <div class="ms-auto">
+                <i class="icon ti ti-users text-secondary"></i>
+              </div>
+            </div>
+            <div class="h1 mb-0" data-live="traffic.visitors_5m" data-fmt="int">
+              {{ snapshot.traffic.visitors_5m|num }}
+            </div>
+            <div class="text-secondary small mt-2">
+              últimos 5 min ·
+              <span data-live="traffic.visitors_30m" data-fmt="int">{{ snapshot.traffic.visitors_30m|num }}</span>
+              en 30 min
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Fila 2: disponibilidad en bloques + incidente -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-1">
+              <div>
+                <div class="subheader">Disponibilidad de las últimas 24 horas</div>
+                <div class="h3 mb-0">Un bloque cada 15 minutos</div>
+              </div>
+              <div class="ms-auto text-end small text-secondary">
+                <div data-incident-line>
+                  {% if snapshot.incident.active %}
+                    <span class="text-danger">
+                      <i class="icon ti ti-alert-triangle"></i>
+                      Incidente activo: {{ snapshot.incident.duration_display|dash }}
+                    </span>
+                  {% else %}
+                    Sin incidentes activos
+                  {% endif %}
+                </div>
+                <div class="mt-1">TTFB del servidor, sin red ni navegador</div>
+              </div>
+            </div>
+            <div class="tracking mt-3" data-uptime-slots>
+              {% for slot in snapshot.uptime.slots %}
+                <div class="tracking-block bg-{{ slot.state|state_class }}"
+                     title="{{ slot.label }} · {{ slot.total }} peticiones · {{ slot.errors }} errores"></div>
+              {% endfor %}
+            </div>
+            <div class="d-flex justify-content-between text-secondary small mt-1">
+              <span>hace 24 h</span>
+              <span>hace 12 h</span>
+              <span>ahora</span>
+            </div>
+            <div class="d-flex flex-wrap gap-3 mt-2 small text-secondary">
+              <span><span class="status status-success me-1"></span>Sin errores</span>
+              <span><span class="status status-warning me-1"></span>Algún 5xx</span>
+              <span><span class="status status-danger me-1"></span>Todo 5xx</span>
+              <span><span class="status status-secondary me-1"></span>Sin datos</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Fila 3: recursos del servidor -->
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-cpu me-1"></i> Recursos del servidor
+            </h3>
+            <div class="card-actions text-secondary small">
+              uptime del host
+              <span class="ms-1"
+                    data-live="system.host_uptime_display"
+                    data-fmt="text">{{ snapshot.system.host_uptime_display|dash }}</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-baseline">
+                <span>CPU</span>
+                <strong data-live="system.cpu.percent" data-fmt="pct">{{ snapshot.system.cpu.percent|pct }}</strong>
+              </div>
+              <div class="progress progress-sm mt-1">
+                <div class="progress-bar"
+                     role="progressbar"
+                     data-live-width="system.cpu.percent"
+                     style="width: {{ snapshot.system.cpu.percent|default:0 }}%"></div>
+              </div>
+              <div class="d-flex flex-wrap gap-1 mt-2 monitoring-cores" data-cores>
+                {% for core in snapshot.system.cpu.cores %}
+                  <span class="monitoring-core"
+                        title="Núcleo {{ forloop.counter }}: {{ core }}%">
+                    <span class="monitoring-core-bar bg-{% if core >= 90 %}danger{% elif core >= 70 %}warning{% else %}primary{% endif %}"
+                          style="height: {{ core }}%"></span>
+                  </span>
+                {% endfor %}
+              </div>
+              <div class="text-secondary small mt-1">
+                <span data-live="system.cpu.count" data-fmt="int">{{ snapshot.system.cpu.count|dash }}</span>
+                núcleos
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-baseline">
+                <span>Memoria RAM</span>
+                <strong data-live="system.memory.percent"
+                        data-fmt="pct">{{ snapshot.system.memory.percent|pct }}</strong>
+              </div>
+              <div class="progress progress-sm mt-1">
+                <div class="progress-bar bg-{% if snapshot.system.memory.percent >= 90 %}danger{% elif snapshot.system.memory.percent >= 70 %}warning{% else %}success{% endif %}"
+                     role="progressbar"
+                     data-live-width="system.memory.percent"
+                     data-live-class="memory"
+                     style="width: {{ snapshot.system.memory.percent|default:0 }}%"></div>
+              </div>
+              <div class="text-secondary small mt-1">
+                <span data-live="system.memory.used" data-fmt="text">{{ snapshot.system.memory.used|dash }}</span>
+                de
+                <span data-live="system.memory.total" data-fmt="text">{{ snapshot.system.memory.total|dash }}</span>
+                · disponible
+                <span data-live="system.memory.available"
+                      data-fmt="text">{{ snapshot.system.memory.available|dash }}</span>
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-baseline">
+                <span>Swap</span>
+                <strong data-live="system.swap.percent" data-fmt="pct">{{ snapshot.system.swap.percent|pct }}</strong>
+              </div>
+              <div class="progress progress-sm mt-1">
+                <div class="progress-bar bg-{% if snapshot.system.swap.percent >= 50 %}warning{% else %}success{% endif %}"
+                     role="progressbar"
+                     data-live-width="system.swap.percent"
+                     data-live-class="swap"
+                     style="width: {{ snapshot.system.swap.percent|default:0 }}%"></div>
+              </div>
+              <div class="text-secondary small mt-1">
+                <span data-live="system.swap.used" data-fmt="text">{{ snapshot.system.swap.used|dash }}</span>
+                de
+                <span data-live="system.swap.total" data-fmt="text">{{ snapshot.system.swap.total|dash }}</span>
+              </div>
+            </div>
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-baseline">
+                <span>Disco (<code>{{ snapshot.disk_path }}</code>)</span>
+                <strong data-live="system.disk.percent" data-fmt="pct">{{ snapshot.system.disk.percent|pct }}</strong>
+              </div>
+              <div class="progress progress-sm mt-1">
+                <div class="progress-bar bg-{% if snapshot.system.disk.percent >= 90 %}danger{% elif snapshot.system.disk.percent >= 75 %}warning{% else %}success{% endif %}"
+                     role="progressbar"
+                     data-live-width="system.disk.percent"
+                     data-live-class="disk"
+                     style="width: {{ snapshot.system.disk.percent|default:0 }}%"></div>
+              </div>
+              <div class="text-secondary small mt-1">
+                <span data-live="system.disk.used" data-fmt="text">{{ snapshot.system.disk.used|dash }}</span>
+                de
+                <span data-live="system.disk.total" data-fmt="text">{{ snapshot.system.disk.total|dash }}</span>
+                · libre
+                <span data-live="system.disk.free" data-fmt="text">{{ snapshot.system.disk.free|dash }}</span>
+              </div>
+            </div>
+            <div class="datagrid">
+              <div class="datagrid-item">
+                <div class="datagrid-title">Red recibida</div>
+                <div class="datagrid-content">
+                  <span data-live="system.network.recv_per_s"
+                        data-fmt="text">{{ snapshot.system.network.recv_per_s|dash }}/s</span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Red enviada</div>
+                <div class="datagrid-content">
+                  <span data-live="system.network.sent_per_s"
+                        data-fmt="text">{{ snapshot.system.network.sent_per_s|dash }}/s</span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Disco leído</div>
+                <div class="datagrid-content">
+                  <span data-live="system.disk_io.read_per_s"
+                        data-fmt="text">{{ snapshot.system.disk_io.read_per_s|dash }}/s</span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Disco escrito</div>
+                <div class="datagrid-content">
+                  <span data-live="system.disk_io.write_per_s"
+                        data-fmt="text">{{ snapshot.system.disk_io.write_per_s|dash }}/s</span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Carga (1 / 5 / 15 min)</div>
+                <div class="datagrid-content">
+                  <span data-live="system.load.one" data-fmt="num2">{{ snapshot.system.load.one|dash }}</span>
+                  /
+                  <span data-live="system.load.five" data-fmt="num2">{{ snapshot.system.load.five|dash }}</span>
+                  /
+                  <span data-live="system.load.fifteen" data-fmt="num2">{{ snapshot.system.load.fifteen|dash }}</span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Worker (PID {{ snapshot.system.process.pid|dash }})</div>
+                <div class="datagrid-content">
+                  <span data-live="system.process.rss" data-fmt="text">{{ snapshot.system.process.rss|dash }}</span>
+                  RSS ·
+                  <span data-live="system.process.threads"
+                        data-fmt="int">{{ snapshot.system.process.threads|dash }}</span>
+                  hilos ·
+                  <span data-live="system.process.uptime_display"
+                        data-fmt="text">{{ snapshot.system.process.uptime_display|dash }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Fila 3b: dependencias + HTTP -->
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-database me-1"></i> Dependencias
+            </h3>
+          </div>
+          <div class="card-body">
+            <div class="datagrid mb-3">
+              <div class="datagrid-item">
+                <div class="datagrid-title">Base de datos</div>
+                <div class="datagrid-content">
+                  <span class="badge bg-{% if snapshot.health.database.ok %}success{% else %}danger{% endif %}-lt"
+                        data-state-badge="health.database.ok">
+                    {% if snapshot.health.database.ok %}Responde{% else %}No responde{% endif %}
+                  </span>
+                  <span class="text-secondary small ms-1"
+                        data-live="health.database.latency_ms"
+                        data-fmt="ms">{{ snapshot.health.database.latency_ms|ms }}</span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Caché</div>
+                <div class="datagrid-content">
+                  <span class="badge bg-{% if snapshot.health.cache.ok %}success{% else %}danger{% endif %}-lt"
+                        data-state-badge="health.cache.ok">
+                    {% if snapshot.health.cache.ok %}Responde{% else %}No responde{% endif %}
+                  </span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Worker de tareas (Huey)</div>
+                <div class="datagrid-content">
+                  <span class="badge bg-{% if snapshot.health.queue.ok %}success{% else %}warning{% endif %}-lt"
+                        data-state-badge="health.queue.ok">
+                    {% if snapshot.health.queue.ok %}Al día{% else %}Atrasado{% endif %}
+                  </span>
+                  <span class="text-secondary small ms-1">
+                    <span data-live="health.queue.stale" data-fmt="int">{{ snapshot.health.queue.stale|dash }}</span>
+                    sin arrancar ·
+                    <span data-live="health.queue.errors" data-fmt="int">{{ snapshot.health.queue.errors|dash }}</span>
+                    con error
+                  </span>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">Peticiones simultáneas</div>
+                <div class="datagrid-content">
+                  <strong data-live="http.concurrency" data-fmt="int">{{ snapshot.http.concurrency|dash }}</strong>
+                  <span class="text-secondary small">(último minuto)</span>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex justify-content-between align-items-baseline mb-1">
+              <div class="subheader">Códigos de estado ({{ snapshot.http.window_minutes }} min)</div>
+              <div class="text-secondary small">
+                <span data-live="http.total" data-fmt="int">{{ snapshot.http.total|num }}</span>
+                peticiones
+              </div>
+            </div>
+            <div class="progress progress-lg mb-2">
+              <div class="progress-bar bg-success"
+                   role="progressbar"
+                   style="width: {{ snapshot.http.status.2xx|percent_of:snapshot.http.total }}%"></div>
+              <div class="progress-bar bg-info"
+                   role="progressbar"
+                   style="width: {{ snapshot.http.status.3xx|percent_of:snapshot.http.total }}%"></div>
+              <div class="progress-bar bg-warning"
+                   role="progressbar"
+                   style="width: {{ snapshot.http.status.4xx|percent_of:snapshot.http.total }}%"></div>
+              <div class="progress-bar bg-danger"
+                   role="progressbar"
+                   style="width: {{ snapshot.http.status.5xx|percent_of:snapshot.http.total }}%"></div>
+            </div>
+            <div class="d-flex flex-wrap gap-3 small">
+              <span><span class="status status-success me-1"></span>2xx
+                <strong data-live="http.status.2xx" data-fmt="int">{{ snapshot.http.status.2xx|num }}</strong></span>
+              <span><span class="status status-info me-1"></span>3xx
+                <strong data-live="http.status.3xx" data-fmt="int">{{ snapshot.http.status.3xx|num }}</strong></span>
+              <span><span class="status status-warning me-1"></span>4xx
+                <strong data-live="http.status.4xx" data-fmt="int">{{ snapshot.http.status.4xx|num }}</strong></span>
+              <span><span class="status status-danger me-1"></span>5xx
+                <strong data-live="http.status.5xx" data-fmt="int">{{ snapshot.http.status.5xx|num }}</strong></span>
+            </div>
+            <div class="datagrid mt-3">
+              <div class="datagrid-item">
+                <div class="datagrid-title">Tasa de error 5xx</div>
+                <div class="datagrid-content">
+                  <strong data-live="http.error_rate" data-fmt="pct">{{ snapshot.http.error_rate|pct }}</strong>
+                </div>
+              </div>
+              <div class="datagrid-item">
+                <div class="datagrid-title">p50 / p95</div>
+                <div class="datagrid-content">
+                  <span data-live="http.p50_ms" data-fmt="ms">{{ snapshot.http.p50_ms|ms }}</span>
+                  /
+                  <span data-live="http.p95_ms" data-fmt="ms">{{ snapshot.http.p95_ms|ms }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="subheader mt-3">Peticiones por minuto</div>
+            <svg class="monitoring-spark mt-1"
+                 data-spark="http"
+                 role="img"
+                 aria-label="Peticiones por minuto en los últimos 30 minutos">
+            </svg>
+          </div>
+        </div>
+      </div>
+      <!-- Fila 4: Core Web Vitals -->
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-bolt me-1"></i> Core Web Vitals
+            </h3>
+            <div class="card-actions text-secondary small">
+              p75 de las últimas {{ snapshot.vitals.window_hours }} h
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row g-4">
+              {% for key, vital in snapshot.vitals.metrics.items %}
+                <div class="col-sm-6 col-lg-3" data-vital-metric="{{ key }}">
+                  <div class="d-flex align-items-baseline mb-1">
+                    <div class="subheader">{{ vital.label }}</div>
+                    <span class="badge bg-{{ vital.rating|state_class }}-lt ms-auto"
+                          data-vital-badge="{{ key }}">{{ vital.rating|default:'sin datos' }}</span>
+                  </div>
+                  <div class="h2 mb-1">
+                    <span data-live="vitals.metrics.{{ key }}.p75"
+                          data-fmt="{% if key == 'cls' %}num2{% else %}ms{% endif %}">{{ vital.p75|dash }}</span>
+                  </div>
+                  <div class="progress progress-sm mb-1">
+                    <div class="progress-bar bg-success"
+                         role="progressbar"
+                         data-vital-bar="good"
+                         style="width: {{ vital.distribution.good|percent_of:vital.samples }}%"></div>
+                    <div class="progress-bar bg-warning"
+                         role="progressbar"
+                         data-vital-bar="needs_improvement"
+                         style="width: {{ vital.distribution.needs_improvement|percent_of:vital.samples }}%"></div>
+                    <div class="progress-bar bg-danger"
+                         role="progressbar"
+                         data-vital-bar="poor"
+                         style="width: {{ vital.distribution.poor|percent_of:vital.samples }}%"></div>
+                  </div>
+                  <div class="text-secondary small">
+                    <span data-live="vitals.metrics.{{ key }}.samples" data-fmt="int">{{ vital.samples|num }}</span>
+                    muestras · bueno ≤
+                    {% if key == 'cls' %}{{ vital.good }}{% else %}{{ vital.good|ms }}{% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="card-footer text-secondary small">
+            Umbrales oficiales. CLS no tiene unidad; LCP, FCP e INP van en milisegundos.
+            Estos datos llegan del navegador, así que incluyen red y dispositivo real.
+          </div>
+        </div>
+      </div>
+      <!-- Fila 5: tráfico en vivo -->
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-world me-1"></i> Tráfico en vivo
+            </h3>
+            <div class="card-actions text-secondary small">últimos 30 min</div>
+          </div>
+          <div class="card-body" data-traffic-body>
+            {% if not snapshot.traffic.has_data %}
+              <div class="empty" data-traffic-empty>
+                <p class="empty-title">Todavía no hay datos del beacon</p>
+                <p class="empty-subtitle text-secondary">
+                  Las visitas se registran desde el navegador. Si este es un entorno
+                  recién instalado, hace falta que alguien abra una página pública.
+                </p>
+              </div>
+            {% endif %}
+            <div class="row g-3 mb-3">
+              <div class="col-4">
+                <div class="subheader">Páginas vistas</div>
+                <div class="h2 mb-0" data-live="traffic.pageviews_30m" data-fmt="int">
+                  {{ snapshot.traffic.pageviews_30m|num }}
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="subheader">Por minuto</div>
+                <div class="h2 mb-0"
+                     data-live="traffic.pageviews_last_minute"
+                     data-fmt="int">{{ snapshot.traffic.pageviews_last_minute|num }}</div>
+              </div>
+              <div class="col-4">
+                <div class="subheader">Páginas por visitante</div>
+                <div class="h2 mb-0" data-live="traffic.pages_per_visitor" data-fmt="num2">
+                  {{ snapshot.traffic.pages_per_visitor|dash }}
+                </div>
+              </div>
+            </div>
+            <div class="subheader">Páginas vistas por minuto</div>
+            <svg class="monitoring-spark mt-1 mb-3"
+                 data-spark="traffic"
+                 role="img"
+                 aria-label="Páginas vistas por minuto en los últimos 30 minutos">
+            </svg>
+            <div class="subheader">Páginas más activas</div>
+            <div class="table-responsive">
+              <table class="table table-sm card-table">
+                <thead>
+                  <tr>
+                    <th>Ruta</th>
+                    <th class="text-end">Vistas</th>
+                  </tr>
+                </thead>
+                <tbody data-table="top_pages">
+                  {% for page in snapshot.traffic.top_pages %}
+                    <tr>
+                      <td class="text-truncate" style="max-width: 20rem;">{{ page.path }}</td>
+                      <td class="text-end">{{ page.views }}</td>
+                    </tr>
+                  {% empty %}
+                    <tr>
+                      <td colspan="2" class="text-secondary">Sin visitas en la ventana.</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="text-secondary small">
+              Sesiones nuevas en 30 min:
+              <span data-live="traffic.new_sessions_30m"
+                    data-fmt="int">{{ snapshot.traffic.new_sessions_30m|num }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-share me-1"></i> Fuentes, dispositivos y navegadores
+            </h3>
+          </div>
+          <div class="card-body">
+            <div class="subheader">Fuentes de tráfico</div>
+            <div class="table-responsive">
+              <table class="table table-sm card-table">
+                <thead>
+                  <tr>
+                    <th>Origen</th>
+                    <th class="text-end">Visitas</th>
+                  </tr>
+                </thead>
+                <tbody data-table="referrers">
+                  {% for row in snapshot.traffic.referrers.hosts %}
+                    <tr>
+                      <td class="text-truncate" style="max-width: 18rem;">{{ row.label }}</td>
+                      <td class="text-end">{{ row.count }}</td>
+                    </tr>
+                  {% empty %}
+                    <tr>
+                      <td colspan="2" class="text-secondary">Sin datos todavía.</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+              {% for row in snapshot.traffic.referrers.types %}
+                <span class="badge bg-secondary-lt">{{ row.label }}: {{ row.count }}</span>
+              {% endfor %}
+            </div>
+            <div class="row g-3 mt-3">
+              <div class="col-sm-6">
+                <div class="subheader">Dispositivo</div>
+                <table class="table table-sm card-table">
+                  <tbody data-table="devices">
+                    {% for row in snapshot.traffic.devices %}
+                      <tr>
+                        <td>{{ row.label }}</td>
+                        <td class="text-end">{{ row.count }}</td>
+                      </tr>
+                    {% empty %}
+                      <tr>
+                        <td colspan="2" class="text-secondary">Sin datos todavía.</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="col-sm-6">
+                <div class="subheader">Navegador</div>
+                <table class="table table-sm card-table">
+                  <tbody data-table="browsers">
+                    {% for row in snapshot.traffic.browsers %}
+                      <tr>
+                        <td>{{ row.browser }}</td>
+                        <td class="text-end">{{ row.count }}</td>
+                      </tr>
+                    {% empty %}
+                      <tr>
+                        <td colspan="2" class="text-secondary">Sin datos todavía.</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Fila 6: errores JS y peso de página -->
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-bug me-1"></i> Errores JavaScript
+            </h3>
+            <div class="card-actions text-secondary small">
+              <span data-live="errors.count" data-fmt="int">{{ snapshot.errors.count|num }}</span>
+              en 24 h ·
+              <span data-live="errors.per_100_pageviews"
+                    data-fmt="num2">{{ snapshot.errors.per_100_pageviews|dash }}</span>
+              por 100 páginas
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-sm card-table">
+                <thead>
+                  <tr>
+                    <th>Hora</th>
+                    <th>Mensaje</th>
+                    <th>Ruta</th>
+                  </tr>
+                </thead>
+                <tbody data-table="errors">
+                  {% for error in snapshot.errors.items %}
+                    <tr>
+                      <td class="text-nowrap">{{ error.at }}</td>
+                      <td class="text-truncate" style="max-width: 22rem;">{{ error.message }}</td>
+                      <td class="text-truncate" style="max-width: 12rem;">{{ error.path }}</td>
+                    </tr>
+                  {% empty %}
+                    <tr>
+                      <td colspan="3" class="text-secondary">Sin errores reportados.</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">
+              <i class="icon ti ti-chart-line me-1"></i> Peso de página y recursos lentos
+            </h3>
+            <div class="card-actions text-secondary small">
+              <span data-live="weight.samples" data-fmt="int">{{ snapshot.weight.samples|num }}</span>
+              páginas medidas
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-sm-6">
+                <div class="subheader">Peso medio transferido</div>
+                <div class="h1 mb-0">
+                  <span data-live="weight.avg_kb" data-fmt="num1">{{ snapshot.weight.avg_kb|dash }}</span>
+                  <span class="h3 text-secondary">KB</span>
+                </div>
+              </div>
+              <div class="col-sm-6">
+                <div class="subheader">Recursos lentos por página</div>
+                <div class="h1 mb-0">
+                  <span data-live="weight.avg_slow" data-fmt="num1">{{ snapshot.weight.avg_slow|dash }}</span>
+                  <span class="h3 text-secondary">&gt; 500 ms</span>
+                </div>
+              </div>
+            </div>
+            <div class="text-secondary small mt-3">
+              Se calcula con <code>transferSize</code> y resource timing del navegador:
+              incluye compresión, no incluye caché ya tibia.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="text-secondary small">
+          <i class="icon ti ti-clock me-1"></i>
+          Se conservan las métricas de peticiones {{ snapshot.http_retention_days }} días y los
+          datos del beacon {{ snapshot.retention_days }} días. La poda corre a diario a las 04:30.
+          El "tiempo de respuesta" es el del servidor: mide desde que entra la petición hasta que
+          el backend entrega la respuesta.
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+{% block extrajs %}
+  <script src="{% static 'dist/js/site-monitoring.js' %}"></script>
+{% endblock %}
