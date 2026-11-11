@@ -68,6 +68,21 @@
       opacity: 1 !important;
     }
 
+    /* ─── MODO OSCURO: párrafos e iconos legibles ───
+       Sobre la superficie casi negra los párrafos de las tarjetas heredaban el
+       gris de cuerpo y se leían como texto secundario; los iconos de la
+       sección de servicios usaban `--tblr-primary` (#2b4b9b), que sobre ese
+       fondo desaparece. Se recupera el blanco atenuado de los párrafos y un
+       azul claro para el icono y su recuadro. Los recuadros de las tarjetas
+       llevan utilidades `bg-white`/`text-white` y no se ven afectados. */
+    [data-bs-theme="dark"] .section-tarjetas p {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+    [data-bs-theme="dark"] .section .shape {
+      --tblr-primary: #7f9fe0;
+      --tblr-primary-lt: rgba(127, 159, 224, 0.16);
+    }
+
     /* ─── BOTÓN DEL BOLETÍN: Gris en oscuro, Blanco en claro ─── */
     [data-bs-theme="dark"] .section-boletin .btn-outline-light {
       color: var(--tblr-secondary) !important;
