@@ -129,3 +129,32 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
   `menu-list.html` y el layout del landing mantiene `severe_only=True`.
   Verificado: `manage.py check`, `makemigrations --check --dry-run`, suite
   completa (1719 pruebas) y `make test-deploy` (107/107).
+
+- **L9** (2026-11-09) Revisión visual del panel y del landing público. Cinco
+  defectos y su causa:
+  1. El registro de actividad mostraba `str(obj)` en ISO con microsegundos
+     (`2026-11-09 13:43:04.827701+00:00`). `Warning`, `WeatherReport` y
+     `ForecastExtendedDay` formatean ahora en hora local (`d/m/Y H:M`) o solo
+     día, y dicen `sin fecha` si no hay valor.
+  2. La franja de emergencia mostraba el aviso más grave aunque el visitante lo
+     hubiera cerrado, y la memoria de un solo cierre tapaba avisos nuevos.
+     Pasa a una lista de cierres con tope de diez, migrando el formato anterior;
+     el servidor entrega los avisos vigentes y el navegador elige el primero no
+     cerrado (ver commit `b942674`).
+  3. La tabla de auditoría cambiaba de aspecto tras «Limpiar»: el refresco AJAX
+     usa `rows.add()`, que crea celdas nuevas desde el `innerHTML` y pierde las
+     clases del `<td>`; `text-nowrap` sobrevivía en la carga inicial y no en el
+     refresco. Se quita la clase y ambos estados quedan iguales (el que ya se
+     veía tras «Limpiar»).
+  4. Las franjas animadas del landing y de las páginas de institución se
+     habían reescrito con un include y CSS propios que perdían el movimiento
+     original. Se revierte al marcado y al CSS de Tabler que ya existían: los
+     archivos `section_waves.html` y `landing-waves.css` se eliminan y los
+     templates vuelven sin diferencias contra el commit anterior.
+  5. En tema oscuro los párrafos de las tarjetas se leían como secundarios y
+     los iconos de «Servicios y herramientas» perdían su azul. Se fija el
+     blanco atenuado de los párrafos y un azul claro para icono y recuadro.
+  Además, la lista de notificaciones pasa a tiempo relativo y a un layout que
+  en móvil baja los botones a su propia línea, con el icono a 1.5rem alineado
+  al título. Verificado: `apps.dashboard` (111), `test_activity_log` +
+  `test_model_strings` (28), `djlint` y capturas reales en 500px y 1280px.
