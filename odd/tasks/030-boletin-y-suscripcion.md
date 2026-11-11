@@ -171,3 +171,22 @@ Spec de referencia: `openspec/changes/030-boletin-y-notificaciones-de-clientes/`
     180 plantillas.
   - La rama queda 67 commits por delante de `dev`, con el árbol limpio. El PR a
     `dev` sigue pendiente de decisión del usuario.
+
+- **L11** (2026-11-11) CI puso en rojo cuatro pruebas de fecha local; el verde
+  local de L10 era falso. `Tests (Django)` falló con `18:41 != 17:41`,
+  `22:00 != 21:00` y `09:43 != 08:43`: exactamente una hora de diferencia.
+  Causa: las pruebas fijaban la hora de pared de `America/Havana` como número,
+  y la regla de horario de verano de Cuba depende de la versión de `tzdata`
+  instalada. El runner resolvía UTC-5 para el 8 de noviembre y el equipo de
+  desarrollo UTC-4, así que la suite pasaba en un sitio y fallaba en el otro.
+  No era un defecto del producto —la conversión es correcta en ambos— sino una
+  prueba que medía el huso de Cuba en vez de la conversión.
+  Arreglo: las cuatro pruebas fijan una zona sin horario de verano
+  (`timezone.override` con UTC-5) y comprueban conversión y formato, que es lo
+  que el código promete. Archivos: `apps/core/tests/test_templatetags.py`,
+  `apps/core/tests/test_activity_log.py`, `apps/meteo/tests/test_model_strings.py`.
+  Verificado en los dos extremos —`TZ=UTC` y la zona del equipo— 41 pruebas OK
+  en cada corrida; después, suite completa **1734 OK** (458 s) sobre la rama ya
+  fusionada con `dev` (#185 y #186), `ruff check` y `ruff format --check` en
+  verde. Lección: una prueba que depende de la base de datos de husos no mide el
+  código, mide el entorno.

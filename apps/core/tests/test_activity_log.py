@@ -1,5 +1,6 @@
 import re
 from datetime import date, timedelta
+from datetime import timezone as dt_timezone
 from unittest import mock
 
 from django.contrib import admin
@@ -22,6 +23,13 @@ from apps.core.utils import (
     log_action,
     log_activity_from_request,
 )
+
+# Zona fija UTC-5, sin horario de verano. El portal usa America/Havana, pero su
+# regla de verano depende de la versión de tzdata instalada: el runner de CI y
+# un equipo de desarrollo resuelven el mismo instante con una hora de
+# diferencia. Lo que el registro promete es presentar la fecha en la zona
+# activa, así que la prueba fija la zona y no el huso de Cuba.
+ZONA_FIJA = dt_timezone(timedelta(hours=-5))
 
 
 def disable_maintenance_mode():
@@ -324,10 +332,11 @@ class ActivityLogViewTests(TestCase):
             message='fila anterior al arreglo',
         )
         self.client.force_login(self.superuser)
-        response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
+        with timezone.override(ZONA_FIJA):
+            response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
 
-        self.assertContains(response, 'Ciclón Tropical - 07/11/2026 18:41')
-        self.assertNotContains(response, '2026-11-07 22:41:39.815152+00:00')
+            self.assertContains(response, 'Ciclón Tropical - 07/11/2026 17:41')
+            self.assertNotContains(response, '2026-11-07 22:41:39.815152+00:00')
 
     def test_las_celdas_no_llevan_atributos_que_el_refresco_ajax_perderia(self):
         """Carga inicial y refresco AJAX tienen que verse igual.
