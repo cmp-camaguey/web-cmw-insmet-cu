@@ -1,4 +1,13 @@
-<td class="text-nowrap">{{ object.action_time|date:'d/m/Y H:i' }}</td>
+{% load utils_filters %}
+{% comment %}
+  Las clases van dentro de las celdas, nunca en el `<td>`: tras filtrar o
+  limpiar, `activity-log-filters.js` reconstruye la tabla con `rows.add()`,
+  que crea celdas nuevas y pierde los atributos del `<td>`. Por eso este
+  template no usa `text-nowrap` en las columnas de fecha e IP: en la carga
+  inicial esas celdas no envolvían y al refrescar sí, y la tabla cambiaba de
+  aspecto. Sin la clase, ambos estados son el mismo.
+{% endcomment %}
+<td>{{ object.action_time|date:'d/m/Y H:i' }}</td>
 <td>
   {% if object.user %}
     {{ object.user }}
@@ -23,9 +32,9 @@
     <span class="badge bg-secondary-lt">{{ object.get_action_flag_display }}</span>
   {% endif %}
 </td>
-<td>{{ object.object_repr|truncatechars:60 }}</td>
+<td>{{ object.object_repr|local_datetime_in_text|truncatechars:60 }}</td>
 <td>{{ object.message|truncatechars:80 }}</td>
-<td class="text-nowrap">
+<td>
   {% if object.ip_address %}
     {{ object.ip_address }}
   {% else %}

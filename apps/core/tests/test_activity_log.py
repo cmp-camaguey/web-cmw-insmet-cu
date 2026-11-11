@@ -1,3 +1,4 @@
+import re
 from datetime import date, timedelta
 from unittest import mock
 
@@ -308,6 +309,41 @@ class ActivityLogViewTests(TestCase):
         # El partial también filtra: si ignorara las fechas, devolvería la fila
         # sembrada (de hoy) y el filtro del operador no serviría de nada.
         self.assertNotContains(response, 'Registro creado por superuser')
+
+    def test_una_fecha_iso_guardada_se_muestra_en_hora_local(self):
+        """El registro es histórico: lo guardado no se toca, se presenta legible.
+
+        Las filas anteriores al arreglo de los `__str__` guardaron el
+        `datetime` en ISO con microsegundos; el operador tiene que leer una
+        fecha, no un `repr`.
+        """
+        ActivityLog.objects.create(
+            user=self.superuser,
+            action_flag=2,
+            object_repr='Ciclón Tropical - 2026-11-07 22:41:39.815152+00:00',
+            message='fila anterior al arreglo',
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
+
+        self.assertContains(response, 'Ciclón Tropical - 07/11/2026 18:41')
+        self.assertNotContains(response, '2026-11-07 22:41:39.815152+00:00')
+
+    def test_las_celdas_no_llevan_atributos_que_el_refresco_ajax_perderia(self):
+        """Carga inicial y refresco AJAX tienen que verse igual.
+
+        `activity-log-filters.js` reconstruye la tabla con `rows.add()`, que
+        crea celdas nuevas desde el `innerHTML` y descarta los atributos del
+        `<td>`. Una clase puesta en el `<td>` (por ejemplo `text-nowrap`) se ve
+        al cargar y desaparece al filtrar o limpiar. La regla es simple: el
+        `<td>` no lleva atributos; las clases van dentro, sobre el contenido.
+        """
+        self.client.force_login(self.superuser)
+        response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
+        celdas = re.findall(r'<td([^>]*)>', response.content.decode())
+
+        self.assertTrue(celdas)
+        self.assertEqual([attrs for attrs in celdas if attrs.strip()], [])
 
     def test_missing_user_and_ip_are_labelled_instead_of_dashes(self):
         """Un «—» no dice si el dato falta o si el usuario se borró.

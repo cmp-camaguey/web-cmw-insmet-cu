@@ -1,9 +1,9 @@
 from decimal import Decimal
 
 from django.template import Context, Template
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
-from apps.core.templatetags.utils_filters import format_cup
+from apps.core.templatetags.utils_filters import format_cup, local_datetime_in_text
 
 
 class FormatCupFilterTest(TestCase):
@@ -33,3 +33,17 @@ class FormatCupFilterTest(TestCase):
             Context({'price': Decimal('1234.56')}),
         )
         self.assertEqual(rendered, '$1.234,56')
+
+
+class LocalDatetimeInTextFilterTest(SimpleTestCase):
+    def test_reescribe_una_fecha_iso_guardada_a_hora_local(self):
+        self.assertEqual(
+            local_datetime_in_text('Ciclón Tropical - 2026-11-07 22:41:39.815152+00:00'),
+            'Ciclón Tropical - 07/11/2026 18:41',
+        )
+
+    def test_deja_intacto_un_texto_sin_fecha(self):
+        self.assertEqual(local_datetime_in_text('Alerta Temprana'), 'Alerta Temprana')
+
+    def test_vacio_devuelve_texto_vacio(self):
+        self.assertEqual(local_datetime_in_text(''), '')
