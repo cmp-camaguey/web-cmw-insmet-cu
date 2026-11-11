@@ -39,8 +39,15 @@
 - [x] Icono con badge en el navbar, junto al de actualizacion de 025, respetando `gap-2`.
 - [x] Desplegable con las 10 mas recientes, "Ver todas" y "Marcar todas como leidas".
 - [x] Pagina de historial con `paginate_by = 10`, sin DataTables.
-- [x] Contador server-rendered de entrada y refresco en el polling existente de `dashboard-update.js`.
-- [x] Marcado de lectura individual y masivo, con su prueba de permisos (403 a no-superusuario).
+- [x] Contador server-rendered de entrada y refresco por endpoint propio
+      (`notifications:unread`) con `ETag`/`304` y `notifications-badge.js`. **No**
+      viaja en el polling de `dashboard-update.js`: ese JSON lee archivos y
+      consulta el remoto, y el contador es un `COUNT` indexado que el portal
+      público consulta con mucha más frecuencia (PR #152).
+- [x] Marcado de lectura individual y masivo, con su prueba de permisos. Desde el
+      cambio 030 la bandeja pide solo sesión y el aislamiento lo da
+      `recipient=request.user`: un cliente marca lo suyo y recibe 404 en el aviso
+      ajeno.
 
 ## Fase 4 — Operacion
 
