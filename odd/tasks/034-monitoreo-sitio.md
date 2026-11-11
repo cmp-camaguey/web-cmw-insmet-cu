@@ -55,10 +55,10 @@ Branch: `feat/034-monitoreo-sitio`. Delivery: `ask-on-risk`. Runner: `python man
 
 | ID | Specs | Ruta | Estado | Commit |
 |----|-------|------|--------|--------|
-| T1 | S1-S10, S14 | inline | [x] | — |
-| T2 | S11 | inline | [x] | — |
-| T3 | S12, S13 | inline | [x] | — |
-| T4 | S1-S14 | inline | [x] | — |
+| T1 | S1-S10, S14 | inline | [x] | `90be43e` |
+| T2 | S11 | inline | [x] | `d6fa6d7` |
+| T3 | S12, S13 | inline | [x] | `90be43e` (S12), `d6fa6d7` (S13) |
+| T4 | S1-S14 | inline | [x] | `90be43e`, `d6fa6d7` |
 
 ## Log
 
@@ -117,3 +117,18 @@ sin beacon, las tarjetas RUM muestran estado vacío.
   `apps.monitoring.tasks.podar_monitoreo`, que es contrato real del consumer.
 - Evidencia: `apps.monitoring` 63/63 en verde; `manage.py check` y
   `makemigrations --check --dry-run` limpios; ruff y djlint sin hallazgos.
+
+### L5 — Cierre
+
+- Suite completa: 1691 tests en verde (`python manage.py test`), sin fallos.
+- El hook `gga` interpreta como error de sintaxis las dos formas de `except` sin
+  paréntesis que produce `ruff format` para Python 3.14 (PEP 758). Se reescribieron como
+  cláusulas separadas en `monitoring_tags.py`, `views.py` y `system.py`: el hook queda
+  contento y el código sigue siendo válido en 3.14.
+- Dos commits de unidad de trabajo: `90be43e` (backend y captura HTTP) y `d6fa6d7`
+  (beacon RUM y panel). Sin PR por decisión del usuario ("solo commit").
+- RDD evaluó el candidato como riesgo alto y el usuario declinó la revisión de este
+  cambio concreto (`declined_this_candidate`): no se crea registro ni autoridad de
+  revisión, y las revisiones futuras siguen activas.
+- S13 corregido en el spec: la sesión se persiste en `localStorage` con TTL de 30 min,
+  no en `sessionStorage`; así sobrevive a la navegación entre páginas y pestañas.
