@@ -580,10 +580,14 @@ class EnvironmentConfigViewTests(EnvironmentViewTestBase):
 
     @staticmethod
     def _column_of(html: str, key: str) -> str:
-        """Clase del contenedor de grilla que envuelve al campo `key`."""
+        """Clase de grilla del contenedor del campo `key`.
+
+        Se devuelve solo la primera clase: el contenedor puede llevar clases de
+        espaciado (por ejemplo `mb-3`), que no cambian el ancho.
+        """
         index = html.index(f'id="id_{key}"')
         start = html.rindex('class="col-', 0, index) + len('class="')
-        return html[start : html.index('"', start)]
+        return html[start : html.index('"', start)].split()[0]
 
     def test_page_does_not_render_server_paths(self):
         self.client.force_login(self.superuser)
