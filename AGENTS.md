@@ -227,8 +227,12 @@ La lista `<available_skills>` del sistema es la fuente autoritativa de skills ca
 - **Revisión**: `judgment-day`, `rdd-defect-workflow`, `go-testing`, `gentle-ai-bench`
 - **Meta**: `skill-creator`, `skill-improver`, `skill-registry`, `cognitive-doc-design`, `comment-writer`, `customize-opencode`
 
-### Configuración de OpenCode (`opencode.json`, no versionada)
-`opencode.json` **no se versiona**: lo genera `gentle-ai install --scope workspace` en la raíz del proyecto y contiene los agentes, permisos y MCP de esa máquina. Es un artefacto, no fuente — 62 % de sus 143 KB era el prompt regenerado de `gentle-orchestrator`, y `gentle-ai sync` lo reescribe, así que versionarlo metía cambios del arnés en PRs que no lo tocaban y permitía que el prompt commiteado derivara en silencio contra la versión instalada. Después de clonar: `gentle-ai install --scope workspace` (o `gentle-ai sync --scope workspace` si gentle-ai ya está instalado). Sin ese paso el orquestador queda sin instrucciones y los agentes del proyecto no existen.
+### Configuración de OpenCode (global, no versionada)
+Los agentes de gentle-ai (`gentle-orchestrator`, los `review-*`, los `jd-*`) viven en la configuración **global** de OpenCode (`~/.config/opencode/opencode.jsonc`), no en el repo. Son una capacidad de la máquina —cómo trabajas con IA—, no una propiedad del proyecto: el repo aporta `AGENTS.md` y `.opencode/skills/`, nada más. Se refrescan con `gentle-ai sync --scope global`.
+
+El repo **no versiona** `opencode.json`. Si aparece uno en la raíz es el residuo de una instalación vieja con `--scope workspace`: está en `.gitignore` y conviene borrarlo, porque `gentle-ai sync` lo reescribe y el 62 % de sus 143 KB era el prompt regenerado del orquestador —un artefacto, no fuente—. Versionarlo metía cambios del arnés en PRs que no lo tocaban y dejaba el prompt commiteado derivando en silencio contra la versión instalada.
+
+Consecuencia asumida de que `default_agent` sea global: `gentle-orchestrator` es el agente por defecto en **todos** los proyectos de la máquina, no sólo en éste.
 
 **Trabajar en el repo sin gentle-ai es perfectamente válido.** La app no depende de nada de esto: Django, `pip install -r requirements/`, PostgreSQL y `manage.py` funcionan igual. Lo único que no tienes son el orquestador y los reviewers; OpenCode arranca con sus agentes por defecto. Los MCP (`context7`, `engram`, `tabler`) también son herramientas de máquina, no del proyecto, y por eso viven en la sección [MCP](#mcp) y no en un archivo versionado: se agregan con `opencode mcp add` si los quieres. Nada de esto es requisito para contribuir.
 
