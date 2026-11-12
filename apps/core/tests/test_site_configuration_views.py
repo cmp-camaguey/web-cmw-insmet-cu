@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.core.models import SiteConfiguration
+from apps.core.models import ActivityLog, SiteConfiguration
 
 
 def _valid_data():
@@ -11,6 +11,9 @@ def _valid_data():
         'theme_base': 'gray',
         'theme_font': 'sans-serif',
         'theme_radius': '1',
+        'timezone_mode': 'auto',
+        'utc_offset_hours': '-5',
+        'time_format': '24',
     }
 
 
@@ -158,6 +161,10 @@ class SiteConfigurationViewTests(TestCase):
         self.assertEqual(response.json(), {'ok': True, 'maintenance_mode': True})
         site.refresh_from_db()
         self.assertTrue(site.maintenance_mode)
+        entry = ActivityLog.objects.filter(
+            object_id=str(site.pk), action_flag=ActivityLog.ACTIVITY_MAINTENANCE
+        ).latest('action_time')
+        self.assertEqual(entry.get_action_flag_display(), 'Mantenimiento')
 
     def test_toggle_maintenance_superuser_disables(self):
         user = User.objects.create_superuser(

@@ -9,10 +9,9 @@
 
 ## Fase 2 — Configuración del dashboard
 
-- [x] `TimezoneConfigurationForm`.
-- [x] `TimezoneConfigurationUpdateView` + URL `core:timezone_configuration`.
-- [x] Plantilla `pages/core/site/timezone.html`.
-- [x] Entrada **Horario y región** en el menú Configuración.
+- [x] Campos de horario integrados en `SiteConfigurationForm`, junto a tema e identidad.
+- [x] Tarjeta **Horario y región** dentro de la página Configuración → Sitio (`core:site_configuration`).
+- [x] Sin entrada de menú ni URL propias: se eliminaron `TimezoneConfigurationUpdateView`, `core:timezone_configuration` y `pages/core/site/timezone.html`.
 - [x] Pruebas de formulario, vista y plantilla.
 
 ## Fase 3 — Aplicación en el portal
@@ -37,3 +36,11 @@
 - El formato 12/24 aplica a la **visualización**. Los datepickers de Tempus
   Dominus siguen en 12 h con AM/PM.
 - Las tareas Huey y los PDF encolados siguen usando `settings.TIME_ZONE`.
+
+## Historial
+
+- **2026-11-12** — «fusiona confuguracion horario y region con la de sitios en la
+  misma pagina manteniendo los estilis de formularios y botones de configuracion
+  de sitio». Se integra el horario en la página **Configuración → Sitio**; la
+  sección independiente se elimina. S1 reescrita; Fase 2 reabierta y cerrada de
+  nuevo.
