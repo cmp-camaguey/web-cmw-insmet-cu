@@ -79,6 +79,26 @@ make hooks                          # solo activar el hook (git config core.hook
 - Si `detect-secrets` reporta un falso positivo nuevo, actualizar el baseline con `detect-secrets scan --exclude-files "static/|staticfiles/|.*\.min\.js$|.*\.map$|\.venv/" > .secrets.baseline` y commitear el `.secrets.baseline`.
 - El mismo job `pre-commit` corre en CI (`.github/workflows/ci.yml`).
 
+### gga (revisor IA del hook)
+
+Después de `pre-commit`, `.githooks/pre-commit` corre `gga run` **si `gga` está en el `PATH`**; si no está, se salta en silencio. `.gga` pide el agente `OPENCODE_AGENT="gga-reviewer"`, y ese agente **ya no viaja con el repo**: `opencode.json` es local (ver `.gitignore`).
+
+Si tenés `gga` instalado, definí `gga-reviewer` en tu `opencode.json` o el hook falla y **bloquea todos los commits**:
+
+```json
+{
+  "agent": {
+    "gga-reviewer": {
+      "description": "Code reviewer driven by the gga pre-commit hook. Reads and runs checks, never edits.",
+      "model": "<proveedor>/<modelo>",
+      "permission": { "edit": "deny", "task": "deny", "write": "deny" }
+    }
+  }
+}
+```
+
+El `model` es tuyo: elegí uno que tu instalación tenga habilitado. Lo que **no** conviene es dejar `OPENCODE_AGENT` sin definir: `gga` caería al agente por defecto de tu OpenCode, y si ese es el orquestador ODD la revisión se vuelve lenta y ruidosa.
+
 ## Flujo de ramas (`dev` → `main`)
 
 Dos ramas de larga vida y nada más:
