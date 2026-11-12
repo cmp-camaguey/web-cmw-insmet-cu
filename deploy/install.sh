@@ -18,6 +18,7 @@
 #      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
 #  10. /etc/webcmp/deploy.env con el destino del health check que corresponde
 #  11. andamiaje de deploy automatico (usuario, sudoers, webcmp-deploy, autodeploy)
+#      y ejecutor del boton "Aplicar cambios" del panel de entorno
 #  12. superusuario, por systemd-run con la ENCRYPTION_KEY
 #
 # AUTO-CONTENIDO, y por que importa: este archivo se ejecuta por un pipe, sin
@@ -66,6 +67,10 @@ DEPLOY_LOGIN_USER=${DEPLOY_LOGIN_USER:-deploy}
 SCRIPT_PATH=${SCRIPT_PATH:-/usr/local/sbin/webcmp-deploy}
 # Ejecutor del boton "Actualizar" del panel (change 025-update-web-deploy).
 AUTODEPLOY_SCRIPT=${AUTODEPLOY_SCRIPT:-/usr/local/sbin/webcmp-autodeploy}
+# Ejecutor del boton "Aplicar cambios" del panel de entorno
+# (change 033-entorno-servidor). Corre como root: reiniciar un servicio lo exige.
+APPLY_SCRIPT=${APPLY_SCRIPT:-/usr/local/sbin/webcmp-apply-env}
+APPLY_STATE_DIR=${APPLY_STATE_DIR:-/var/lib/webcmp}
 AUTODEPLOY_STATE_DIR=${AUTODEPLOY_STATE_DIR:-/var/lib/webcmp}
 CONFIG_DIR=${CONFIG_DIR:-/etc/webcmp}
 CONFIG_FILE=${CONFIG_FILE:-$CONFIG_DIR/deploy.env}
@@ -106,6 +111,7 @@ GUNICORN_UNIT=${GUNICORN_UNIT:-webcmp}
 HUEY_UNIT=${HUEY_UNIT:-webcmp-huey}
 # El .path se habilita y vigila; el .service lo arranca systemd, nunca a mano.
 AUTODEPLOY_UNIT=${AUTODEPLOY_UNIT:-webcmp-autodeploy}
+APPLY_UNIT=${APPLY_UNIT:-webcmp-apply}
 GUNICORN_SOCKET=${GUNICORN_SOCKET:-/run/$GUNICORN_UNIT/gunicorn.sock}
 
 # scripts/generate_env.py usa PEP 758 (except sin parentesis, `except A, B:`),
@@ -3316,12 +3322,83 @@ setup_autodeploy() {
     echo "  estado:   journalctl -u $AUTODEPLOY_UNIT"
 }
 
+# --- C.11c Boton "Aplicar cambios" del panel (change 033-entorno-servidor) ---
+#
+# Mismas tres piezas que C.11b, con una diferencia de privilegio que importa: el
+# ejecutor corre como root, porque reiniciar un servicio del sistema lo exige.
+#
+# Ese privilegio es seguro SOLO mientras el script no acepte ordenes: no lee
+# destinos ni comandos del archivo de peticion, y las unidades que reinicia
+# estan escritas en el propio unit. Un proceso web comprometido consigue, como
+# mucho, reiniciar esos dos servicios — algo que ya puede lograr tumbando el
+# proceso. No gana un interprete ni un comando arbitrario.
+#
+# El archivo de peticion es distinto del de deploy-request a proposito: son dos
+# operaciones con privilegios distintos y un `.path` solo apunta a una unidad.
+setup_apply() {
+    local tmp
+
+    log "Boton 'Aplicar cambios' del panel (ejecutor: root)"
+
+    ensure_dir "$APPLY_STATE_DIR" 2775 "$DEPLOY_LOGIN_USER" "$SERVICE_GROUP"
+
+    if [ -f "$APP_DIR/deploy/apply-env.sh" ] \
+        || need_checkout 'se instalaria webcmp-apply-env desde deploy/apply-env.sh'
+    then
+        # root:root en /usr/local/sbin, NUNCA dentro del checkout: ese
+        # directorio lo escribe $SERVICE_USER, y un script que corre como root y
+        # vive en un directorio escribible por el proceso web es la escalada mas
+        # directa que existe.
+        install_if_changed "$APP_DIR/deploy/apply-env.sh" "$APPLY_SCRIPT" 0755 root root
+    fi
+
+    if [ -f "$APP_DIR/deploy/systemd/webcmp-apply.service" ] \
+        || need_checkout 'se renderizaria webcmp-apply.service'
+    then
+        tmp=$(mktemp)
+        render_template "$APP_DIR/deploy/systemd/webcmp-apply.service" "$tmp" \
+            "/srv/webcmp<>$APP_DIR" \
+            "Group=webcmp<>Group=$SERVICE_GROUP" \
+            "UNITS=webcmp.service webcmp-huey.service<>UNITS=$GUNICORN_UNIT.service $HUEY_UNIT.service" \
+            || { rm -f "$tmp"; die "No se pudo renderizar webcmp-apply.service."; }
+        install_if_changed "$tmp" "/etc/systemd/system/$APPLY_UNIT.service" 0644 root root
+        rm -f "$tmp"
+    fi
+
+    if [ -f "$APP_DIR/deploy/systemd/webcmp-apply.path" ] \
+        || need_checkout 'se renderizaria webcmp-apply.path'
+    then
+        tmp=$(mktemp)
+        # El `Unit=` del .path se renderiza tambien, por la misma razon que en
+        # C.11b: un .path apuntando al nombre viejo queda habilitado y nunca
+        # dispara nada, sin un solo error que lo delate.
+        render_template "$APP_DIR/deploy/systemd/webcmp-apply.path" "$tmp" \
+            "/srv/webcmp<>$APP_DIR" \
+            "Unit=webcmp-apply.service<>Unit=$APPLY_UNIT.service" \
+            || { rm -f "$tmp"; die "No se pudo renderizar webcmp-apply.path."; }
+        install_if_changed "$tmp" "/etc/systemd/system/$APPLY_UNIT.path" 0644 root root
+        rm -f "$tmp"
+    fi
+
+    run systemctl daemon-reload
+    # `enable --now` deja el .path vigilando. No se arranca el .service: se
+    # dispara cuando aparece la peticion, y arrancarlo ahora reiniciaria el sitio
+    # sin que nadie lo haya pedido.
+    run systemctl enable --now "$APPLY_UNIT.path"
+
+    echo "  peticion: $APPLY_STATE_DIR/apply-request"
+    echo "  ejecutor: $APPLY_SCRIPT (usuario root)"
+    echo "  estado:   journalctl -u $APPLY_UNIT"
+}
+
 if [ "$SKIP_DEPLOY_SCAFFOLD" -eq 1 ]; then
     log "Andamiaje de deploy automatico: omitido (--skip-deploy-scaffold)"
     log "Boton 'Actualizar' del panel: omitido (necesita el usuario $DEPLOY_LOGIN_USER)"
+    log "Boton 'Aplicar cambios' del panel: omitido (necesita el usuario $DEPLOY_LOGIN_USER)"
 else
     setup_deploy_scaffold
     setup_autodeploy
+    setup_apply
 fi
 
 # --- C.12 Arranque de los servicios --------------------------------------

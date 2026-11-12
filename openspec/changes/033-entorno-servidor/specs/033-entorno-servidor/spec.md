@@ -85,10 +85,13 @@ deshabilitado con un aviso explícito y el POST NO DEBE modificar el archivo ni
 registrar actividad.
 ## S9 — Aplicación diferida
 
-Los cambios NO DEBEN aplicarse en caliente. La página DEBE advertir que se
-aplican al reiniciar el servicio y DEBE marcar como `Pendiente de reinicio` los
-parámetros cuyo valor en archivo difiere del valor en ejecución. El panel NO
-DEBE reiniciar el servicio.
+Los cambios NO DEBEN aplicarse en caliente: guardar no cambia el valor en
+ejecución. La página DEBE advertir que se aplican al reiniciar el servicio y
+DEBE marcar como `Pendiente de reinicio` los parámetros cuyo valor en archivo
+difiere del valor en ejecución.
+
+El reinicio solo ocurre cuando el operador lo pide con **Aplicar cambios** (S16),
+y lo ejecuta systemd, nunca el proceso web.
 ## S10 — Auditoría
 
 Cada guardado con cambios DEBE registrar una fila en `ActivityLog` con el
@@ -148,3 +151,22 @@ valor: ni nombres de variables (`SECRET_KEY`, `ENCRYPTION_KEY`, `DB_PASS`,
   nombre (`SMTP`, `Redis`, `PostgreSQL`), no por la ruta del módulo.
 - Aceptación: el HTML no contiene ninguno de esos identificadores y la tarjeta de
   secretos lista solo nombres como `Clave secreta de Django`.
+
+## S16 — Aplicar cambios
+
+La página DEBE ofrecer un botón **Aplicar cambios** junto a **Guardar**, que
+guarda el formulario y pide el reinicio de los servicios en una sola acción.
+
+- El panel NO DEBE ejecutar `systemctl`: escribe una petición y una unidad
+  `systemd .path` la recoge. El proceso web no gana privilegios.
+- Si ya hay una petición pendiente, NO DEBE encolar otra y DEBE avisarlo; los
+  cambios igual se guardan.
+- Un formulario inválido o un archivo no escribible NO DEBEN dejar petición.
+- El botón DEBE quedar deshabilitado, con un aviso, cuando el proceso web no
+  puede dejar la petición.
+- La página DEBE mostrar el estado del último reinicio: en curso, completado,
+  fallido o sin confirmar. Un estado ilegible NO DEBE presentarse como
+  resultado.
+- Aceptación: un POST a la ruta de aplicación guarda el cambio y crea la
+  petición con el usuario; con una petición previa, el archivo no se sobrescribe
+  y la página avisa que ya hay un reinicio en curso.

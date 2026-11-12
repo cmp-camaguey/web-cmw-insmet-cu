@@ -1,0 +1,17 @@
+[Unit]
+Description=Vigila la peticion de reinicio del panel de entorno (change 033-entorno-servidor)
+Documentation=file:/srv/webcmp/deploy/README-deploy.md
+
+[Path]
+# El panel (usuario `webcmp`) crea este archivo y se desentiende; systemd lo
+# recoge y arranca el servicio. Es la pieza que convierte el boton "Aplicar
+# cambios" en un reinicio sin darle sudo al proceso web.
+#
+# Archivo DISTINTO del de deploy-request a proposito: son dos operaciones con
+# privilegios distintos y un `.path` solo puede apuntar a una unidad. Compartir
+# archivo obligaria a que el ejecutor de deploy tambien reiniciara servicios.
+PathExists=/var/lib/webcmp/apply-request
+Unit=webcmp-apply.service
+
+[Install]
+WantedBy=multi-user.target

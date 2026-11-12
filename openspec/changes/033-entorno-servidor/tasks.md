@@ -39,6 +39,17 @@
 - [x] Ayuda del campo antes del valor en ejecución.
 - [x] Etiquetas y motores en castellano: sin identificadores de variables ni rutas de módulo.
 
+## Fase 3d — Aplicar cambios
+
+- [x] Botón **Aplicar cambios** junto a **Guardar**: guarda y pide el reinicio.
+- [x] `apps/core/env_apply.py`: petición con `O_EXCL`, estado del último reinicio y ventana de `running` viejo.
+- [x] `EnvironmentConfigApplyView` reutiliza guardado, validación y auditoría de la vista base.
+- [x] La página muestra el estado del último reinicio y deshabilita el botón sin directorio escribible.
+- [x] `deploy/apply-env.sh` con `systemctl` fijo, saneo del autor y estado atómico.
+- [x] `deploy/systemd/webcmp-apply.path` y `.service`, con `Environment="UNITS=..."` renderizado.
+- [x] `setup_apply()` en `deploy/install.sh`.
+- [x] `deploy/tests/test_apply_env_sh.sh` (23 casos) y `README-deploy.md`.
+
 ## Fase 4 — Verificación
 
 - [x] `python manage.py check`.
