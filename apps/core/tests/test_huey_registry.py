@@ -47,6 +47,9 @@ EXPECTED_TASKS = {
     'apps.commercial.tasks.recordar_facturas_pendientes',
     # 030: contratos que vencen dentro del horizonte de aviso.
     'apps.commercial.tasks.avisar_contratos_por_vencer',
+    # 034: poda diaria de métricas de monitoreo. Se registra por
+    # `MonitoringConfig.ready()`.
+    'apps.monitoring.tasks.podar_monitoreo',
 }
 
 # Lo que hace `huey_consumer config.huey_consumer_entry.huey`, reducido a lo que

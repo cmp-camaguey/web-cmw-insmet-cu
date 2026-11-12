@@ -31,6 +31,7 @@ urlpatterns = [
     path('notificaciones/', include('apps.core.urls_notifications')),
     path('accounts/', include('apps.user_auth.urls')),
     path('dashboard/', include('apps.dashboard.urls')),
+    path('rum/', include('apps.monitoring.urls')),
     path('publications/', include('apps.publications.urls')),
     path('', include('apps.home.urls')),
 ]
