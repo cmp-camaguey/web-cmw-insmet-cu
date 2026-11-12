@@ -561,8 +561,39 @@ class EnvironmentConfigViewTests(EnvironmentViewTestBase):
 
         self.assertEqual(self._column_of(html, 'SITE_URL'), 'col-12')
         self.assertEqual(self._column_of(html, 'LDAP_SERVER_URI'), 'col-12')
-        self.assertEqual(self._column_of(html, 'EMAIL_PORT'), 'col-md-6')
+        self.assertEqual(self._column_of(html, 'EMAIL_USE_TLS'), 'col-md-6')
         self.assertEqual(self._column_of(html, 'UPDATE_CHECK_TTL'), 'col-md-6')
+
+    def test_email_port_and_user_take_the_full_column_row(self):
+        """Puerto y usuario SMTP van cada uno en su propia fila."""
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        for key in ('EMAIL_PORT', 'EMAIL_HOST_USER'):
+            self.assertEqual(self._column_of(html, key), 'col-12', msg=key)
+
+    def test_pending_invoice_reminder_takes_the_full_column_row(self):
+        """El recordatorio de factura pendiente va en su propia fila."""
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        self.assertEqual(self._column_of(html, 'INVOICE_PENDING_REMINDER_DAYS'), 'col-12')
+
+    def test_save_button_is_labelled_guardar(self):
+        """Solo hay dos verbos en la página: "Guardar" escribe y "Aplicar cambios" reinicia."""
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        self.assertIn('</i> Guardar', html)
+        self.assertNotIn('Aceptar', html)
+
+    def test_ftp_section_stays_in_a_single_column(self):
+        """El bloque FTP va en una sola columna: host, puerto, usuario y clave."""
+        self.client.force_login(self.superuser)
+        html = self.client.get(self.url).content.decode()
+
+        for key in ('FTP_OBS_HOST', 'FTP_OBS_PORT', 'FTP_OBS_USER', 'FTP_OBS_PASS'):
+            self.assertEqual(self._column_of(html, key), 'col-12', msg=key)
 
     def test_help_text_comes_before_the_running_value(self):
         """El orden es etiqueta, campo, ayuda y por último el valor en ejecución.

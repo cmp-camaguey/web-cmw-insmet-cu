@@ -128,6 +128,7 @@ EDITABLE_FIELDS = (
         label='Recordatorio de factura pendiente (días)',
         kind='int',
         group='notifications',
+        width='full',
         placeholder='Ej.: 7',
         min_value=1,
         max_value=365,
@@ -148,6 +149,7 @@ EDITABLE_FIELDS = (
         label='Puerto SMTP',
         kind='int',
         group='email',
+        width='full',
         placeholder='Ej.: 587',
         min_value=1,
         max_value=65535,
@@ -159,6 +161,7 @@ EDITABLE_FIELDS = (
         label='Usuario SMTP',
         kind='text',
         group='email',
+        width='full',
         placeholder='Ej.: avisos@cmp.cu',
         required=False,
     ),
@@ -341,6 +344,7 @@ EDITABLE_FIELDS = (
         label='Host FTP de observaciones',
         kind='text',
         group='ftp',
+        width='full',
         placeholder='Ej.: ftp.cmp.cu',
         required=False,
     ),
@@ -349,6 +353,7 @@ EDITABLE_FIELDS = (
         label='Puerto FTP de observaciones',
         kind='int',
         group='ftp',
+        width='full',
         placeholder='Ej.: 990',
         min_value=1,
         max_value=65535,
@@ -359,6 +364,7 @@ EDITABLE_FIELDS = (
         label='Usuario FTP de observaciones',
         kind='text',
         group='ftp',
+        width='full',
         placeholder='Ej.: observaciones',
         required=False,
     ),
@@ -367,6 +373,7 @@ EDITABLE_FIELDS = (
         label='Contraseña FTP de observaciones',
         kind='password',
         group='ftp',
+        width='full',
         placeholder='Ej.: contraseña nueva',
         required=False,
         secret=True,
@@ -377,21 +384,21 @@ _SPEC_BY_KEY = {spec.key: spec for spec in EDITABLE_FIELDS}
 
 # Títulos de las tarjetas que son solo lectura de punta a punta.
 GROUP_TITLES = {
-    'app': ('Aplicación', 'ti-apps'),
-    'domain': ('Dominio y orígenes', 'ti-world'),
-    'database': ('Base de datos', 'ti-database'),
-    'cache': ('Caché', 'ti-bolt'),
+    'app': 'Aplicación',
+    'domain': 'Dominio y orígenes',
+    'database': 'Base de datos',
+    'cache': 'Caché',
 }
 
 # Títulos de las secciones editables. `app` se llama distinto acá porque la
 # tarjeta de solo lectura "Aplicación" ya existe y repetir el nombre confunde.
 EDITABLE_GROUP_TITLES = {
-    'app': ('Sitio', 'ti-world-www'),
-    'notifications': ('Avisos operativos', 'ti-bell'),
-    'email': ('Correo', 'ti-mail'),
-    'ldap': ('LDAP', 'ti-users'),
-    'updates': ('Actualizaciones del panel', 'ti-refresh'),
-    'ftp': ('Observaciones (FTP)', 'ti-cloud-upload'),
+    'app': 'Sitio',
+    'notifications': 'Avisos operativos',
+    'email': 'Correo',
+    'ldap': 'LDAP',
+    'updates': 'Actualizaciones del panel',
+    'ftp': 'Observaciones (FTP)',
 }
 
 # Secretos que NO se administran desde el panel. Los de correo, LDAP y FTP sí
@@ -423,8 +430,8 @@ def build_environment(settings_obj=settings, environ=None, file_values=None) -> 
     for key, items in _readonly_groups(settings_obj, environ).items():
         if not items:
             continue
-        title, icon = GROUP_TITLES[key]
-        groups.append({'key': key, 'title': title, 'icon': icon, 'items': items})
+        title = GROUP_TITLES[key]
+        groups.append({'key': key, 'title': title, 'items': items})
 
     return {
         'groups': groups,

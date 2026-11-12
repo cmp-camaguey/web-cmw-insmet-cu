@@ -7,7 +7,7 @@
       </div>
       <div>
         Los cambios se aplican cuando se reinicie el servicio. <strong>Aplicar cambios</strong>
-        guarda y reinicia de una vez; <strong>Aceptar</strong> solo escribe los valores, y el
+        guarda y reinicia de una vez; <strong>Guardar</strong> solo escribe los valores, y el
         sitio sigue usando los de <strong>En ejecución</strong> hasta el próximo reinicio.
       </div>
     </div>
@@ -52,15 +52,13 @@
 {% endblock content_before %}
 {% block form %}
   {% for section in editable_sections %}
-    <div class="col-12">
-      <div class="card">
+    <div class="col-xl-6">
+      <div class="card h-100">
         <div class="card-body">
-          <h3 class="subheader text-muted fw-medium mb-3">
-            <i class="icon ti ti-{{ section.icon }} me-1"></i>{{ section.title }}
-          </h3>
+          <h3 class="subheader text-muted fw-medium mb-2">{{ section.title }}</h3>
           <div class="row">
             {% for row in section.rows %}
-              <div class="{{ row.width_class }} mb-3">
+              <div class="{{ row.width_class }} mb-2">
                 {% if row.is_secret %}
                   <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
                   <div class="input-group">
@@ -73,7 +71,7 @@
                       {% endif %}
                     </span>
                   </div>
-                  <small class="text-muted d-block mt-2">
+                  <small class="text-muted d-block mt-1">
                     Dejar en blanco para no cambiarla. El valor guardado nunca se muestra.
                   </small>
                 {% elif row.spec.kind == 'bool' %}
@@ -82,9 +80,9 @@
                     <label class="form-check-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
                   </div>
                   {% if row.field.help_text %}
-                    <small class="text-muted d-block mt-2">{{ row.field.help_text }}</small>
+                    <small class="text-muted d-block mt-1">{{ row.field.help_text }}</small>
                   {% endif %}
-                  <small class="text-muted d-block mt-2">
+                  <small class="text-muted d-block mt-1">
                     En ejecución: <code>{{ row.display }}</code>
                     {% if row.pending %}
                       <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
@@ -96,9 +94,9 @@
                          for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
                   {{ row.field }}
                   {% if row.field.help_text %}
-                    <small class="text-muted d-block mt-2">{{ row.field.help_text }}</small>
+                    <small class="text-muted d-block mt-1">{{ row.field.help_text }}</small>
                   {% endif %}
-                  <small class="text-muted d-block mt-2">
+                  <small class="text-muted d-block mt-1">
                     En ejecución: <code>{{ row.display }}</code>
                     {% if row.pending %}
                       <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
@@ -129,14 +127,12 @@
     </div>
   {% endfor %}
   {% for group in groups %}
-    <div class="col-12">
-      <div class="card">
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100">
         <div class="card-header">
-          <h3 class="card-title">
-            <i class="icon ti ti-{{ group.icon }} me-1"></i>{{ group.title }}
-          </h3>
+          <h3 class="card-title">{{ group.title }}</h3>
         </div>
-        <div class="table-responsive">
+        <div class="table-responsive environment-card-scroll">
           <table class="table table-sm table-vcenter card-table">
             <tbody>
               {% for item in group.items %}
@@ -193,7 +189,7 @@
       <button type="submit"
               class="btn btn-primary"
               {% if not can_write %}disabled{% endif %}>
-        <i class="icon ti ti-check"></i> Aceptar
+        <i class="icon ti ti-check"></i> Guardar
       </button>
       {% comment %}
         `formaction` y no un segundo formulario: los campos son los mismos y

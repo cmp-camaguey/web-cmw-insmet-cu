@@ -216,8 +216,7 @@ class EnvironmentConfigView(LoginRequiredMixin, UserPassesTestMixin, TemplateVie
         return [
             {
                 'key': key,
-                'title': EDITABLE_GROUP_TITLES[key][0],
-                'icon': EDITABLE_GROUP_TITLES[key][1],
+                'title': EDITABLE_GROUP_TITLES[key],
                 'rows': rows,
                 'readonly': environment['section_notes'].get(key, []),
             }
