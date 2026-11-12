@@ -1,7 +1,7 @@
 {% load my_filters %}
 {% if request.user|has_permission:'core.change_companysettings' or request.user|has_permission:'core.change_siteconfiguration' or request.user.is_superuser or request.user|has_permission:'core.view_emailrecipientlist' %}
   <li class="nav-item dropdown
-             {% if 'core:company_settings' in segment or 'core:site_configuration' in segment or 'core:activity_log' in segment or 'email' in segment %}active{% endif %}">
+             {% if 'core:company_settings' in segment or 'core:site_configuration' in segment or 'core:timezone_configuration' in segment or 'core:environment_config' in segment or 'core:activity_log' in segment or 'email' in segment %}active{% endif %}">
     <a class="nav-link dropdown-toggle"
        href="#navbar-base"
        data-bs-toggle="dropdown"
@@ -12,7 +12,7 @@
       <span class="nav-link-title">Configuración</span>
     </a>
     <div class="dropdown-menu
-                {% if 'core:company_settings' in segment or 'core:site_configuration' in segment or 'core:activity_log' in segment or 'email' in segment %}show{% endif %}">
+                {% if 'core:company_settings' in segment or 'core:site_configuration' in segment or 'core:timezone_configuration' in segment or 'core:environment_config' in segment or 'core:activity_log' in segment or 'email' in segment %}show{% endif %}">
       <div class="dropdown-menu-columns">
         <div class="dropdown-menu-column">
           {% if request.user|has_permission:'core.change_companysettings' %}
@@ -24,6 +24,14 @@
             <a class="dropdown-item
                       {% if 'site' in segment %}active{% endif %}"
                href="{% url 'core:site_configuration' %}">Sitio</a>
+            <a class="dropdown-item
+                      {% if 'core:timezone_configuration' in segment %}active{% endif %}"
+               href="{% url 'core:timezone_configuration' %}">Horario y región</a>
+          {% endif %}
+          {% if request.user.is_superuser %}
+            <a class="dropdown-item
+                      {% if 'core:environment_config' in segment %}active{% endif %}"
+               href="{% url 'core:environment_config' %}">Entorno del servidor</a>
           {% endif %}
           {% if request.user|has_permission:'core.view_activitylog' %}
             <a class="dropdown-item

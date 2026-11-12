@@ -8,7 +8,7 @@
         {% if weather_tomorrow %}
           {% if weather_tomorrow.file %}
             {% url 'home:weather_report_pdf' weather_tomorrow.uuid as report_pdf_url %}
-            {% include 'includes/home/document_card.html' with title='Pronóstico del Tiempo para Mañana' summary=weather_tomorrow.summary publisher=weather_tomorrow.user.get_full_name publisher_avatar=weather_tomorrow.user.profile.get_avatar date=weather_tomorrow.date|date:'d/m/Y h:i A' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Pronóstico del Tiempo para Mañana' %}
+            {% include 'includes/home/document_card.html' with title='Pronóstico del Tiempo para Mañana' summary=weather_tomorrow.summary publisher=weather_tomorrow.user.get_full_name publisher_avatar=weather_tomorrow.user.profile.get_avatar date=weather_tomorrow.date|local_datetime:'d/m/Y' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Pronóstico del Tiempo para Mañana' %}
           {% endif %}
           {% include 'includes/home/document_pdf_modal.html' %}
         {% else %}

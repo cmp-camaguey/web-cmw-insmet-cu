@@ -1,4 +1,4 @@
-{% load utils_filters %}
+{% load my_filters %}
 {% comment %}
   Las clases van dentro de las celdas, nunca en el `<td>`: tras filtrar o
   limpiar, `activity-log-filters.js` reconstruye la tabla con `rows.add()`,
@@ -6,8 +6,11 @@
   template no usa `text-nowrap` en las columnas de fecha e IP: en la carga
   inicial esas celdas no envolvían y al refrescar sí, y la tabla cambiaba de
   aspecto. Sin la clase, ambos estados son el mismo.
+
+  La fecha va con `local_datetime` para que respete la zona y el formato 12/24 h
+  configurados en el sitio.
 {% endcomment %}
-<td>{{ object.action_time|date:'d/m/Y H:i' }}</td>
+<td>{{ object.action_time|local_datetime:'d/m/Y H:i' }}</td>
 <td>
   {% if object.user %}
     {{ object.user }}

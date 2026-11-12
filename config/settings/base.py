@@ -14,6 +14,7 @@ perfil ya no podría imponer el suyo. Ver odd/tasks/split-config-settings.md.
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -24,7 +25,12 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-load_dotenv(BASE_DIR / '.env')
+# Archivo de entorno. Es una constante y no un literal repetido porque el panel
+# de "Entorno del servidor" escribe sobre el mismo archivo que se carga acá: si
+# divergen, el panel guarda en un lugar y Django lee de otro.
+ENV_FILE_PATH = BASE_DIR / '.env'
+
+load_dotenv(ENV_FILE_PATH)
 
 IS_PRODUCTION = 'PRODUCTION' in os.environ
 
@@ -216,6 +222,7 @@ INSTALLED_APPS = [
     'apps.meteo.apps.MeteoConfig',
     'apps.commercial.apps.CommercialConfig',
     'apps.dashboard.apps.DashboardConfig',
+    'apps.monitoring.apps.MonitoringConfig',
 ]
 
 whitenoise_middleware = 'whitenoise.middleware.WhiteNoiseMiddleware'
@@ -227,6 +234,9 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     whitenoise_middleware,
+    # Mide cada petición del stack Django. Va justo después de WhiteNoise:
+    # los estáticos salen antes y no ensucian la muestra.
+    'apps.monitoring.middleware.RequestMetricsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -236,6 +246,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'apps.core.middleware.CheckUserProfileMiddleware',
     'apps.core.middleware.MaintenanceModeMiddleware',
+    'apps.core.middleware.SiteTimezoneMiddleware',
 ]
 
 # ---------------------------------------------------------------------------
@@ -521,8 +532,27 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
 EMAIL_FILE_PATH = os.getenv('EMAIL_FILE_PATH', BASE_DIR / 'tmp' / 'emails')
 
+
 # LDAP
-if os.getenv('LDAP_SERVER_URI'):
+def resolve_ldap_enabled(environ):
+    """¿Se agrega el backend LDAP a la autenticación?
+
+    `LDAP_ENABLED` manda cuando existe, porque es el interruptor que administra
+    el panel. Sin la variable se mantiene la regla anterior —LDAP activo si hay
+    `LDAP_SERVER_URI`— para que un `.env` viejo siga arrancando igual. La
+    lectura es tolerante a mayúsculas y a `yes`/`on`: si alguien escribe
+    `LDAP_ENABLED=true` a mano, apagar la autenticación del directorio por eso
+    sería un error caro.
+    """
+    raw = environ.get('LDAP_ENABLED')
+    if raw is None:
+        return bool(environ.get('LDAP_SERVER_URI'))
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+LDAP_ENABLED = resolve_ldap_enabled(os.environ)
+
+if LDAP_ENABLED:
     AUTHENTICATION_BACKENDS = [
         'apps.user_auth.backends.LDAP3Backend',
         'django.contrib.auth.backends.ModelBackend',
@@ -580,3 +610,21 @@ UPDATE_CHECK_TIMEOUT = int(os.getenv('UPDATE_CHECK_TIMEOUT', '15'))
 # (ver `pending_commits`). 60 peticiones por hora sin autenticar: con 5 minutos
 # de cache, un panel abierto todo el dia gasta 12.
 UPDATE_REPO_API = os.getenv('UPDATE_REPO_API', 'https://api.github.com/repos/cmp-camaguey/webcmp')
+
+
+# --- Monitoreo del sitio (feature 034) --------------------------------------
+# Interruptor único: apagado, el middleware no registra peticiones y el beacon
+# no se inyecta. Los datos ya guardados se siguen mostrando y se siguen podando.
+#
+# `manage.py test` se apaga acá y no solo en `testing.py`: con `DEBUG=True` en
+# `.env` la suite corre bajo el perfil `dev`, y una fila INSERT por petición
+# descuadraría los `assertNumQueries` de la suite. Los tests del propio
+# monitoreo lo reactivan con `override_settings(MONITORING_ENABLED=True)`.
+MONITORING_ENABLED = os.getenv('MONITORING_ENABLED', 'True') == 'True' and 'test' not in sys.argv
+# Días que se conservan las filas de `PageView`, `WebVital` y `JavaScriptError`.
+MONITORING_RETENTION_DAYS = int(os.getenv('MONITORING_RETENTION_DAYS', '30'))
+# Días que se conserva una fila por petición. Es más corto a propósito: es la
+# tabla que más crece y las ventanas del panel son de minutos u horas.
+MONITORING_HTTP_RETENTION_DAYS = int(os.getenv('MONITORING_HTTP_RETENTION_DAYS', '14'))
+# Sistema de archivos que se reporta como "disco".
+MONITORING_DISK_PATH = os.getenv('MONITORING_DISK_PATH', '/')

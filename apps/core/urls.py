@@ -8,7 +8,9 @@ from apps.core.views import (
     EmailRecipientListDeleteView,
     EmailRecipientListListView,
     EmailRecipientListUpdateView,
+    EnvironmentConfigView,
     SiteConfigurationUpdateView,
+    TimezoneConfigurationUpdateView,
 )
 
 app_name = 'core'
@@ -17,6 +19,12 @@ urlpatterns = [
     path('empresa/', CompanySettingsUpdateView.as_view(), name='company_settings'),
     path('empresa/ajax/', CompanySettingsAjaxUpdateView.as_view(), name='company_settings_ajax'),
     path('configuracion-sitio/', SiteConfigurationUpdateView.as_view(), name='site_configuration'),
+    path(
+        'horario-region/',
+        TimezoneConfigurationUpdateView.as_view(),
+        name='timezone_configuration',
+    ),
+    path('entorno/', EnvironmentConfigView.as_view(), name='environment_config'),
     path('listas-correo/', EmailRecipientListListView.as_view(), name='email_recipient_list'),
     path(
         'listas-correo/crear/',

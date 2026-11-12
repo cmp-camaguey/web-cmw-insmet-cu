@@ -1,7 +1,7 @@
 from django.core.mail.backends.base import BaseEmailBackend
 from django.test import TestCase, override_settings
 
-from apps.core.models import TaskExecutionLog
+from apps.core.models import CompanySettings, TaskExecutionLog
 from apps.core.tasks import generate_invoice_pdf_and_email_task, send_email_task
 from config.huey import huey
 
@@ -18,6 +18,43 @@ class FailingEmailBackend(BaseEmailBackend):
 @huey.task()
 def _boom_task():
     raise RuntimeError('fallo forzado para monitoreo')
+
+
+class TaskExecutionLogUuidTests(TestCase):
+    def test_uuid_is_generated_and_unique(self):
+        first = TaskExecutionLog.objects.create(task_id='uuid-a', task_name='send_email_task')
+        second = TaskExecutionLog.objects.create(task_id='uuid-b', task_name='send_email_task')
+        self.assertIsNotNone(first.uuid)
+        self.assertNotEqual(first.uuid, second.uuid)
+
+
+class CustomPermissionLabelTests(TestCase):
+    """Los permisos custom usan el codename nativo de Django y etiqueta española.
+
+    El codename en minúsculas es el que Django genera solo: los permisos se
+    renombraron en sitio (fila de `auth_permission` conservada, ver la migración
+    `0004` de `core`), así que los grupos mantienen lo que ya tenían asignado.
+    """
+
+    def test_task_execution_log_permissions_are_labelled_in_spanish(self):
+        labels = dict(TaskExecutionLog._meta.permissions)
+        self.assertEqual(labels['view_taskexecutionlog'], 'Ver')
+        self.assertEqual(labels['add_taskexecutionlog'], 'Añadir')
+        self.assertEqual(labels['change_taskexecutionlog'], 'Editar')
+        self.assertEqual(labels['delete_taskexecutionlog'], 'Eliminar')
+
+    def test_company_settings_declares_four_custom_permissions(self):
+        codenames = {codename for codename, _ in CompanySettings._meta.permissions}
+        self.assertEqual(
+            codenames,
+            {
+                'view_companysettings',
+                'add_companysettings',
+                'change_companysettings',
+                'delete_companysettings',
+            },
+        )
+        self.assertEqual(CompanySettings._meta.default_permissions, ())
 
 
 class TaskMonitoringTests(TestCase):

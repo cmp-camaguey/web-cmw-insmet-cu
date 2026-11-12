@@ -9,9 +9,9 @@
         {% if weather_note %}
           {% if weather_note.file %}
             {% url 'home:weather_report_pdf' weather_note.uuid as report_pdf_url %}
-            {% include 'includes/home/document_card.html' with title='Nota Meteorológica' summary=weather_note.summary publisher=weather_note.user.get_full_name publisher_avatar=weather_note.user.profile.get_avatar date=weather_note.date|date:'d/m/Y h:i A' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Nota Meteorológica' %}
+            {% include 'includes/home/document_card.html' with title='Nota Meteorológica' summary=weather_note.summary publisher=weather_note.user.get_full_name publisher_avatar=weather_note.user.profile.get_avatar date=weather_note.date|local_datetime:'d/m/Y' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Nota Meteorológica' %}
           {% else %}
-            {% include 'includes/home/document_card.html' with title='Nota Meteorológica' summary=weather_note.summary publisher=weather_note.user.get_full_name publisher_avatar=weather_note.user.profile.get_avatar date=weather_note.date|date:'d/m/Y h:i A' %}
+            {% include 'includes/home/document_card.html' with title='Nota Meteorológica' summary=weather_note.summary publisher=weather_note.user.get_full_name publisher_avatar=weather_note.user.profile.get_avatar date=weather_note.date|local_datetime:'d/m/Y' %}
           {% endif %}
         {% else %}
           <div class="row row-cards">

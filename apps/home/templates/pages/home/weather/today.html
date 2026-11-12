@@ -8,7 +8,7 @@
         {% if weather_today %}
           {% if weather_today.file %}
             {% url 'home:weather_report_pdf' weather_today.uuid as report_pdf_url %}
-            {% include 'includes/home/document_card.html' with title='Pronóstico del Tiempo' summary=weather_today.summary publisher=weather_today.user.get_full_name publisher_avatar=weather_today.user.profile.get_avatar date=weather_today.date|date:'d/m/Y h:i A' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Pronóstico del Tiempo' %}
+            {% include 'includes/home/document_card.html' with title='Pronóstico del Tiempo' summary=weather_today.summary publisher=weather_today.user.get_full_name publisher_avatar=weather_today.user.profile.get_avatar date=weather_today.date|local_datetime:'d/m/Y' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Pronóstico del Tiempo' %}
           {% endif %}
           {% include 'includes/home/document_pdf_modal.html' %}
         {% else %}

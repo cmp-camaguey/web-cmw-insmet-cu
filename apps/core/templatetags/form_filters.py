@@ -2,6 +2,10 @@ import re
 from datetime import date, datetime, time
 
 from django import template
+from django.utils import timezone as dj_timezone
+from django.utils.formats import date_format
+
+from apps.core.timezone_utils import get_request_time_format
 
 register = template.Library()
 
@@ -68,6 +72,50 @@ def iso_datetime(value):
     if isinstance(value, datetime):
         return value.strftime('%Y-%m-%dT%H:%M')
     return value
+
+
+def _clock_pattern(with_seconds=False):
+    """Patrón de hora según el formato configurado para el request."""
+    pattern = get_request_time_format()
+    if with_seconds:
+        return 'h:i:s A' if 'A' in pattern else 'H:i:s'
+    return pattern
+
+
+def _site_localtime(value):
+    """Localiza un datetime aware en la zona activa del request."""
+    if isinstance(value, datetime) and dj_timezone.is_aware(value):
+        return dj_timezone.localtime(value)
+    return value
+
+
+@register.filter
+def local_time(value):
+    """Hora sola respetando el formato configurado (12/24 h)."""
+    if value in (None, ''):
+        return ''
+    return date_format(_site_localtime(value), _clock_pattern())
+
+
+@register.filter
+def local_datetime(value, date_pattern='d/m/Y'):
+    """Fecha + hora respetando el formato configurado (12/24 h)."""
+    if value in (None, ''):
+        return ''
+    current = _site_localtime(value)
+    return f'{date_format(current, date_pattern)} {date_format(current, _clock_pattern())}'
+
+
+@register.filter
+def local_datetime_seconds(value, date_pattern='d/m/Y'):
+    """Fecha + hora con segundos, respetando el formato configurado (12/24 h)."""
+    if value in (None, ''):
+        return ''
+    current = _site_localtime(value)
+    return (
+        f'{date_format(current, date_pattern)} '
+        f'{date_format(current, _clock_pattern(with_seconds=True))}'
+    )
 
 
 @register.filter
