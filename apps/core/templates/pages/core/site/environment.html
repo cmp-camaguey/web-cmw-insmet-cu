@@ -1,180 +1,149 @@
-{% extends 'layouts/dashboard.html' %}
-{% block content %}
-  <div class="row row-cards">
-    <div class="col-12">
-      <div class="alert alert-info" role="alert">
-        <div class="d-flex">
-          <div class="me-2">
-            <i class="icon ti ti-info-circle"></i>
-          </div>
-          <div>
-            Los cambios se aplican cuando se reinicie el servicio. Mientras no se reinicie,
-            el sitio sigue usando los valores de <strong>En ejecución</strong>.
-          </div>
+{% extends 'layouts/form.html' %}
+{% block content_before %}
+  <div class="alert alert-info mb-3" role="alert">
+    <div class="d-flex">
+      <div class="me-2">
+        <i class="icon ti ti-info-circle"></i>
+      </div>
+      <div>
+        Los cambios se aplican cuando se reinicie el servicio. <strong>Aplicar cambios</strong>
+        guarda y reinicia de una vez; <strong>Aceptar</strong> solo escribe los valores, y el
+        sitio sigue usando los de <strong>En ejecución</strong> hasta el próximo reinicio.
+      </div>
+    </div>
+  </div>
+  {% if not can_write %}
+    <div class="alert alert-danger mb-3" role="alert">
+      <div class="d-flex">
+        <div class="me-2">
+          <i class="icon ti ti-alert-triangle"></i>
+        </div>
+        <div>
+          El proceso web no puede guardar la configuración. Los parámetros quedan en solo
+          lectura hasta que un operador revise los permisos del servidor.
         </div>
       </div>
     </div>
-    {% if not can_write %}
-      <div class="col-12">
-        <div class="alert alert-danger" role="alert">
-          <div class="d-flex">
-            <div class="me-2">
-              <i class="icon ti ti-alert-triangle"></i>
-            </div>
-            <div>
-              El proceso web no puede guardar la configuración. Los parámetros quedan en solo
-              lectura hasta que un operador revise los permisos del servidor.
-            </div>
-          </div>
+  {% endif %}
+  {% if apply_status %}
+    <div class="alert alert-{{ apply_status.tone }} mb-3" role="alert">
+      <div class="d-flex">
+        <div class="me-2">
+          <i class="icon ti ti-{{ apply_status.icon }}"></i>
+        </div>
+        <div>{{ apply_status.text }}</div>
+      </div>
+    </div>
+  {% endif %}
+  {% if can_write and not can_apply %}
+    <div class="alert alert-warning mb-3" role="alert">
+      <div class="d-flex">
+        <div class="me-2">
+          <i class="icon ti ti-plug-off"></i>
+        </div>
+        <div>
+          El reinicio automático no está disponible en este servidor, así que el botón
+          <strong>Aplicar cambios</strong> queda deshabilitado. Guarde los cambios y reinicie
+          el servicio desde el servidor.
         </div>
       </div>
-    {% endif %}
+    </div>
+  {% endif %}
+{% endblock content_before %}
+{% block form %}
+  {% for section in editable_sections %}
     <div class="col-12">
-      <form method="post" action=".">
-        {% csrf_token %}
-        {% if form.non_field_errors %}
-          <div class="alert alert-danger" role="alert">
-            {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+      <div class="card">
+        <div class="card-body">
+          <h3 class="subheader text-muted fw-medium mb-3">
+            <i class="icon ti ti-{{ section.icon }} me-1"></i>{{ section.title }}
+          </h3>
+          <div class="row">
+            {% for row in section.rows %}
+              <div class="{{ row.width_class }} mb-3">
+                {% if row.is_secret %}
+                  <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                  <div class="input-group">
+                    {{ row.field }}
+                    <span class="input-group-text">
+                      {% if row.configured %}
+                        <span class="badge bg-success-lt">Configurada</span>
+                      {% else %}
+                        <span class="badge bg-secondary-lt">Sin configurar</span>
+                      {% endif %}
+                    </span>
+                  </div>
+                  <small class="text-muted d-block mt-2">
+                    Dejar en blanco para no cambiarla. El valor guardado nunca se muestra.
+                  </small>
+                {% elif row.spec.kind == 'bool' %}
+                  <div class="form-check form-switch">
+                    {{ row.field }}
+                    <label class="form-check-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                  </div>
+                  {% if row.field.help_text %}
+                    <small class="text-muted d-block mt-2">{{ row.field.help_text }}</small>
+                  {% endif %}
+                  <small class="text-muted d-block mt-2">
+                    En ejecución: <code>{{ row.display }}</code>
+                    {% if row.pending %}
+                      <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
+                    {% endif %}
+                  </small>
+                {% else %}
+                  <label class="form-label{% if row.field.field.required %}
+                                  required{% endif %}"
+                         for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+                  {{ row.field }}
+                  {% if row.field.help_text %}
+                    <small class="text-muted d-block mt-2">{{ row.field.help_text }}</small>
+                  {% endif %}
+                  <small class="text-muted d-block mt-2">
+                    En ejecución: <code>{{ row.display }}</code>
+                    {% if row.pending %}
+                      <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
+                    {% endif %}
+                  </small>
+                {% endif %}
+                {% if row.field.errors %}
+                  <div class="invalid-feedback d-block">{{ row.field.errors.0 }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% if section.readonly %}
+          <div class="card-footer">
+            <div class="text-muted small mb-1">Solo lectura</div>
+            <div class="row">
+              {% for item in section.readonly %}
+                <div class="col-md-6 py-1">
+                  <span class="text-muted">{{ item.label }}:</span>
+                  <code class="text-break">{{ item.value }}</code>
+                </div>
+              {% endfor %}
+            </div>
           </div>
         {% endif %}
-        {% for section in editable_sections %}
-          <div class="card mb-3">
-            <div class="card-header">
-              <h3 class="card-title">
-                <i class="icon ti ti-{{ section.icon }} me-1"></i>{{ section.title }}
-              </h3>
-            </div>
-            <div class="card-body">
-              <div class="row g-3">
-                {% for row in section.rows %}
-                  <div class="{{ row.width_class }}">
-                    {% if row.is_secret %}
-                      <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-                      <div class="input-group">
-                        {{ row.field }}
-                        <span class="input-group-text">
-                          {% if row.configured %}
-                            <span class="badge bg-success-lt">Configurada</span>
-                          {% else %}
-                            <span class="badge bg-secondary-lt">Sin configurar</span>
-                          {% endif %}
-                        </span>
-                      </div>
-                      <small class="text-muted d-block mt-1">
-                        Dejar en blanco para no cambiarla. El valor guardado nunca se muestra.
-                      </small>
-                    {% elif row.spec.kind == 'bool' %}
-                      <div class="form-check form-switch">
-                        {{ row.field }}
-                        <label class="form-check-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-                      </div>
-                      {% if row.field.help_text %}
-                        <small class="text-muted d-block mt-1">{{ row.field.help_text }}</small>
-                      {% endif %}
-                      <small class="text-muted d-block mt-1">
-                        En ejecución: <code>{{ row.display }}</code>
-                        {% if row.pending %}
-                          <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
-                        {% endif %}
-                      </small>
-                    {% else %}
-                      <label class="form-label{% if row.field.field.required %}
-                                      required{% endif %}"
-                             for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-                      {{ row.field }}
-                      {% if row.field.help_text %}
-                        <small class="text-muted d-block mt-1">{{ row.field.help_text }}</small>
-                      {% endif %}
-                      <small class="text-muted d-block mt-1">
-                        En ejecución: <code>{{ row.display }}</code>
-                        {% if row.pending %}
-                          <span class="badge bg-warning-lt ms-1">Pendiente de reinicio</span>
-                        {% endif %}
-                      </small>
-                    {% endif %}
-                    {% if row.field.errors %}
-                      <div class="invalid-feedback d-block">{{ row.field.errors.0 }}</div>
-                    {% endif %}
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
-            {% if section.readonly %}
-              <div class="card-footer">
-                <div class="text-muted small mb-1">Solo lectura</div>
-                <div class="row">
-                  {% for item in section.readonly %}
-                    <div class="col-md-6 py-1">
-                      <span class="text-muted">{{ item.label }}:</span>
-                      <code class="text-break">{{ item.value }}</code>
-                    </div>
-                  {% endfor %}
-                </div>
-              </div>
-            {% endif %}
-          </div>
-        {% endfor %}
-        <div class="d-flex justify-content-end gap-2 mb-3">
-          <a href="{% url 'core:environment_config' %}"
-             class="btn btn-outline-secondary">Descartar cambios</a>
-          <button type="submit"
-                  class="btn btn-primary"
-                  {% if not can_write %}disabled{% endif %}>
-            <i class="icon ti ti-device-floppy"></i> Guardar
-          </button>
-        </div>
-      </form>
-    </div>
-    {% for group in groups %}
-      <div class="col-12">
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">
-              <i class="icon ti ti-{{ group.icon }} me-1"></i>{{ group.title }}
-            </h3>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-sm table-vcenter card-table">
-              <tbody>
-                {% for item in group.items %}
-                  <tr>
-                    <td class="text-muted w-50">{{ item.label }}</td>
-                    <td>
-                      <code class="text-break">{{ item.value }}</code>
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
-    {% endfor %}
+    </div>
+  {% endfor %}
+  {% for group in groups %}
     <div class="col-12">
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">
-            <i class="icon ti ti-lock me-1"></i>Secretos fuera del panel
+            <i class="icon ti ti-{{ group.icon }} me-1"></i>{{ group.title }}
           </h3>
-        </div>
-        <div class="card-body">
-          <p class="text-muted mb-0">
-            Estas claves no se administran desde acá. Solo se informa si están configuradas;
-            ningún valor se envía al navegador.
-          </p>
         </div>
         <div class="table-responsive">
           <table class="table table-sm table-vcenter card-table">
             <tbody>
-              {% for secret in secrets %}
+              {% for item in group.items %}
                 <tr>
-                  <td class="text-muted">{{ secret.label }}</td>
-                  <td class="text-end">
-                    {% if secret.configured %}
-                      <span class="badge bg-success-lt">Configurada</span>
-                    {% else %}
-                      <span class="badge bg-secondary-lt">Sin configurar</span>
-                    {% endif %}
+                  <td class="text-muted w-50">{{ item.label }}</td>
+                  <td>
+                    <code class="text-break">{{ item.value }}</code>
                   </td>
                 </tr>
               {% endfor %}
@@ -183,5 +152,64 @@
         </div>
       </div>
     </div>
+  {% endfor %}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">
+          <i class="icon ti ti-lock me-1"></i>Secretos fuera del panel
+        </h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-0">
+          Estas claves no se administran desde acá. Solo se informa si están configuradas;
+          ningún valor se envía al navegador.
+        </p>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-vcenter card-table">
+          <tbody>
+            {% for secret in secrets %}
+              <tr>
+                <td class="text-muted">{{ secret.label }}</td>
+                <td class="text-end">
+                  {% if secret.configured %}
+                    <span class="badge bg-success-lt">Configurada</span>
+                  {% else %}
+                    <span class="badge bg-secondary-lt">Sin configurar</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 {% endblock %}
+{% block form_actions %}
+  <div class="col-12">
+    <div class="d-flex justify-content-end gap-2 pt-3 mt-3 border-top">
+      <button type="submit"
+              class="btn btn-primary"
+              {% if not can_write %}disabled{% endif %}>
+        <i class="icon ti ti-check"></i> Aceptar
+      </button>
+      {% comment %}
+        `formaction` y no un segundo formulario: los campos son los mismos y
+        un POST aparte obligaría a duplicar el formulario completo, con el
+        riesgo de que los dos se separen.
+      {% endcomment %}
+      <button type="submit"
+              formaction="{% url 'core:environment_apply' %}"
+              class="btn btn-warning"
+              onclick="return confirm('Se guardarán los cambios y se reiniciarán los servicios. El sitio dejará de responder unos segundos. ¿Continuar?')"
+              {% if not can_write or not can_apply %}disabled{% endif %}>
+        <i class="icon ti ti-refresh"></i> Aplicar cambios
+      </button>
+      <a href="{% url 'core:environment_config' %}" class="btn btn-secondary">
+        <i class="icon ti ti-x"></i> Cancelar
+      </a>
+    </div>
+  </div>
+{% endblock form_actions %}

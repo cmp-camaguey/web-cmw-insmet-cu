@@ -623,6 +623,10 @@ sudoers acotado a un comando, `/usr/local/sbin/webcmp-deploy` y el ejecutor
 de despliegue**: la actualizacion es pull, asi que no hay clave privada que sacar
 del servidor ni secret que cargar en GitHub. Ver **El boton "Actualizar"**.
 
+En la misma pasada queda el ejecutor del boton **"Aplicar cambios"** del panel de
+entorno (`webcmp-apply` y su `.path`), que corre como root porque reinicia los
+servicios. Ver **El boton "Aplicar cambios" del panel de entorno**.
+
 Re-correr el script es seguro: cada pregunta muestra el valor actual como
 default, no regenera claves, no borra la base y no pisa ni `/etc/webcmp/deploy.env`
 ni un `.env` afinado a mano sin confirmarlo.
@@ -664,6 +668,12 @@ El paso 6 del andamiaje es el ejecutor del boton (`webcmp-autodeploy` y su
 systemd, el directorio de estado con setgid y el script que resuelve el SHA. Si se
 dejo `--skip-deploy-scaffold`, el deploy sigue disponible a mano con
 `webcmp-deploy`.
+
+El boton **"Aplicar cambios"** del panel de entorno sale del mismo paso, en
+[`setup_apply()`](../deploy/install.sh): `webcmp-apply-env` y su `.path`. Son las
+mismas piezas con un ejecutor distinto, y por eso `--skip-deploy-scaffold` tambien
+lo omite; los archivos y permisos estan en **El boton "Aplicar cambios" del panel
+de entorno**.
 
 El `deploy.env` del camino manual sale de `deploy.env.example`, que **no define
 ninguna `HEALTHCHECK_*`**. Sin ellas el health check va al 443 de `127.0.0.1`
@@ -834,6 +844,111 @@ Si el panel se queda en "Desplegando..." para siempre, el ejecutor murio antes d
 escribir `failed`. Pasada una hora el panel deja de creer ese estado
 (`RUN_STALE_SECONDS`) y vuelve a mostrar el aviso con el boton; el estado crudo
 sigue en el archivo. La fuente de verdad es `journalctl`, no el panel.
+
+
+## El boton "Aplicar cambios" del panel de entorno
+
+Configuracion → Entorno del servidor guarda los parametros editables, pero Django
+los leyo al arrancar: hasta que el servicio no se reinicie, el sitio sigue usando
+los valores viejos. Por eso la pagina tiene, junto a **Guardar**, un boton
+**Aplicar cambios** que hace las dos cosas en un solo paso.
+
+Son dos botones y no uno porque **Guardar** sirve para dejar preparado un cambio
+que se aplicara en la ventana de mantenimiento. **Aplicar cambios** es para
+cuando el cambio se quiere en el sitio ahora. Un boton que solo reiniciara
+descartaria en silencio lo que el operador acaba de escribir, asi que no existe.
+
+El mecanismo es el mismo del boton "Actualizar", con un privilegio distinto:
+
+```
+Django (webcmp)  --escribe-->  /var/lib/webcmp/apply-request
+                                        |
+                                systemd .path (PathExists=)
+                                        |
+                                        v
+                          webcmp-apply-env (usuario: root)
+                                        |
+                          systemctl restart webcmp webcmp-huey
+                                        |
+                                        v
+                          escribe /var/lib/webcmp/apply-status.json
+```
+
+Este es el **unico** lugar del diseno donde el ejecutor corre como root, porque
+reiniciar un servicio del sistema lo exige. Ese privilegio es seguro solo
+mientras el script no acepte ordenes, y no las acepta:
+
+- No lee destinos ni comandos del archivo de peticion. Del contenido solo toma
+  el nombre de quien lo pidio, y lo sanea antes de escribirlo.
+- Las unidades que reinicia estan escritas en el propio unit
+  (`Environment="UNITS=..."`), que `install.sh` renderiza desde `GUNICORN_UNIT` y
+  `HUEY_UNIT`.
+- No ejecuta nada del checkout. El script vive en `/usr/local/sbin`, `root:root`,
+  fuera del directorio que escribe `webcmp`.
+
+Un proceso web comprometido consigue, como mucho, reiniciar esos dos servicios
+—algo que ya puede lograr tumbando el proceso— y no gana un interprete ni un
+comando arbitrario.
+
+Se reinician **los dos** servicios siempre: Huey manda correos y genera PDF con la
+configuracion que leyo al arrancar, asi que reiniciar solo Gunicorn deja al worker
+con los valores viejos.
+
+### Lo que el panel muestra despues
+
+El ejecutor escribe `apply-status.json` y la pagina lo lee en cada visita:
+
+| Estado | Cuando | Que dice la pagina |
+|---|---|---|
+| `running` | el ejecutor arranco y todavia no termino | "Reinicio en curso" |
+| `ok` | `systemctl restart` salio 0 | "Ultimo reinicio completado", con fecha y autor |
+| `failed` | `systemctl restart` fallo | "El ultimo reinicio fallo", con el motivo |
+| `stale` | `running` con mas de 180 s (`RUN_STALE_SECONDS`) | "quedo sin confirmar; revise los servicios" |
+
+`stale` existe porque un `running` eterno es peor que un aviso: systemd puede
+matar la unidad por timeout y el panel se quedaria "en curso" para siempre. Un
+estado que no se reconoce, o un JSON a medias, no se muestra como si fuera un
+resultado: la pagina no inventa.
+
+Si el directorio no es escribible por el proceso web, el boton queda
+deshabilitado y la pagina lo explica. En un servidor sin esta unidad instalada,
+**Guardar** sigue funcionando y el reinicio se hace a mano.
+
+### Archivos y permisos
+
+| Ruta | Dueno | Modo |
+|---|---|---|
+| `/var/lib/webcmp/apply-request` | `webcmp:webcmp` | 0644 |
+| `/var/lib/webcmp/apply-status.json` | `root:webcmp` | 0644 |
+| `/usr/local/sbin/webcmp-apply-env` | `root:root` | 0755 |
+| `/etc/systemd/system/webcmp-apply.path` | `root:root` | 0644 |
+| `/etc/systemd/system/webcmp-apply.service` | `root:root` | 0644 |
+
+`install.sh` lo instala en `setup_apply()`, junto al andamiaje del boton
+"Actualizar". Con `--skip-deploy-scaffold` no se instala.
+
+### Apagarlo
+
+```bash
+sudo systemctl disable --now webcmp-apply.path
+sudo rm -f /var/lib/webcmp/apply-request
+```
+
+A partir de ahi la peticion queda en disco y nadie la recoge: el boton sigue
+visible, porque lo que lo habilita es el permiso del directorio, no la unidad.
+Como el archivo no se consume, el segundo intento avisa **"Ya hay un reinicio en
+curso"** aunque no haya ninguno. Es el precio de no dejar que el proceso web
+pregunte por systemd; si se apaga la unidad, conviene quitar el boton de la vista
+o volver a habilitarla. **Guardar** no se ve afectado y el reinicio se hace a
+mano. Para volver a habilitarlo, `sudo systemctl enable --now webcmp-apply.path`.
+
+### Diagnosticar
+
+```bash
+systemctl status webcmp-apply.path
+journalctl -u webcmp-apply -n 50
+cat /var/lib/webcmp/apply-status.json
+```
 
 
 ## Las notificaciones del panel

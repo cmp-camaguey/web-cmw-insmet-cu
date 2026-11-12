@@ -84,16 +84,43 @@ una pista del valor actual: los campos de contraseña usan
 - **Sin sorpresas**: solo se escriben las claves cuyo valor cambió. Si la clave
   no está en el archivo y el valor coincide con el efectivo, tampoco se agrega.
 
-## 4. Sin reinicio desde el panel
+## 4. Aplicar los cambios sin darle root al proceso web
 
 Django lee el entorno al arrancar. Escribir el `.env` no cambia nada en
-caliente, y reiniciar el servicio desde la web es exactamente la acción que
-puede tumbar el sitio. La página:
+caliente, así que la página:
 
 - Advierte que los cambios aplican al reiniciar.
 - Marca `Pendiente de reinicio` los parámetros cuyo valor en archivo difiere del
   valor en ejecución.
-- No dispara `systemctl` ni escribe peticiones de despliegue.
+- Ofrece **Aplicar cambios**: guarda y pide el reinicio en una sola acción, para
+  que nadie tenga que recordar el orden ni entrar por SSH.
+
+El proceso web **no** ejecuta `systemctl`. Reiniciar desde ahí sería darle root a
+la aplicación: `webcmp` corre con el shell en `/bin/false` y sin sudo, a
+propósito. El botón escribe `/var/lib/webcmp/apply-request` y se desentiende; una
+unidad `webcmp-apply.path` (`PathExists=`) la ve aparecer y arranca
+`webcmp-apply.service`, que corre como root y ejecuta
+`/usr/local/sbin/webcmp-apply-env`.
+
+Ese ejecutor es el único punto con privilegios, y está acotado a propósito:
+
+- No lee destinos ni comandos del archivo de petición. Del contenido solo toma
+  el nombre de quien pidió, saneado, para el registro.
+- Las unidades que reinicia están en `Environment="UNITS=..."`, dentro del unit
+  que renderiza `install.sh` desde `GUNICORN_UNIT` y `HUEY_UNIT`.
+- Vive en `/usr/local/sbin`, `root:root`, fuera del checkout que escribe
+  `webcmp`.
+- El archivo se crea con `O_EXCL`: dos pestañas no encolan dos reinicios, y el
+  segundo intento se avisa en vez de pisar el primero.
+- Se consume antes de tomar el `flock`, porque `PathExists=` solo reacciona a la
+  transición ausente→presente: un archivo que quede en disco bloquearía todas
+  las peticiones siguientes sin un error visible.
+
+El ejecutor deja `/var/lib/webcmp/apply-status.json` con `running`, `ok` o
+`failed`, y la página lo lee. Un `running` de más de 180 s se informa como
+**sin confirmar** en vez de "en curso" para siempre: si systemd mató la unidad,
+el panel no puede seguir esperando. Un estado desconocido o un JSON roto no se
+muestran: la página no inventa resultados.
 
 ## 5. Seguridad
 

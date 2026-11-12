@@ -1,7 +1,9 @@
+import json
 import os
 import shutil
 import stat
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from django.conf import settings
@@ -10,6 +12,13 @@ from django.template.loader import render_to_string
 from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
+from apps.core.env_apply import (
+    RUN_STALE_SECONDS,
+    ApplyRequestPendingError,
+    apply_status,
+    can_request,
+    request_apply,
+)
 from apps.core.env_config import (
     EDITABLE_FIELDS,
     as_bool,
@@ -282,7 +291,9 @@ class EnvConfigTests(SimpleTestCase):
             self.assertFalse(as_bool(value))
 
 
-class EnvironmentConfigViewTests(TestCase):
+class EnvironmentViewTestBase(TestCase):
+    """Andamiaje compartido por las dos vistas del panel de entorno."""
+
     def setUp(self):
         _disable_maintenance()
         self.tempdir = tempfile.mkdtemp()
@@ -336,6 +347,8 @@ class EnvironmentConfigViewTests(TestCase):
         data.update(overrides)
         return data
 
+
+class EnvironmentConfigViewTests(EnvironmentViewTestBase):
     def test_anonymous_is_redirected_to_login(self):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 302)
@@ -567,10 +580,14 @@ class EnvironmentConfigViewTests(TestCase):
 
     @staticmethod
     def _column_of(html: str, key: str) -> str:
-        """Clase del contenedor de grilla que envuelve al campo `key`."""
+        """Clase de grilla del contenedor del campo `key`.
+
+        Se devuelve solo la primera clase: el contenedor puede llevar clases de
+        espaciado (por ejemplo `mb-3`), que no cambian el ancho.
+        """
         index = html.index(f'id="id_{key}"')
         start = html.rindex('class="col-', 0, index) + len('class="')
-        return html[start : html.index('"', start)]
+        return html[start : html.index('"', start)].split()[0]
 
     def test_page_does_not_render_server_paths(self):
         self.client.force_login(self.superuser)
@@ -581,6 +598,8 @@ class EnvironmentConfigViewTests(TestCase):
             getattr(settings, 'UPDATE_STATUS_FILE', ''),
             getattr(settings, 'UPDATE_REQUEST_FILE', ''),
             getattr(settings, 'UPDATE_PROGRESS_FILE', ''),
+            getattr(settings, 'ENV_APPLY_REQUEST_FILE', ''),
+            getattr(settings, 'ENV_APPLY_STATUS_FILE', ''),
         ):
             if value:
                 self.assertNotContains(response, str(value))
@@ -654,3 +673,212 @@ class EnvironmentConfigViewTests(TestCase):
 
         request.user = self.staff
         self.assertNotIn('Entorno del servidor', render_to_string(template, request=request))
+
+
+class EnvApplyStatusTests(SimpleTestCase):
+    """Estado del reinicio: lo que el panel muestra y lo que nunca inventa."""
+
+    def setUp(self):
+        self.tempdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tempdir, ignore_errors=True)
+        self.path = Path(self.tempdir) / 'apply-status.json'
+
+    def _write(self, payload):
+        self.path.write_text(json.dumps(payload), encoding='utf-8')
+
+    def test_missing_file_reports_nothing(self):
+        self.assertIsNone(apply_status(self.path))
+
+    def test_garbage_file_reports_nothing(self):
+        self.path.write_text('{no es json', encoding='utf-8')
+        self.assertIsNone(apply_status(self.path))
+
+    def test_non_object_reports_nothing(self):
+        self.path.write_text('[]', encoding='utf-8')
+        self.assertIsNone(apply_status(self.path))
+
+    def test_unknown_state_reports_nothing(self):
+        self._write({'status': 'quizas'})
+        self.assertIsNone(apply_status(self.path))
+
+    def test_ok_state_reports_when_and_who(self):
+        self._write(
+            {
+                'status': 'ok',
+                'requested_by': 'omar',
+                'started_at': '2026-11-10T12:00:00+00:00',
+                'finished_at': '2026-11-10T12:00:05+00:00',
+            }
+        )
+        status = apply_status(self.path)
+        self.assertEqual(status['state'], 'ok')
+        self.assertEqual(status['tone'], 'success')
+        self.assertIn('Último reinicio completado', status['text'])
+        self.assertIn('omar', status['text'])
+
+    def test_failed_state_carries_the_reason(self):
+        self._write({'status': 'failed', 'error': 'systemctl restart devolvio un error'})
+        status = apply_status(self.path)
+        self.assertEqual(status['state'], 'failed')
+        self.assertEqual(status['tone'], 'danger')
+        self.assertIn('systemctl restart devolvio un error', status['text'])
+
+    def test_recent_running_is_in_progress(self):
+        self._write({'status': 'running', 'started_at': datetime.now(UTC).isoformat()})
+        status = apply_status(self.path)
+        self.assertEqual(status['state'], 'running')
+        self.assertEqual(status['tone'], 'info')
+        self.assertIn('Reinicio en curso', status['text'])
+
+    def test_old_running_is_reported_as_unconfirmed(self):
+        started = datetime.now(UTC) - timedelta(seconds=RUN_STALE_SECONDS + 1)
+        self._write({'status': 'running', 'started_at': started.isoformat()})
+        status = apply_status(self.path)
+        self.assertEqual(status['state'], 'stale')
+        self.assertEqual(status['tone'], 'warning')
+        self.assertIn('sin confirmar', status['text'])
+
+    def test_running_without_start_instant_is_unconfirmed(self):
+        self._write({'status': 'running'})
+        self.assertEqual(apply_status(self.path)['state'], 'stale')
+
+    def test_request_is_written_once(self):
+        request_path = Path(self.tempdir) / 'apply-request'
+        user = User(username='omar')
+
+        payload = request_apply(request_path, user)
+
+        self.assertEqual(payload['requested_by'], 'omar')
+        self.assertTrue(request_path.exists())
+        with self.assertRaises(ApplyRequestPendingError):
+            request_apply(request_path, user)
+
+    def test_can_request_follows_the_directory(self):
+        self.assertTrue(can_request(Path(self.tempdir) / 'apply-request'))
+        self.assertFalse(can_request(Path(self.tempdir) / 'no-existe' / 'apply-request'))
+
+
+class EnvironmentApplyViewTests(EnvironmentViewTestBase):
+    """El botón "Aplicar cambios": guarda y pide el reinicio en un solo paso."""
+
+    def setUp(self):
+        super().setUp()
+        self.request_path = Path(self.tempdir) / 'apply-request'
+        self.status_path = Path(self.tempdir) / 'apply-status.json'
+        override = override_settings(
+            ENV_APPLY_REQUEST_FILE=self.request_path,
+            ENV_APPLY_STATUS_FILE=self.status_path,
+        )
+        override.enable()
+        self.addCleanup(override.disable)
+        self.apply_url = reverse('core:environment_apply')
+
+    def test_apply_saves_the_changes_and_requests_the_restart(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(self.apply_url, self._payload(NOTIFICATIONS_MAX_VISIBLE='25'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('NOTIFICATIONS_MAX_VISIBLE=25', self.env_path.read_text(encoding='utf-8'))
+        payload = json.loads(self.request_path.read_text(encoding='utf-8'))
+        self.assertEqual(payload['requested_by'], 'root')
+
+    def test_apply_records_the_restart_in_the_audit_log(self):
+        self.client.force_login(self.superuser)
+
+        self.client.post(self.apply_url, self._payload(NOTIFICATIONS_MAX_VISIBLE='25'))
+
+        self.assertTrue(
+            ActivityLog.objects.filter(
+                object_repr='Entorno del servidor',
+                message='Reinicio del servicio solicitado',
+            ).exists()
+        )
+
+    def test_apply_without_changes_still_requests_the_restart(self):
+        """Se pudo editar el archivo a mano y usar el botón solo para aplicar."""
+        self.client.force_login(self.superuser)
+        before = self.env_path.read_text(encoding='utf-8')
+
+        response = self.client.post(self.apply_url, self._payload())
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.env_path.read_text(encoding='utf-8'), before)
+        self.assertTrue(self.request_path.exists())
+        self.assertFalse(
+            ActivityLog.objects.filter(message__startswith='Parámetros actualizados').exists()
+        )
+
+    def test_apply_with_a_pending_request_does_not_enqueue_twice(self):
+        self.client.force_login(self.superuser)
+        self.request_path.write_text('{"requested_by": "previo"}', encoding='utf-8')
+
+        response = self.client.post(
+            self.apply_url, self._payload(NOTIFICATIONS_MAX_VISIBLE='25'), follow=True
+        )
+
+        self.assertEqual(
+            self.request_path.read_text(encoding='utf-8'), '{"requested_by": "previo"}'
+        )
+        self.assertContains(response, 'Ya hay un reinicio en curso')
+        self.assertIn('NOTIFICATIONS_MAX_VISIBLE=25', self.env_path.read_text(encoding='utf-8'))
+
+    def test_apply_with_an_invalid_form_does_not_request_anything(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(self.apply_url, self._payload(SITE_URL='ftp://cmp.cu/'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.request_path.exists())
+
+    def test_apply_when_the_file_is_not_writable_does_not_request_anything(self):
+        self.client.force_login(self.superuser)
+        self.env_path.parent.chmod(0o500)
+        self.addCleanup(self.env_path.parent.chmod, 0o700)
+
+        response = self.client.post(self.apply_url, self._payload(NOTIFICATIONS_MAX_VISIBLE='25'))
+
+        self.assertEqual(response.status_code, 302)
+        self.env_path.parent.chmod(0o700)
+        self.assertFalse(self.request_path.exists())
+
+    def test_staff_without_superuser_cannot_request_the_restart(self):
+        self.client.force_login(self.superuser)
+        payload = self._payload()
+        self.client.force_login(self.staff)
+
+        response = self.client.post(self.apply_url, payload)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(self.request_path.exists())
+
+    def test_page_offers_the_button_next_to_the_save_button(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(self.url)
+
+        self.assertTrue(response.context['can_apply'])
+        self.assertContains(response, 'Aplicar cambios')
+        self.assertContains(response, f'formaction="{self.apply_url}"')
+
+    def test_page_disables_the_button_without_the_watcher(self):
+        self.client.force_login(self.superuser)
+        override = override_settings(
+            ENV_APPLY_REQUEST_FILE=Path(self.tempdir) / 'no-existe' / 'apply-request'
+        )
+        override.enable()
+        self.addCleanup(override.disable)
+
+        response = self.client.get(self.url)
+
+        self.assertFalse(response.context['can_apply'])
+        self.assertContains(response, 'El reinicio automático no está disponible')
+
+    def test_page_shows_the_last_restart_status(self):
+        self.status_path.write_text(
+            json.dumps({'status': 'ok', 'finished_at': '2026-11-10T12:00:05+00:00'}),
+            encoding='utf-8',
+        )
+        self.client.force_login(self.superuser)
+
+        self.assertContains(self.client.get(self.url), 'Último reinicio completado')

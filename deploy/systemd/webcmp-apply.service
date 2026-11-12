@@ -1,0 +1,32 @@
+[Unit]
+Description=Reinicio pedido desde el panel de entorno (change 033-entorno-servidor)
+Documentation=file:/srv/webcmp/deploy/README-deploy.md
+
+[Service]
+Type=oneshot
+# root, y es el UNICO lugar del diseno donde hace falta: reiniciar un servicio
+# del sistema es una operacion de root. El script no acepta argumentos, no lee
+# destinos del archivo de peticion y reinicia una lista fija de unidades, asi
+# que este privilegio no se puede redirigir a otro comando.
+User=root
+# El grupo del servicio para que apply-status.json lo pueda leer el proceso web
+# aunque alguien endurezca los permisos del directorio.
+Group=webcmp
+ExecStart=/usr/local/sbin/webcmp-apply-env
+# Las unidades que se reinician. El instalador las renderiza desde
+# GUNICORN_UNIT y HUEY_UNIT: si alguien renombra un servicio, un ejecutor con
+# los nombres viejos fallaria en cada pulsacion del boton, y el panel diria
+# "fallo el reinicio" sin decir que el nombre ya no existe.
+Environment="UNITS=webcmp.service webcmp-huey.service"
+# Un `restart` de los dos servicios tarda segundos. Este tope existe para que
+# una unidad colgada no deje el panel en "en curso" hasta el timeout global de
+# systemd (90s por defecto) sin explicacion.
+TimeoutStartSec=120
+# El script no necesita escribir fuera de /var/lib/webcmp ni leer el checkout.
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
