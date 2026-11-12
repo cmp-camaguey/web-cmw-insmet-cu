@@ -1,3 +1,4 @@
+# data-safety: reviewed: rellena `uuid` en filas existentes; no borra ni reescribe datos.
 import uuid
 
 from django.db import migrations, models
