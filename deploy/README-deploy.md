@@ -8,12 +8,10 @@ La logica vive en [`deploy.sh`](deploy.sh), que corre **en el servidor**. Lo
 dispara el boton **"Actualizar"** del panel: el servidor resuelve `refs/heads/main`
 contra GitHub por HTTPS y aplica el commit localmente. No hace falta ningun puerto
 entrante ni ningun runner conectandose.
-Una sola fuente de verdad: si el procedimiento esta en los dos lados, el dia que
-uno cambie el deploy hace cosas distintas segun por donde entro.
 
 ## Que hace, y en que orden
 
-El orden no es estetico, es la garantia:
+El orden importa:
 
 | # | Paso | Por que en ese lugar |
 | --- | --- | --- |
@@ -29,28 +27,20 @@ El orden no es estetico, es la garantia:
 | 10 | `systemctl restart` de ambos units | `reload` NO alcanza, ver la nota de abajo |
 | 11 | Health check contra Nginx local | Atraviesa Nginx, TLS y el socket: el camino completo |
 
-### Por que `makemigrations --check` y no `makemigrations`
+### Gate `makemigrations --check`
 
-El proyecto **versiona las migraciones**: los `0001_initial` de cada app estan
-en el repositorio y viajan en el clone. El esquema no se deriva de los modelos
-en el servidor.
+El proyecto versiona las migraciones: los `0001_initial` de cada app están en el
+repositorio y viajan en el clone. `makemigrations --check --dry-run` sale distinto
+de 0 si un cambio de modelo llega sin su migración, y el deploy aborta **antes**
+de tocar la base. El CI corre el mismo gate antes de `migrate`.
 
-Con las migraciones en el arbol, `makemigrations --check --dry-run` pasa a ser
-un gate util: si un cambio de modelo llega sin su migracion, el comando sale
-distinto de 0 y el deploy aborta **antes** de tocar la base. El CI corre el
-mismo gate antes de `migrate`.
-
-Versionar las migraciones es lo que vuelve revisable un cambio de esquema: un
-`ALTER` destructivo se ve en el diff del PR, no en el log del deploy. Sigue
-siendo cierto que **el rollback del codigo no deshace el esquema**: Django no
-genera migraciones inversas, y una migracion destructiva ya aplicada deja la
-base con el esquema nuevo.
+El rollback del código no deshace el esquema: Django no genera migraciones
+inversas.
 
 ### Respaldo antes de migrar
 
-Con el update por boton nadie mira el deploy: un superusuario aprieta, el commit
-se aplica y `migrate` corre solo. Por eso `deploy.sh` toma un `pg_dump` **antes**
-de migrar, y solo cuando hay algo que migrar:
+`deploy.sh` toma un `pg_dump` **antes** de migrar, y solo cuando hay algo que
+migrar:
 
 ```bash
 # Se pregunta sin aplicar nada. Sale 1 si queda algo pendiente.
@@ -86,9 +76,8 @@ migraciones se niega a correr.
 
 ### Gate de migraciones en el merge a `main`
 
-El respaldo es la red; el gate es no necesitarla. El job
-**`Migrations safety (dev -> main)`** corre en cada PR cuya base es `main` y
-analiza el AST de las migraciones nuevas con
+El job **`Migrations safety (dev -> main)`** corre en cada PR cuya base es `main`
+y analiza el AST de las migraciones nuevas con
 [`scripts/check_migrations.py`](../scripts/check_migrations.py):
 
 | Caso | Resultado |
@@ -126,33 +115,26 @@ merge-base). El 2 tambien es rojo: un gate que no puede comparar no puede
 aprobar. En GitHub, el job se agrega a los *required status checks* de
 `Protect main`; en un PR a `dev` aparece como *skipped*.
 
-### Por que el `check --deploy` del servidor y no solo el del CI
+### Gate `check --deploy` en el servidor
 
-El job `deploy-check` del CI corre el mismo check, pero con valores de mentira:
-base de datos que no existe, sin SMTP, `SECRET_KEY` de un par Fernet descartable.
-Verifica que **el codigo** no tenga problemas de seguridad.
-
-El gate del servidor corre contra el `.env` de verdad. Es la primera vez que se
-comprueba que la `SECRET_KEY` se descifra con la `ENCRYPTION_KEY` de
+El `deploy-check` del CI corre el mismo check con valores de mentira: base que no
+existe, sin SMTP, `SECRET_KEY` descartable. El gate del servidor corre contra el
+`.env` real: comprueba que la `SECRET_KEY` se descifra con la `ENCRYPTION_KEY` de
 `/etc/webcmp/encryption.env`, que `DB_*` apunta al PostgreSQL real y que
-`EMAIL_BACKEND` no es el de consola (que `production.py` rechaza). Tarda segundos
-y evita un sitio caido.
+`EMAIL_BACKEND` no es el de consola.
 
-### Por que `restart` y no `reload`
+### `reload` no aplica código nuevo
 
-`systemctl reload` (SIGHUP) recarga la configuracion de Gunicorn y los workers se
-re-forkean **desde el master**, que tiene el codigo viejo en memoria. Los workers
-nuevos tambien tendrian el codigo viejo. El sitio serviria los templates viejos
-con los estaticos nuevos: el peor estado posible, uno que no se ve como falla.
+`systemctl reload` (SIGHUP) recarga la configuración de Gunicorn, pero los workers
+se re-forkean desde el master, que tiene el código viejo en memoria. El sitio
+serviría templates viejos con estáticos nuevos. El deploy usa `restart`.
 
-### Por que `systemd-run` y no `manage.py` pelado
+### `manage.py` a mano cae en el perfil de desarrollo
 
 Los comandos de Django corren en una unidad transitoria con el mismo
-`EnvironmentFile` y `PRODUCTION=1` que `webcmp.service`. Un `manage.py` corrido a
-mano en una shell sin `PRODUCTION` cae en el perfil de **desarrollo**
-(`config/settings/__init__.py` elige perfil por la variable de entorno): migra
-con las credenciales del entorno en vez de con las de produccion, y el deploy
-"pasa" contra la base equivocada.
+`EnvironmentFile` y `PRODUCTION=1` que `webcmp.service`. Un `manage.py` corrido en
+una shell sin `PRODUCTION` usa el perfil de desarrollo y opera contra la base
+equivocada.
 
 ## Rollback
 
@@ -161,10 +143,9 @@ anterior, reinstala dependencias, recoloca estaticos y reinicia los units. Sale
 con codigo 1, asi que el panel y `deploy-status.json` lo marcan fallido aunque el
 sitio haya quedado sirviendo la version anterior.
 
-La trampa que lo dispara es `trap rollback EXIT`, no `ERR`. No es indistinto:
-`trap ... ERR` no corre cuando el script hace `exit`, y `die()` -que es como
-termina practicamente todo el deploy, incluido el health check- hace `exit 1`.
-Con `ERR`, el rollback era inalcanzable justo en el caso para el que existe.
+El disparador es `trap rollback EXIT`, no `ERR`: `trap ... ERR` no corre cuando el
+script hace `exit`, y `die()` —con el que termina casi todo el deploy, incluido el
+health check— hace `exit 1`.
 
 Lo que **no** hace, y hay que saber antes de confiar en el:
 
@@ -182,264 +163,37 @@ Manual:
 sudo /usr/local/sbin/webcmp-deploy <commit-anterior>
 ```
 
-## El servidor en Proxmox (antes de instalar)
+## Requisitos del servidor
 
-Esta seccion termina donde empieza `install.sh`. Todo lo de abajo se hace **una
-vez**, en la consola de Proxmox, y no lo automatiza nada de este repo.
+Se instala en un Linux x86_64 con systemd: una VM o un contenedor con init propio,
+es indistinto.
 
-### Contenedor LXC
-
-Se despliega en un contenedor LXC sin privilegios, no en una VM. Es seguro en
-este proyecto porque `install.sh` no toca nada del host.
-
-`install.sh` no toca nada del host. No hace `mount`, ni `sysctl`, ni `modprobe`,
-ni maneja `apparmor`, ni red con `iptables`. Lo que hace es `apt-get`, crear un
-usuario, `python -m venv`, unidades systemd propias, `nginx` y PostgreSQL/Redis
-como servicios. Todo eso corre dentro de un LXC con systemd, que es el PID 1 del
-contenedor: `systemctl enable --now webcmp` funciona igual que en una VM.
-
-La regla de "nada de systemd en contenedores" aplica a contenedores sin init
-propio (imagenes de Docker hechas para correr un solo proceso). Proxmox no es
-ese caso: entrega un sistema completo y systemd arranca como PID 1.
-
-### Lo unico que si rompe: la version de Python
-
-Este es el requisito que hay que respetar, y no es negociable:
-
-```
-MIN_PYTHON=(3 14)
-```
-
-`scripts/generate_env.py` usa PEP 758 (`except A, B:`, sin parentesis), que
-existe **solo desde Python 3.14**. Con 3.12 o 3.13 el generador no compila y el
-error no menciona la version: dice `multiple exception types must be
-parenthesized`. Por eso `install.sh` chequea la version al arrancar y aborta con
-un mensaje que si la nombra.
-
-Consecuencia practica: **el template tiene que traer Python 3.14**. Ubuntu 24.04
-trae 3.12. Comprueba antes de crear nada:
-
-```bash
-pveam update
-pveam available --section system | grep -i 'ubuntu-26'
-```
-
-Si no aparece un template de Ubuntu 26.04 (o el que corresponda con 3.14), las
-opciones son agregar el PPA de deadsnakes al contenedor o compilar Python a mano.
-Las dos funcionan, las dos son trabajo extra que se evita eligiendo bien el
-template.
-
-Por la misma razon los workflows de CI fijan `runs-on: ubuntu-26.04`. Correr
-`check --deploy` y los tests en otra imagen valida un sistema que no es el que
-sirve el sitio, y el verde no dice nada sobre el servidor real.
-
-### Crear el contenedor
-
-Ajusta storage (`local-zfs`), red y el nombre del template a lo que liste
-`pveam available` en tu nodo:
-
-```bash
-pct create 120 local:vztmpl/ubuntu-26.04-standard_26.04-1_amd64.tar.zst \
-  --hostname webcmp \
-  --cores 4 --memory 8192 --swap 2048 \
-  --rootfs local-zfs:60 \
-  --net0 name=eth0,bridge=vmbr0,ip=10.0.0.50/24,gw=10.0.0.1 \
-  --nameserver 1.1.1.1 \
-  --unprivileged 1 \
-  --onboot 1 \
-  --timezone America/Havana
-
-pct start 120
-pct exec 120 -- bash -lc 'apt-get update && apt-get -y full-upgrade'
-```
-
-Notas sobre esas banderas:
-
-- **`--unprivileged 1`**: no hace falta privilegiado. Nada del despliegue monta
-  nada. Efecto lateral: los archivos de `/srv/webcmp` aparecen en el host con
-  UID `100000 + uid`, que solo importa si alguien va a leerlos desde el host.
-- **`--swap 2048`**: sin esto el contenedor no tiene swap propio y un pico de
-  memoria mata un worker de Gunicorn en vez de paginar. El swap del LXC se
-  cuenta contra el host, no es gratis.
-- **Sin `nesting=1`**: eso es para Docker dentro del contenedor. Aca no hay
-  Docker, y activarlo solo amplia la superficie.
-- **`--rootfs` en storage con snapshots**: ZFS o LVM-thin. Sobre storage tipo
-  `dir`, `pct snapshot` no existe y el paso siguiente se cae del plan.
-- **`--memory` es un limite de cgroup**: si PostgreSQL y los workers lo superan,
-  el kernel mata procesos *dentro* del contenedor. `free` dentro del contenedor
-  muestra la memoria del host, asi que no sirve para diagnosticar — mira
-  `pct status 120 --verbose` o el grafico del nodo.
-
-### Dimensiones
-
-Lo que carga el contenedor es PostgreSQL, Redis, Gunicorn (workers) y ~114 MB de
-estaticos que `collectstatic` reescribe en cada deploy.
-
-| Recurso | Recomendado | Minimo |
-| --- | --- | --- |
-| vCPU | 4 | 2 |
-| RAM | 8 GB | 4 GB |
-| Disco | 60 GB | 30 GB |
-
-Con 2 vCPU el primer `collectstatic` (hashear y comprimir en gzip+brotli) tarda
-varios minutos y el deploy se acerca al `TimeoutStartSec=45min` de
-`webcmp-autodeploy.service`. No es solo lentitud: es margen que se pierde.
-
-El disco crece con `media/`, los PDFs que sube la gente y los respaldos de
-PostgreSQL de `/var/backups/webcmp/db` (10 como maximo, uno por deploy con
-migraciones). 60 GB no es capricho: un dump completo de esta base entra sin
-problema en ese margen, pero no entra en 30 GB junto con todo lo demas.
-
-### Sistema y red
-
-- **Ubuntu 26.04 LTS** (o el template que traiga Python 3.14), x86_64. El
-  instalador asume `apt`.
-- **Zona horaria `America/Havana`**, igual que `TIME_ZONE` del proyecto. Si no
-  coinciden, las fechas de los avisos y los logs se leen en dos relojes
-  distintos.
-- **IP fija**, no DHCP. En Proxmox se fija en `--net0 ip=...` o se cambia despues
-  con `pct set 120 --net0 ...`. Un servidor de produccion con IP dinamica es un
-  incidente esperando su turno.
-- **Nombre en DNS** que coincida **exactamente** con tres cosas: el
+- **Ubuntu 26.04 LTS**, que trae Python 3.14. `scripts/generate_env.py` usa PEP 758
+  y no compila en 3.12 ni 3.13, asi que `install.sh` verifica la version al
+  arrancar y aborta si no sirve. Los workflows de CI usan `runs-on: ubuntu-26.04`
+  por la misma razon.
+- **IP fija** y nombre en DNS que coincida **exactamente** con el
   `EXTERNAL_HOSTNAME` del `.env`, el `PublicHostname` de `deploy.env` y el
-  `server_name` de Nginx. Si difieren, el health check entra con un nombre que
-  el sitio no reconoce y responde `DisallowedHost`.
+  `server_name` de Nginx. Si difieren, el sitio responde `DisallowedHost`.
+- **Zona horaria `America/Havana`**, igual que `TIME_ZONE`.
+- **Salida HTTPS a `github.com:443`**. El servidor resuelve `refs/heads/main` con
+  `git ls-remote`; no necesita ningun puerto entrante.
+- **Dimensiones**: 4 vCPU, 8 GB de RAM y 60 GB de disco. Piso: 2, 4 y 30. El disco
+  crece con `media/`, los PDFs y los respaldos de `/var/backups/webcmp/db`.
 
-### Snapshot antes del primer `install.sh`
-
-Toma un snapshot del contenedor recien creado y con la red configurada,
-**antes** de correr el instalador:
-
-```bash
-pct snapshot 120 pre-install
-```
-
-Ese primer paso toca apt, crea usuarios, bases y vhosts: si sale mal a medias,
-`pct rollback 120 pre-install` cuesta un minuto y volver a mano cuesta una
-tarde. Requiere storage con soporte de snapshots (ver arriba); si el tuyo no lo
-tiene, el equivalente es `vzdump 120 --mode snapshot --compress zstd` a un
-storage de backup.
-
-### Conectividad: solo salida HTTPS
-
-La actualizacion **la tira el servidor**. El boton "Actualizar" del panel escribe
-un archivo de peticion, un `.path` de systemd lo recoge y `webcmp-autodeploy`
-resuelve `refs/heads/main` con `git ls-remote` contra GitHub. No hay ningun runner
-de GitHub conectandose al contenedor: el deploy no necesita un solo puerto
-entrante.
-
-Lo que si hace falta:
+Comprobar la conectividad antes de instalar:
 
 ```bash
-# como el usuario deploy, sin credenciales: el repo es publico
 sudo -u deploy env GIT_TERMINAL_PROMPT=0 \
     git ls-remote https://github.com/cmp-camaguey/webcmp.git refs/heads/main
 ```
 
-Si eso devuelve un SHA, el boton funciona. Si no:
+Si devuelve un SHA, el boton "Actualizar" va a funcionar. Si falla por DNS, por
+timeout o por autenticacion, el deploy por boton no puede resolver el commit.
 
-| Sintoma | Causa |
-| --- | --- |
-| `Could not resolve host` | DNS. Sin resolucion no hay `ls-remote` |
-| timeout / `Connection refused` | Sin salida al 443. Pedirla al proveedor |
-| `Authentication failed` | El repo no es legible sin credenciales: el ejecutor no tiene token |
-
-El servidor solo necesita **salida** a `github.com:443`. Nada de puertos
-entrantes.
-
-### Topologia con Nginx Proxy Manager externo
-
-El caso del proveedor: NPM corre en Docker **en otra maquina** y termina TLS
-ahi. `install.sh` lo soporta con `PROXY_MODE=external`, y esa opcion **si
-instala Nginx en el LXC**:
-
-```text
-Navegador --https--> NPM (otra maquina) --http--> LXC:80 Nginx --> socket unix --> Gunicorn
-```
-
-El Nginx del contenedor no es un lujo: es el unico que puede servir `/media/` y
-`/static/` desde ese filesystem. Django no sirve media con `DEBUG=False` y
-WhiteNoise solo sirve `staticfiles`, asi que sin el Nginx, el logo, el favicon y
-cada PDF subido dan 404 mientras el resto del sitio "funciona". Gunicorn sigue
-escuchando **solo** en el socket unix: no se expone en la red en ninguna de las
-dos topologias.
-
-Lo que se configura en NPM:
-
-| Campo | Valor |
-| --- | --- |
-| Scheme | `http` (NPM habla HTTP con el LXC; el TLS lo pone el) |
-| Forward Hostname / IP | IP de LAN del LXC |
-| Forward Port | puerto HTTP del instalador (80 por defecto) |
-| Websockets Support | on (el grafico de sounding las usa) |
-| SSL | Let's Encrypt en NPM; el dominio tiene que resolver a NPM |
-
-No hacen falta Custom Locations ni headers extra: el `X-Forwarded-Proto` que
-manda NPM lo **propaga** el vhost HTTP (`map`), no lo reescribe con `$scheme`.
-Si lo reescribiera, Django no veria la peticion como segura y el login entraria
-en un bucle de logout sin un solo error en el log.
-
-El puerto HTTP del LXC tiene que quedar alcanzable **solo** desde la maquina del
-NPM. El instalador no toca el firewall y lo imprime como advertencia:
-
-```bash
-sudo ufw allow from <IP_DEL_NPM> to any port 80 proto tcp
-sudo ufw deny 80/tcp
-```
-
-El health check del deploy atraviesa ese Nginx por HTTP (`HEALTHCHECK_URL` +
-`HEALTHCHECK_RESOLVE` a `127.0.0.1:$HTTP_PORT`), asi que un vhost roto o un
-`/media/` sin servir no quedan en verde.
-
-### Probar el sitio antes de que exista el NPM
-
-Con `external`, este Nginx escucha HTTP y nada mas, y `production.py` deja
-`SESSION_COOKIE_SECURE` y `CSRF_COOKIE_SECURE` en `True`. El navegador **no
-guarda** una cookie `Secure` que llega por `http://`: el sitio abre, pero el
-login devuelve el formulario vacio, sin un solo error en pantalla ni en el log.
-Parece que el deploy esta roto y no lo esta.
-
-Dos formas de validar el login sin el NPM:
-
-1. Instalar con `nginx-local` + TLS autofirmado, probar el login completo, y
-   despues reinstalar **de cero** con `external`. No re-correr `install.sh`
-   sobre la misma instalacion: borra `.env` y `encryption.env`, rota
-   `SECRET_KEY` y la clave de cifrado.
-2. Dejar el login sin verificar hasta que el NPM apunte al contenedor. Todo lo
-   demas se valida igual, y no necesita el NPM:
-
-```bash
-systemctl status webcmp webcmp-huey --no-pager
-
-# El Host importa: ALLOWED_HOSTS lleva solo el dominio, asi que un pedido con
-# Host: 127.0.0.1 lo rechaza Django con 400 y Nginx no registra nada. Es el
-# mismo motivo por el que el health check usa --resolve.
-H='Host: www.meteocamaguey.cu'
-
-curl -sI -H "$H" http://127.0.0.1/ | head -1
-curl -s -o /dev/null -w '%{http_code}\n' -H "$H" http://127.0.0.1/api/doc/
-# Los estaticos los sirve Nginx, no Django: aca el Host da igual.
-curl -s -o /dev/null -w '%{http_code}\n' \
-    http://127.0.0.1/static/dist/css/tabler.min.css
-```
-
-`/api/doc/` tiene que dar `200` y `/` un `200` o `302`. Un `400` en los dos es
-`ALLOWED_HOSTS`, no un deploy roto.
-
-### Checklist antes de instalar
-
-- [ ] Contenedor LXC creado (sin privilegios, sin `nesting`), x86_64
-- [ ] Template con **Python 3.14** verificado (`install.sh` aborta si no)
-- [ ] 2 vCPU / 4 GB / 30 GB como piso; 4/8/60 si el portal va a tener trafico real
-- [ ] `--swap` asignado (sin swap, un pico mata un worker)
-- [ ] Rootfs en storage con snapshots (ZFS / LVM-thin) o backup tomado
-- [ ] IP fija
-- [ ] Nombre en DNS resoluble desde donde se va a probar
-- [ ] Zona horaria `America/Havana`
-- [ ] Snapshot `pre-install` tomado
-- [ ] Puerto 22 alcanzable desde donde se va a correr el deploy (o decision explicita de desplegar a mano)
-- [ ] Topologia de proxy decidida: TLS en Nginx local (`nginx-local`) o en un NPM externo (`external`)
-- [ ] Con NPM externo: IP o subred del NPM, para limitar el firewall del puerto HTTP del LXC
+Toma un snapshot o un backup del servidor limpio **antes** del primer
+`install.sh`: ese paso toca apt, crea usuarios, bases y vhosts, y rehacerlo a mano
+cuesta una tarde.
 
 ## Instalación de la aplicación paso a paso
 
@@ -701,6 +455,13 @@ En esta topología el health check del deploy apunta a `http://` en
 `HEALTHCHECK_URL` y `HEALTHCHECK_RESOLVE` en `/etc/webcmp/deploy.env`, el deploy
 falla por construcción.
 
+> **Sin NPM delante, el login no se puede probar.** `production.py` deja
+> `SESSION_COOKIE_SECURE` y `CSRF_COOKIE_SECURE` en `True`, y el navegador
+> descarta una cookie `Secure` que llega por `http://`: el sitio abre, pero el
+> login devuelve el formulario vacío sin un solo error en pantalla ni en el log.
+> Verifica el resto con `curl` (paso 7) y deja el login para cuando el NPM apunte
+> al servidor.
+
 > **Reinicio de Nginx, no `reload`.** Los grupos suplementarios se leen al crear
 > los workers. Un `reload` alcanza para leer la config, pero si acabás de cambiar
 > la pertenencia a un grupo, reiniciá el servicio.
@@ -839,10 +600,9 @@ Despues, la corrida real. **Necesita una terminal**: el script aborta si el
 `stdin` no es un TTY, porque un instalador que adivina en un pipe escribe el
 `.env` equivocado y nadie lo ve hasta que el sitio responde `DisallowedHost`.
 
-Por eso se descarga y se ejecuta en vez de encadenar `curl ... | sudo bash -s`:
-en el pipe el `stdin` del script es la tuberia, y el guard de `-t 0` lo rechaza
-antes de tocar nada. El pipe queda reservado para `--help` (sale antes del
-guard) y para `--non-interactive`, donde no hay preguntas que responder.
+El pipe (`curl ... | sudo bash -s`) no sirve: el `stdin` del script sería la
+tubería y el guard `-t 0` lo rechaza. Se acepta solo para `--help` y para
+`--non-interactive`.
 
 ```bash
 curl -fsSL -o /tmp/install.sh https://raw.githubusercontent.com/cmp-camaguey/webcmp/main/deploy/install.sh \
@@ -961,11 +721,10 @@ sudo systemctl restart nginx     # reinicio, no reload: los grupos se leen al
 ```
 
 El paso 6 del andamiaje es el ejecutor del boton (`webcmp-autodeploy` y su
-`.path`), que es
-[`setup_autodeploy()`](../deploy/install.sh) y no vale la pena copiar a mano: son
-dos unidades de systemd, el directorio de estado con setgid y el script que
-resuelve el SHA. Si se dejo `--skip-deploy-scaffold`, el deploy sigue disponible
-a mano con `webcmp-deploy`.
+`.path`), que instala [`setup_autodeploy()`](../deploy/install.sh): dos unidades de
+systemd, el directorio de estado con setgid y el script que resuelve el SHA. Si se
+dejo `--skip-deploy-scaffold`, el deploy sigue disponible a mano con
+`webcmp-deploy`.
 
 El `deploy.env` del camino manual sale de `deploy.env.example`, que **no define
 ninguna `HEALTHCHECK_*`**. Sin ellas el health check va al 443 de `127.0.0.1`
@@ -1258,11 +1017,10 @@ no-cache` y `ETag` derivado del cuerpo, para que la mayoria de los sondeos
 devuelvan 0 bytes. El JS (`static/dist/js/notifications-badge.js`) pregunta cada
 20 s y **no pregunta mientras la pestaña esta oculta**.
 
-Vive aparte del estado de despliegue del panel a proposito. Ese JSON
-(`dashboard:update_status`) lee archivos y compara commits con el remoto: es
-caro por diseno y solo lo pide el panel de administracion. El contador es lo
-unico que podra consultar la campana del portal publico cuando lleguen los
-clientes (cambio 030), y un `COUNT` indexado no puede viajar pegado a esa carga.
+Vive aparte del estado de despliegue del panel: ese JSON
+(`dashboard:update_status`) lee archivos y compara commits con el remoto, es
+caro por diseño y solo lo pide el panel de administracion. El contador es un
+`COUNT` indexado, pensado para que lo consulte la campana del portal publico.
 
 Con `USE_REDIS_CACHE=True` el conteo se guarda 20 s y se invalida al marcar,
 borrar o crear un aviso. Con `USE_REDIS_CACHE=False` **no se cachea**: LocMem
@@ -1331,23 +1089,21 @@ sudo -u webcmp .venv/bin/python manage.py cleanup_orphan_media --dry-run
 
 ## Errores que solo aparecen en produccion
 
-No los arregla este trabajo, pero conviene tenerlos a mano: son los que hacen que
-un `collectstatic` o un `manage.py check` en verde no digan nada del sitio real.
-Todos se reprodujeron en el servidor de prueba.
+Sintomas que un `collectstatic` o un `manage.py check` en verde no detectan:
 
 | Sintoma | Causa |
 | --- | --- |
-| `ValueError: Missing staticfiles manifest entry for ''`, 500 en **cada** pagina | Las plantillas hacian `{% static '' %}ruta`, concatenando `STATIC_URL` a mano. Con el storage de manifest hay que pasar la ruta al tag. Ver el commit que lo arregla |
+| `ValueError: Missing staticfiles manifest entry for ''`, 500 en **cada** pagina | Las plantillas hacian `{% static '' %}ruta`, concatenando `STATIC_URL` a mano. Con el storage de manifest hay que pasar la ruta al tag |
 | `DisallowedHost: Invalid HTTP_HOST header: 'webcmp'` en cada peticion | En Nginx, `proxy_set_header` se hereda del `server` **solo si el `location` no declara ninguno**. `location /` declara dos para el websocket, asi que el `Host` se perdia y volvia al default `$proxy_host`, que es el nombre del upstream |
 | Un 400 que se convierte en 500 | Los handlers de error renderizan plantillas, y el context processor leia `request.user` sin `getattr`. Ese atributo lo pone `AuthenticationMiddleware`, que corre despues de `CommonMiddleware`: si la excepcion salta antes, no existe |
 | 502 en todo, con `connect() failed (13: Permission denied)` en el log de Nginx | `www-data` no estaba en el grupo `webcmp`, y el socket sale `0770 webcmp:webcmp` |
 | El sitio se cae cada 60 s y vuelve solo | `WatchdogSec=60` en el unit, pero Gunicorn solo manda `READY=1`, nunca `WATCHDOG=1`. systemd esperaba un ping que no llega y mandaba `SIGABRT` |
 | `collectstatic` falla con `Post-processing 'x.js' failed!` | El `.min.js` termina en `//# sourceMappingURL=x.js.map` y el `.map` no esta en el repo. El storage de manifest tiene que resolver cada referencia |
 | `[ERROR] Control server error: Permission denied: '/home/webcmp'` en cada arranque | El control socket de Gunicorn 26 cae a `$HOME/.gunicorn/`, y `webcmp` no tiene home con `ProtectHome=true` |
-| `NodeNotFoundError` al correr `migrate` | Habia una migracion versionada (`commercial/0006`) que dependia de un padre nunca commiteado. Se elimino; desde el cambio 031 el gate `makemigrations --check --dry-run` del CI detecta esa cadena rota antes del merge |
+| `NodeNotFoundError` al correr `migrate` | Una migracion versionada dependia de un padre nunca commiteado. El gate `makemigrations --check --dry-run` del CI detecta esa cadena rota antes del merge |
 | `the cache has been disabled` en cada deploy | `sudo` aplica `env_reset` y descarta `PIP_CACHE_DIR` del entorno del llamador. Hay que pasarla con `sudo -u user env PIP_CACHE_DIR=... cmd` |
 
-Dos de estos se detectan antes de tocar produccion y conviene que sigan asi:
+Dos se detectan antes de tocar produccion:
 
 - `manage.py check --deploy` con la configuracion real ya esta en el deploy.
 - Las referencias del tag `static` se pueden revisar con un chequeo de dos
