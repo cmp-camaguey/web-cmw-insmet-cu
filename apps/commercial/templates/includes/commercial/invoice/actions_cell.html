@@ -8,23 +8,29 @@
        data-bs-original-title="Descargar Factura">
       <i class="icon ti ti-download"></i>
     </a>
+    {% comment %}
+      Sin `data-bs-toggle="tooltip"`: el botón ya usa `data-bs-toggle="modal"` y
+      un segundo atributo con el mismo nombre se descarta en el navegador, así
+      que el tooltip nunca se inicializaba. `document-modal.js` lo crea a mano
+      para estos disparadores, leyendo `aria-label`.
+    {% endcomment %}
     <button type="button"
             class="btn btn-icon btn-outline-primary btn-sm"
             data-bs-toggle="modal"
             data-bs-target="#documentPdfModal"
             data-pdf-url="{% url 'commercial:factura_download' invoice.uuid %}?inline=1"
             data-pdf-title="Factura {{ invoice.number }}"
-            data-bs-toggle="tooltip"
-            data-bs-placement="bottom"
             aria-label="Ver Factura"
             data-bs-original-title="Ver Factura">
       <i class="icon ti ti-file-type-pdf"></i>
     </button>
   {% elif invoice.status_display == 'pagada' %}
-    {# El PDF es asíncrono: la factura puede quedar pagada sin él, y eso es
-     más grave que un render fallido en una factura pendiente (dinero
-     cobrado sin comprobante). Por eso el aviso escalado va primero y el
-     error concreto queda en el tooltip. #}
+    {% comment %}
+      El PDF es asíncrono: la factura puede quedar pagada sin él, y eso es
+      más grave que un render fallido en una factura pendiente (dinero
+      cobrado sin comprobante). Por eso el aviso escalado va primero y el
+      error concreto queda en el tooltip.
+    {% endcomment %}
     <span class="badge bg-orange-lt"
           data-bs-toggle="tooltip"
           data-bs-original-title="{{ invoice.pdf_error|truncatechars:160 }}"

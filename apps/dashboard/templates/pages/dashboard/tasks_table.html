@@ -36,7 +36,13 @@
           {% if execution.summary %}
             <span class="fw-medium">{{ execution.summary }}</span>
           {% else %}
-            <span class="text-secondary">—</span>
+            {# Solo las tareas con registro de negocio resoluble tienen resumen #}
+            {# (hoy, la de factura). El resto no pertenece a un cliente #}
+            {# concreto: «Sistema» lo dice, «—» no. #}
+            <span class="text-secondary"
+                  data-bs-toggle="tooltip"
+                  data-bs-placement="top"
+                  data-bs-original-title="La tarea no está asociada a un registro de negocio">Sistema</span>
           {% endif %}
         </td>
         <td>
@@ -55,9 +61,9 @@
           {% endif %}
         </td>
         <td class="text-center">{{ execution.attempts }}</td>
-        <td>{{ execution.enqueued_at|date:"d/m/Y H:i:s"|default:"—" }}</td>
-        <td>{{ execution.started_at|date:"d/m/Y H:i:s"|default:"—" }}</td>
-        <td>{{ execution.finished_at|date:"d/m/Y H:i:s"|default:"—" }}</td>
+        <td>{{ execution.enqueued_at|date:"d/m/Y H:i:s"|default:"Sin registrar" }}</td>
+        <td>{{ execution.started_at|date:"d/m/Y H:i:s"|default:"Sin iniciar" }}</td>
+        <td>{{ execution.finished_at|date:"d/m/Y H:i:s"|default:"Sin finalizar" }}</td>
         <td class="text-nowrap">
           <div class="btn-list">
             {% if execution.status == 'ERROR' %}
@@ -114,7 +120,7 @@
         <div class="modal-dialog modal-dialog-scrollable modal-lg">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Traceback — {{ execution.task_name }}</h5>
+              <h5 class="modal-title">Traceback · {{ execution.task_name }}</h5>
               <button type="button"
                       class="btn-close"
                       data-bs-dismiss="modal"
@@ -124,15 +130,15 @@
               <dl class="row mb-3">
                 <dt class="col-sm-3">De quién es</dt>
                 <dd class="col-sm-9">
-                  {{ execution.summary|default:"—" }}
+                  {{ execution.summary|default:"Sistema" }}
                 </dd>
                 <dt class="col-sm-3">Tarea</dt>
                 <dd class="col-sm-9">
-                  <code>{{ execution.func_name|default:"—" }}</code>
+                  <code>{{ execution.func_name|default:"No registrada" }}</code>
                 </dd>
                 <dt class="col-sm-3">Argumentos</dt>
                 <dd class="col-sm-9">
-                  <code>{{ execution.args_repr|default:"—" }}</code>
+                  <code>{{ execution.args_repr|default:"No disponible" }}</code>
                 </dd>
               </dl>
               <pre class="bg-dark text-light p-3 mb-0 rounded-2"

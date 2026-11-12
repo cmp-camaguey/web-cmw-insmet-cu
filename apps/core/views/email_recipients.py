@@ -7,13 +7,21 @@ from django.contrib.auth.mixins import (
     PermissionRequiredMixin,
     UserPassesTestMixin,
 )
+from django.db.models import Count, Prefetch, Q
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, ListView, UpdateView, View
 
 from apps.core.forms.email_recipients import EmailRecipientFormSet, EmailRecipientListForm
-from apps.core.models import EmailRecipientList
+from apps.core.models import EmailRecipientList, Subscription
 from apps.core.utils import log_action
+
+# Quién recibe de verdad un envío: la misma condición que `apps.core.audiences`.
+# La pantalla de listas la usa para no anunciar un alcance que el envío no tiene.
+_REACHABLE = Q(
+    subscriptions__subscriber__active=True,
+    subscriptions__subscriber__confirmed_at__isnull=False,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +48,21 @@ class EmailRecipientListListView(LoginRequiredMixin, PermissionRequiredMixin, Li
         context['url_create'] = reverse_lazy('core:email_recipient_create')
         context['url_list'] = reverse_lazy('core:email_recipient_list')
         context['is_superuser'] = self.request.user.is_superuser
-        context['objects'] = EmailRecipientList.objects.all()
+        context['objects'] = EmailRecipientList.objects.annotate(
+            member_count=Count('subscriptions', distinct=True),
+            reachable_count=Count('subscriptions', filter=_REACHABLE, distinct=True),
+        ).prefetch_related(
+            Prefetch(
+                'subscriptions',
+                queryset=Subscription.objects.filter(
+                    subscriber__active=True,
+                    subscriber__confirmed_at__isnull=False,
+                )
+                .select_related('subscriber')
+                .order_by('subscriber__email'),
+                to_attr='reachable_subscriptions',
+            )
+        )
         return context
 
 
@@ -139,7 +161,7 @@ class EmailRecipientListUpdateView(
         )
 
         for form in formset:
-            if not form.instance.email:
+            if not form.instance.pk:
                 form.initial['email'] = ''
 
         context['formset'] = formset

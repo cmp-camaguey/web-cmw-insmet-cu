@@ -189,13 +189,14 @@ class WeatherReportCreateView(LoginRequiredMixin, PermissionRequiredMixin, Creat
         messages.success(
             self.request, f'{cfg["title_create"]} ha sido creado con éxito.', extra_tags='success'
         )
-        mail_send(
-            self.request,
-            self.object,
-            cfg['subject_create'],
-            cfg['mail_url'],
-            attachment_name=f'{cfg["pdf_filename_prefix"]}_{self.object.date.strftime("%Y-%m-%d")}.pdf',
-        )
+        if form.cleaned_data.get('send_email'):
+            mail_send(
+                self.request,
+                self.object,
+                cfg['subject_create'],
+                cfg['mail_url'],
+                attachment_name=f'{cfg["pdf_filename_prefix"]}_{self.object.date.strftime("%Y-%m-%d")}.pdf',
+            )
 
         return redirect(self.get_success_url())
 
@@ -243,11 +244,6 @@ class WeatherReportUpdateView(
         return kwargs
 
     def form_valid(self, form):
-        original_object = self.get_object(queryset=None)
-        relevant_fields = ['summary', 'file', 'email_recipient_list']
-        has_changes = any(
-            form.cleaned_data[field] != getattr(original_object, field) for field in relevant_fields
-        )
         cfg = self.get_config()
 
         form.instance.date = timezone.now()
@@ -260,7 +256,7 @@ class WeatherReportUpdateView(
             message=f'Se actualizó {cfg["title_update"]}: {self.object.date}.',
         )
 
-        if has_changes:
+        if form.cleaned_data.get('send_email'):
             mail_send(
                 self.request,
                 self.object,

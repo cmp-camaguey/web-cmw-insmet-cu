@@ -727,6 +727,23 @@ El ejecutor **no confia en el SHA del archivo**: lo resuelve el mismo con `git
 ls-remote` sobre `refs/heads/main`. Aunque el proceso web este comprometido y escriba
 lo que quiera, lo maximo que consigue es desplegar lo que ya esta en `main`.
 
+### Cuando el deploy falla
+
+Un deploy que aborta revierte el codigo y **no** toca `/etc/webcmp/deployed`, asi
+que el commit sigue pendiente. El panel lo distingue con un estado propio
+(`failed`): el desplegable muestra **"El despliegue fallo"** y el boton para
+reintentar, en vez de repetir "Actualizacion disponible" como si nunca se hubiera
+intentado. Un fallo viejo no mancha un commit nuevo: si `main` avanzo despues del
+intento, lo pendiente es otro commit y se anuncia como actualizacion normal.
+
+El motivo no esta en el panel a proposito (el stderr de `git` puede traer rutas del
+servidor). Esta en el journal:
+
+```bash
+cat /var/lib/webcmp/deploy-status.json          # status: failed + el sha intentado
+journalctl -u webcmp-autodeploy -n 80 --no-pager
+```
+
 ### Archivos y permisos
 
 | Ruta | Dueno | Modo |
@@ -961,7 +978,7 @@ sudo install -o root -g root -m 0600 deploy/deploy.env.example /etc/webcmp/deplo
 sudo -u webcmp /srv/webcmp/.venv/bin/python -c 'import django'   # el venv esta sano
 
 # 3. El gate real pasa.
-sudo -u webcmp systemd-run --quiet --pipe --wait \
+sudo systemd-run --quiet --wait \
   -p EnvironmentFile=/etc/webcmp/encryption.env \
   -p Environment=PRODUCTION=1 --uid=webcmp --gid=webcmp \
   --working-directory=/srv/webcmp \
@@ -974,5 +991,13 @@ sudo /usr/local/sbin/webcmp-deploy main
 #    confirmar que el sitio vuelve atras sin intervention.
 sudo /usr/local/sbin/webcmp-deploy <commit-anterior>
 ```
+
+El paso 3 no imprime nada en la terminal: lo que decide es el codigo de salida, y
+la salida del reporte queda en el journal (`journalctl --since -5min | grep -A5
+'check --deploy'`). **No le agregues `--pipe`**: en systemd 259 ese flag pasa
+descriptores por D-Bus al arrancar la unidad transitoria y falla de forma
+intermitente con `Failed to start transient service unit: Connection reset by
+peer`. Fue lo que tumbo el deploy del 2026-11-11, en el paso de `migrate`, y
+`deploy.sh` ya no lo usa.
 
 Si el paso 3 falla, el problema es el `.env` o `encryption.env`, no el deploy.

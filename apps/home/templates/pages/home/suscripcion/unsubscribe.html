@@ -1,0 +1,45 @@
+{% extends 'layouts/base-auth.html' %}
+{% load static %}
+{% comment %}
+  La baja llega desde un enlace en un correo y se abre sin sesión. Por eso usa
+  el layout de autenticación, el mismo de las páginas de error: sin navbar, sin
+  menús y sin nada que el visitante pueda tocar además del botón de vuelta. Un
+  menú aquí solo distraería de la única acción que importa.
+{% endcomment %}
+{% block title %}
+  Cancelar suscripción
+{% endblock %}
+{% block body %}
+  border-top-wide border-primary d-flex flex-column
+{% endblock %}
+{% block content %}
+  <div class="page page-center">
+    <div class="container-tight py-4">
+      <div class="empty">
+        <div class="empty-img">
+          {% if valid %}
+            <img src="{% static 'dist/img/webp/exit.webp' %}" height="128" alt="" />
+          {% else %}
+            <img src="{% static 'dist/img/webp/error.webp' %}" height="128" alt="" />
+          {% endif %}
+        </div>
+        {% if valid %}
+          <p class="empty-title">Baja confirmada</p>
+          <p class="empty-subtitle text-muted">
+            {% if subscriber %}{{ subscriber.email }} ya no recibirá{% else %}No recibirá más{% endif %}
+            avisos, pronósticos ni novedades del Centro. Puede volver a suscribirse cuando quiera.
+          </p>
+        {% else %}
+          <p class="empty-title">Enlace no válido</p>
+          <p class="empty-subtitle text-muted">Este enlace de baja no existe. Si sigue recibiendo correos, escriba al Centro.</p>
+        {% endif %}
+        <div class="empty-action">
+          <a href="{% url 'home:landing' %}" class="btn btn-primary">
+            <i class="icon ti ti-arrow-left"></i>
+            Volver al inicio
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

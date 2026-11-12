@@ -222,15 +222,25 @@ def _field_no_admite_nulos(call: ast.Call) -> bool:
     Esa columna no se puede agregar a una tabla con filas: PostgreSQL la rechaza y
     el deploy aborta en el `migrate`, ya con el respaldo tomado pero con el sitio
     a medio actualizar. Se avisa antes, en el PR.
+
+    El `default` vive dentro del `Field`, no en el `AddField`: mirarlo en el
+    `AddField` dejaba pasar como riesgo un `default=False` o `default=0`, que son
+    defaults validos. `default=None` no llena una columna NOT NULL y cuenta como
+    ausencia.
     """
     if any(kw.arg in {'default', 'preserve_default'} for kw in call.keywords):
         return False
     campo = next((kw.value for kw in call.keywords if kw.arg == 'field'), None)
     if not isinstance(campo, ast.Call):
         return False
-    for kw in campo.keywords:
-        if kw.arg == 'null' and isinstance(kw.value, ast.Constant):
-            return kw.value.value is False
+    opciones = {kw.arg: kw.value for kw in campo.keywords}
+    default = opciones.get('default')
+    es_none_explicito = isinstance(default, ast.Constant) and default.value is None
+    if default is not None and not es_none_explicito:
+        return False
+    null = opciones.get('null')
+    if isinstance(null, ast.Constant):
+        return null.value is False
     # Sin `null=True` explicito el campo es NOT NULL.
     return True
 

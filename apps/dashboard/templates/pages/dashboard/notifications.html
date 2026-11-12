@@ -1,4 +1,28 @@
 {% extends 'layouts/dashboard.html' %}
+{% load utils_filters %}
+{% block extrastyle %}
+  <style>
+    /* `.icon` de esta versión de Tabler mide 1.25rem; el aviso pide un icono
+       algo mayor, y el título tiene que poder encogerse en vez de saltar a la
+       línea siguiente junto a él. */
+    .list-group-item .notification-icon {
+      --tblr-icon-size: 1.5rem;
+    }
+    .notification-body {
+      flex: 1 1 0%;
+      min-width: 0;
+    }
+    /* Móvil: los botones de acción de cada aviso bajan a su propia línea, así
+       el texto no queda aprisionado entre el icono y dos botones. Desde `sm`
+       vuelven a la derecha del aviso, como en escritorio. */
+    @media (max-width: 575.98px) {
+      .notification-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+    }
+  </style>
+{% endblock %}
 {% block page_header %}
   <div class="row g-2 align-items-center">
     <div class="col">
@@ -11,21 +35,24 @@
           <form method="post" action="{% url 'dashboard:notifications_read_all' %}">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
-            <button type="submit" class="btn btn-primary">
+            <button type="submit"
+                    class="btn btn-primary"
+                    aria-label="Marcar todas como leídas">
               <i class="icon ti ti-checks"></i>
-              Marcar todas como leídas
+              <span class="d-none d-sm-inline">Marcar todas como leídas</span>
             </button>
           </form>
         {% endif %}
         {% if page_obj.paginator.count %}
           <button type="button"
                   class="btn btn-outline-danger"
+                  aria-label="Eliminar todas las notificaciones"
                   data-bs-toggle="modal"
                   data-bs-target="#notification-delete-modal"
                   data-delete-url="{% url 'dashboard:notifications_delete_all' %}"
                   data-delete-message="¿Eliminar todas las notificaciones?">
             <i class="icon ti ti-trash"></i>
-            Eliminar todas
+            <span class="d-none d-sm-inline">Eliminar todas</span>
           </button>
         {% endif %}
       </div>
@@ -36,47 +63,56 @@
   <div class="card">
     <div class="list-group list-group-flush">
       {% for notification in notifications %}
-        <div class="list-group-item d-flex align-items-start gap-3">
+        <div class="list-group-item d-flex flex-wrap align-items-start gap-2 gap-sm-3">
           {% if notification.severity == 'error' %}
-            <i class="icon ti ti-alert-circle text-danger"></i>
+            <i class="icon notification-icon flex-shrink-0 ti ti-alert-circle text-danger"></i>
           {% elif notification.severity == 'warning' %}
-            <i class="icon ti ti-alert-triangle text-warning"></i>
+            <i class="icon notification-icon flex-shrink-0 ti ti-alert-triangle text-warning"></i>
           {% else %}
-            <i class="icon ti ti-info-circle text-info"></i>
+            <i class="icon notification-icon flex-shrink-0 ti ti-info-circle text-info"></i>
           {% endif %}
-          <div class="flex-fill">
+          <div class="notification-body text-break">
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <span class="fw-bold">{{ notification.title }}</span>
               {% if not notification.is_read %}
                 <span class="badge bg-blue text-blue-fg">Sin leer</span>
               {% endif %}
-              <span class="text-secondary small ms-auto">{{ notification.created_at|date:'d/m/Y H:i' }}</span>
+              <span class="text-secondary small ms-auto">{{ notification.created_at|time_since }}</span>
             </div>
             {% if notification.body %}
               <div class="text-secondary small mt-1">{{ notification.body|linebreaksbr }}</div>
             {% endif %}
-            {% if notification.url %}
-              <a href="{{ notification.url }}" class="small">Ver detalle</a>
+            {% if notification.link %}
+              <a href="{{ notification.link }}" class="small">Ver detalle</a>
             {% endif %}
           </div>
-          <div class="d-flex align-items-center gap-2">
+          <div class="notification-actions d-flex align-items-center gap-2 ms-auto flex-shrink-0">
             {% if not notification.is_read %}
               <form method="post"
                     action="{% url 'dashboard:notification_read' notification.uuid %}">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                <button type="submit" class="btn btn-sm btn-outline-secondary">Marcar leída</button>
+                <button type="submit"
+                        class="btn btn-icon btn-outline-success btn-sm"
+                        aria-label="Marcar como leída">
+                  <i class="icon ti ti-check"
+                     data-bs-toggle="tooltip"
+                     data-bs-placement="bottom"
+                     title="Marcar como leída"></i>
+                </button>
               </form>
             {% endif %}
             <button type="button"
                     class="btn btn-icon btn-outline-danger btn-sm"
-                    title="Eliminar"
                     aria-label="Eliminar notificación"
                     data-bs-toggle="modal"
                     data-bs-target="#notification-delete-modal"
                     data-delete-url="{% url 'dashboard:notification_delete' notification.uuid %}"
                     data-delete-message="¿Eliminar «{{ notification.title }}»?">
-              <i class="icon ti ti-trash"></i>
+              <i class="icon ti ti-trash"
+                 data-bs-toggle="tooltip"
+                 data-bs-placement="bottom"
+                 title="Eliminar"></i>
             </button>
           </div>
         </div>
@@ -116,9 +152,17 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          {% comment %}
+            `action` vacio y boton deshabilitado a proposito: el modal vive en
+            `{% block modal %}` del layout base, que se renderiza DESPUES del
+            bloque de pagina donde se carga `notifications.js`. Si el script no
+            llegara a engancharse, un submit con `action=""` haria POST a esta
+            misma pagina y el usuario veria un 405. Deshabilitado, sin JS no
+            hay envio: el script lo habilita al abrir el modal con su URL.
+          {% endcomment %}
           <form method="post" id="notification-delete-form" action="">
             {% csrf_token %}
-            <button type="submit" class="btn btn-danger">Eliminar</button>
+            <button type="submit" class="btn btn-danger" disabled>Eliminar</button>
           </form>
         </div>
       </div>
