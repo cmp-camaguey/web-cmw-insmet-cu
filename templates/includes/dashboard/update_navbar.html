@@ -20,6 +20,16 @@
            data-bs-toggle="tooltip"
            data-bs-placement="bottom"
            title="Actualizaciones del servidor"></i>
+        {% comment %}
+          Spinner de Tabler mientras el servidor despliega. Sustituye al icono,
+          no se suma: dos indicadores en el mismo hueco no informan mas. El JS
+          lo muestra solo en el estado `running`, y si este nodo no existe
+          (template viejo en cache) deja el icono `ti-loader` de siempre.
+        {% endcomment %}
+        <span class="spinner-border spinner-border-sm text-blue d-none"
+              id="update-navbar-spinner"
+              role="status"
+              aria-label="Desplegando"></span>
         <span class="badge bg-red badge-pill position-absolute top-0 start-100 translate-middle d-none"
               id="update-navbar-badge"
               aria-hidden="true"></span>
