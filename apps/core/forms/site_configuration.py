@@ -8,6 +8,13 @@ HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
 
 
 class SiteConfigurationForm(forms.ModelForm):
+    """Tema, identidad, horario y formato de hora del sitio.
+
+    El offset solo se exige en modo manual. En automático el selector puede
+    llegar deshabilitado por la interfaz (y por lo tanto ausente del POST), así
+    que el campo es opcional y se conserva el valor guardado.
+    """
+
     class Meta:
         model = SiteConfiguration
         fields = [
@@ -15,6 +22,9 @@ class SiteConfigurationForm(forms.ModelForm):
             'theme_base',
             'theme_font',
             'theme_radius',
+            'timezone_mode',
+            'utc_offset_hours',
+            'time_format',
             'brand_logo',
             'favicon',
         ]
@@ -30,37 +40,22 @@ class SiteConfigurationForm(forms.ModelForm):
             'theme_base': forms.Select(attrs={'class': 'form-select'}),
             'theme_font': forms.Select(attrs={'class': 'form-select'}),
             'theme_radius': forms.Select(attrs={'class': 'form-select'}),
+            'timezone_mode': forms.Select(attrs={'class': 'form-select'}),
+            'utc_offset_hours': forms.Select(attrs={'class': 'form-select'}),
+            'time_format': forms.Select(attrs={'class': 'form-select'}),
             'brand_logo': forms.FileInput(attrs={'class': 'form-control'}),
             'favicon': forms.FileInput(attrs={'class': 'form-control'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['utc_offset_hours'].required = False
 
     def clean_primary_color(self):
         value = self.cleaned_data.get('primary_color')
         if not HEX_COLOR_RE.match(value):
             raise forms.ValidationError('El color debe tener formato #RRGGBB.')
         return value
-
-
-class TimezoneConfigurationForm(forms.ModelForm):
-    """Zona horaria y formato de hora del sitio.
-
-    El offset solo se exige en modo manual. En automático el selector puede
-    llegar deshabilitado por la interfaz (y por lo tanto ausente del POST), así
-    que el campo es opcional y se conserva el valor guardado.
-    """
-
-    class Meta:
-        model = SiteConfiguration
-        fields = ['timezone_mode', 'utc_offset_hours', 'time_format']
-        widgets = {
-            'timezone_mode': forms.Select(attrs={'class': 'form-select'}),
-            'utc_offset_hours': forms.Select(attrs={'class': 'form-select'}),
-            'time_format': forms.Select(attrs={'class': 'form-select'}),
-        }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields['utc_offset_hours'].required = False
 
     def clean(self):
         cleaned_data = super().clean()

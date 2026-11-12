@@ -13,7 +13,6 @@ from apps.core.views.env_config import EnvironmentConfigView
 from apps.core.views.serve_file import PublicServeFileView, ServeModelFileView
 from apps.core.views.site_configuration import (
     SiteConfigurationUpdateView,
-    TimezoneConfigurationUpdateView,
 )
 
 __all__ = [
@@ -28,5 +27,4 @@ __all__ = [
     'PublicServeFileView',
     'ServeModelFileView',
     'SiteConfigurationUpdateView',
-    'TimezoneConfigurationUpdateView',
 ]

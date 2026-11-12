@@ -2,11 +2,14 @@
 
 ## S1 — Sección de configuración
 
-El dashboard debe exponer una sección **Configuración → Horario y región**
-visible para usuarios con `core.change_siteconfiguration`.
+El horario y el formato de hora viven **en la misma página** que el resto de la
+configuración del sitio: Configuración → Sitio (`core:site_configuration`). No
+hay una entrada de menú ni una URL separadas.
 
-- Aceptación: la entrada existe en el menú, la URL responde 200 con permiso y
-  403 sin permiso.
+- Aceptación: la página responde 200 con `core.change_siteconfiguration` y 403
+  sin permiso; contiene la tarjeta **Horario y región** con los tres campos; el
+  menú de Configuración no tiene una entrada aparte ni existe
+  `/config/horario-region/`.
 - Verificación: pruebas de vista y de plantilla.
 
 ## S2 — Modo de zona horaria

@@ -55,11 +55,12 @@ class SiteConfigurationTemplateTests(TestCase):
         self.assertContains(response, 'enctype="multipart/form-data"')
         self.assertContains(response, 'novalidate')
 
-    def test_two_section_cards_rendered(self):
+    def test_section_cards_rendered(self):
         response = self._get_edit_page()
-        # Section titles as set by the two form_card includes.
+        # Section titles as set by the form_card includes.
         self.assertContains(response, 'Colores y tema')
         self.assertContains(response, 'Identidad')
+        self.assertContains(response, 'Horario y región')
 
     def test_primary_and_theme_base_side_by_side(self):
         response = self._get_edit_page()
