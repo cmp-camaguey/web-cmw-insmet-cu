@@ -627,6 +627,21 @@ class DashboardNavbarTest(UpdateTestCase):
         # La barra arranca oculta: fuera de `running` no se muestra.
         self.assertIn('progress progress-sm', html)
 
+    def test_el_aviso_tiene_el_spinner_de_tabler(self):
+        # Mientras el servidor despliega, el icono del navbar se sustituye por
+        # este spinner. Si el nodo desaparece del template, el JS cae al
+        # `ti-loader` y el admin pierde la senal de que algo esta corriendo.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        html = self.client.get(reverse('dashboard:index')).content.decode()
+
+        self.assertIn('id="update-navbar-spinner"', html)
+        self.assertIn('spinner-border spinner-border-sm', html)
+        # Arranca oculto: solo se muestra en `running`.
+        self.assertIn('spinner-border spinner-border-sm text-blue d-none', html)
+
     def test_el_aviso_no_se_renderiza_para_no_superusuario(self):
         self.client.force_login(self.plain)
 

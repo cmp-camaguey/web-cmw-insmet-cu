@@ -24,6 +24,7 @@
   }
 
   var icon = document.getElementById('update-navbar-icon');
+  var spinner = document.getElementById('update-navbar-spinner');
   var badge = document.getElementById('update-navbar-badge');
   var title = document.getElementById('update-navbar-title');
   var text = document.getElementById('update-navbar-text');
@@ -155,6 +156,15 @@
     badge.classList.toggle('d-none', !options.badge);
 
     icon.className = 'icon ' + (options.icon || 'ti ti-refresh');
+    // El spinner sustituye al icono durante el despliegue. Se aplica despues de
+    // reescribir `className` porque esa asignacion borra cualquier `d-none`
+    // anterior. Sin el nodo (template viejo en cache) queda el `ti-loader`, que
+    // es lo que habia antes de este cambio.
+    var spinning = Boolean(options.spinner) && Boolean(spinner);
+    icon.classList.toggle('d-none', spinning);
+    if (spinner) {
+      spinner.classList.toggle('d-none', !spinning);
+    }
     title.textContent = options.title || 'Actualizaciones';
     text.textContent = options.message || '';
     detail.textContent = options.detail || '';
@@ -186,6 +196,7 @@
       paint({
         badge: 'blue',
         icon: 'ti ti-loader',
+        spinner: true,
         title: 'Desplegando',
         message: run.message || 'Desplegando…',
         // Sin detalle: la accion en curso va debajo de la barra, y decir "se
