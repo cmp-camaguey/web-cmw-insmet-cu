@@ -743,6 +743,37 @@ El ejecutor **no confia en el SHA del archivo**: lo resuelve el mismo con `git
 ls-remote` sobre `refs/heads/main`. Aunque el proceso web este comprometido y escriba
 lo que quiera, lo maximo que consigue es desplegar lo que ya esta en `main`.
 
+### Progreso del despliegue
+
+Mientras el despliegue corre, el desplegable reemplaza el texto **"Desplegando…"** por
+una barra `progress-sm` de Tabler y, debajo, la accion que se esta ejecutando. La
+barra avanza con los pasos reales de `deploy.sh`, que publica la clave del paso en
+`/var/lib/webcmp/deploy-progress.json`. El archivo lleva **solo la clave**: la
+etiqueta y el porcentaje los calcula el panel desde una tabla cerrada, igual que los
+mensajes de estado, para que un archivo escrito por root no sea un canal de texto
+hacia el navegador del administrador.
+
+| Paso publicado | Accion que muestra el panel | Barra al empezar |
+|---|---|---|
+| `code` | Actualizando el código | 0% |
+| `deps` | Instalando dependencias | 15% |
+| `checks` | Validando la configuración | 45% |
+| `backup` | Respaldando la base de datos | 55% |
+| `migrate` | Aplicando migraciones | 65% |
+| `static` | Recolectando estáticos | 85% |
+| `restart` | Reiniciando los servicios | 90% |
+| `healthcheck` | Comprobando el sitio | 95% |
+
+Antes del primer paso —el ejecutor todavia resolviendo el commit— y durante el
+rollback la barra es **indeterminada**, no un 0% quieto: en la ventana inicial aun no
+hay avance que medir, y revertir no avanza hacia el final. Con el despliegue ya
+terminado (o fallido) el bloque de progreso desaparece y vuelven los mensajes de
+siempre.
+
+Escribir ese archivo es **best-effort**: si el directorio no existe o no se puede
+escribir, `deploy.sh` sigue y el panel muestra "Preparando el despliegue…". Una barra
+de progreso no puede abortar el despliegue que esta describiendo.
+
 ### Cuando el deploy falla
 
 Un deploy que aborta revierte el codigo y **no** toca `/etc/webcmp/deployed`, asi
@@ -768,6 +799,7 @@ journalctl -u webcmp-autodeploy -n 80 --no-pager
 | `/var/lib/webcmp` | `deploy:webcmp` | 2775 |
 | `/var/lib/webcmp/deploy-request` | `webcmp:webcmp` | 0644 |
 | `/var/lib/webcmp/deploy-status.json` | `deploy:webcmp` | 0644 |
+| `/var/lib/webcmp/deploy-progress.json` | `root:webcmp` | 0644 |
 | `/usr/local/sbin/webcmp-autodeploy` | `root:root` | 0755 |
 
 El 2775 del directorio lleva setgid a proposito: hace que el archivo de peticion y
@@ -794,6 +826,7 @@ disco y nadie la recoge. El deploy manual (`webcmp-deploy`) no se toca.
 systemctl status webcmp-autodeploy.path
 journalctl -u webcmp-autodeploy -n 50
 cat /var/lib/webcmp/deploy-status.json
+cat /var/lib/webcmp/deploy-progress.json   # paso en curso de la barra
 cat /etc/webcmp/deployed
 ```
 

@@ -44,11 +44,13 @@ class UpdateTestCase(TestCase):
         self.deployed_file = os.path.join(self.tmpdir, 'deployed')
         self.status_file = os.path.join(self.tmpdir, 'deploy-status.json')
         self.request_file = os.path.join(self.tmpdir, 'deploy-request')
+        self.progress_file = os.path.join(self.tmpdir, 'deploy-progress.json')
 
         override = override_settings(
             UPDATE_DEPLOYED_SHA_FILE=self.deployed_file,
             UPDATE_STATUS_FILE=self.status_file,
             UPDATE_REQUEST_FILE=self.request_file,
+            UPDATE_PROGRESS_FILE=self.progress_file,
         )
         override.enable()
         self.addCleanup(override.disable)
@@ -277,6 +279,141 @@ class UpdateStatusViewTest(UpdateTestCase):
         self.assertEqual(payload['last_run']['status'], 'running')
 
 
+class UpdateProgressTest(UpdateTestCase):
+    """Barra de progreso del despliegue en curso.
+
+    El contrato es el mismo que el del estado: el archivo lo escribe otro
+    usuario, asi que solo su CLAVE de paso sobrevive; etiqueta y porcentaje los
+    pone el panel.
+    """
+
+    def set_progress(self, **payload):
+        self.write(self.progress_file, json.dumps(payload))
+
+    def running(self, **kwargs):
+        self.set_deployed()
+        self.set_remote()
+        self.set_run_status(status='running', sha=SHA_LATEST, **kwargs)
+        self.client.force_login(self.admin)
+        return self.client.get(self.status_url).json()
+
+    def test_paso_en_curso_con_su_porcentaje(self):
+        self.set_progress(step='migrate', updated_at='2026-11-11T10:00:00+00:00')
+
+        payload = self.running()
+
+        # 15 (codigo) + 30 (dependencias) + 10 (checks) + 10 (respaldo): lo que
+        # ya se hizo, no lo que se esta haciendo.
+        self.assertEqual(
+            payload['progress'],
+            {'step': 'migrate', 'message': 'Aplicando migraciones', 'percent': 65},
+        )
+
+    def test_cada_paso_da_el_porcentaje_de_la_tabla(self):
+        # La tabla es el contrato con deploy.sh: si un peso se toca, la barra deja
+        # de corresponder con los pasos reales y nada mas lo detecta.
+        esperado = {
+            'code': 0,
+            'deps': 15,
+            'checks': 45,
+            'backup': 55,
+            'migrate': 65,
+            'static': 85,
+            'restart': 90,
+            'healthcheck': 95,
+        }
+        for step, percent in esperado.items():
+            with self.subTest(step=step):
+                self.set_progress(step=step)
+                self.assertEqual(self.running()['progress']['percent'], percent)
+
+    def test_sin_archivo_la_barra_es_indeterminada(self):
+        # Ventana real entre que el ejecutor escribe `running` y el primer paso
+        # de deploy.sh: la barra no puede quedarse en 0% mintiendo.
+        payload = self.running()
+
+        self.assertEqual(
+            payload['progress'],
+            {'step': None, 'message': 'Preparando el despliegue…', 'percent': None},
+        )
+
+    def test_archivo_ilegible_es_preparacion(self):
+        self.write(self.progress_file, '{no es json')
+        self.assertIsNone(self.running()['progress']['percent'])
+
+    def test_paso_desconocido_no_llega_al_navegador(self):
+        self.set_progress(step='<img src=x onerror=alert(1)>', percent=99, message='mia')
+
+        payload = self.running()
+        progress = payload['progress']
+
+        self.assertIsNone(progress['step'])
+        self.assertIsNone(progress['percent'])
+        self.assertNotIn('onerror', json.dumps(payload))
+        self.assertNotIn('mia', json.dumps(payload))
+
+    def test_porcentaje_del_archivo_se_ignora(self):
+        # El porcentaje lo calcula el panel: un archivo manipulado no puede
+        # pintar la barra al 99% para siempre.
+        self.set_progress(step='migrate', percent=99)
+        self.assertEqual(self.running()['progress']['percent'], 65)
+
+    def test_la_clave_coincide_solo_exacta(self):
+        # Una clave con espacios o en mayusculas no es "casi" el paso: si se
+        # aceptara por parecido, un archivo mal escrito daria un porcentaje
+        # creible y equivocado.
+        for step in (' migrate ', 'MIGRATE', 'migrate\n'):
+            with self.subTest(step=step):
+                self.set_progress(step=step)
+                self.assertEqual(
+                    self.running()['progress'],
+                    {'step': None, 'message': 'Preparando el despliegue…', 'percent': None},
+                )
+
+    def test_la_ruta_del_archivo_no_llega_al_navegador(self):
+        # El navegador no tiene por que saber donde vive el archivo de progreso:
+        # es infraestructura del servidor, no un dato del panel.
+        self.set_progress(step='migrate')
+
+        body = json.dumps(self.running())
+
+        self.assertNotIn(self.tmpdir, body)
+        self.assertNotIn('deploy-progress.json', body)
+
+    def test_rollback_es_indeterminado(self):
+        # Revertir no avanza hacia el final: un porcentaje ahi mentiria.
+        self.set_progress(step='rollback')
+
+        progress = self.running()['progress']
+
+        self.assertEqual(progress['percent'], None)
+        self.assertEqual(progress['message'], 'Revirtiendo el código')
+
+    def test_fuera_de_running_no_se_envia_progreso(self):
+        # Un archivo que quedo de un intento anterior no pinta nada en un panel
+        # que ya dice "al dia".
+        self.set_progress(step='migrate')
+        self.set_deployed()
+        self.set_remote(sha=SHA_DEPLOYED)
+        self.client.force_login(self.admin)
+
+        payload = self.client.get(self.status_url).json()
+
+        self.assertEqual(payload['state'], 'up_to_date')
+        self.assertIsNone(payload['progress'])
+
+    def test_progreso_huerfano_no_acompana_el_reintento(self):
+        # `running` viejo: el panel vuelve a ofrecer la actualizacion, asi que
+        # tampoco hay despliegue en curso que ilustrar.
+        self.set_progress(step='migrate')
+        started = datetime.now(UTC) - timedelta(hours=2)
+
+        payload = self.running(started_at=started.isoformat())
+
+        self.assertEqual(payload['state'], 'available')
+        self.assertIsNone(payload['progress'])
+
+
 class UpdateRequestViewTest(UpdateTestCase):
     def test_no_superusuario_no_puede_pedir(self):
         self.client.force_login(self.plain)
@@ -473,6 +610,22 @@ class DashboardNavbarTest(UpdateTestCase):
         response = self.client.get(reverse('dashboard:index'))
 
         self.assertContains(response, 'update-navbar-commits')
+
+    def test_el_desplegable_tiene_la_barra_de_progreso_de_tabler(self):
+        # El JS pinta el progreso sobre estos nodos y con la clase de Tabler. Si
+        # desaparecen, la barra no se dibuja y no hay error: el admin vuelve a
+        # ver el texto "Desplegando…" sin saber que el panel dejo de informar.
+        self.set_deployed()
+        self.set_remote()
+        self.client.force_login(self.admin)
+
+        html = self.client.get(reverse('dashboard:index')).content.decode()
+
+        self.assertIn('id="update-navbar-progress"', html)
+        self.assertIn('id="update-navbar-progress-bar"', html)
+        self.assertIn('id="update-navbar-progress-step"', html)
+        # La barra arranca oculta: fuera de `running` no se muestra.
+        self.assertIn('progress progress-sm', html)
 
     def test_el_aviso_no_se_renderiza_para_no_superusuario(self):
         self.client.force_login(self.plain)
