@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0002_taskexecutionlog_uuid_and_permissions'),
+        ('core', '0007_taskexecutionlog_uuid'),
     ]
 
     operations = [

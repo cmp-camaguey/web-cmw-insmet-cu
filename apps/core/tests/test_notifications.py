@@ -1,15 +1,20 @@
 """Pruebas del núcleo de avisos (cambio 026, `design.md` §9 tests 1, 2, 6, 7 y 8)."""
 
+from types import SimpleNamespace
+
 from django.contrib.auth.models import User
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.core.models import Notification
+from apps.core.models import Notification, NotificationPreference
 from apps.core.notifications import (
     TASK_ERROR_ALLOWLIST,
     make_dedupe_key,
+    muted_email_addresses,
     notify,
+    notify_audience,
     notify_superusers,
     notify_task_failure,
 )
@@ -136,6 +141,82 @@ class NotifySuperusersCountTests(TestCase):
         self.assertEqual(Notification.objects.count(), 0)
 
 
+class NotifyAudienceTests(TestCase):
+    """Techo de audiencia por fuente (cambio 030, `design.md` §7.1).
+
+    `notify_audience` decide a quién puede alcanzar cada `source`: una fuente
+    interna no llega a un no-superusuario ni aunque la llamada pase clientes.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser('admin-audiencia', 'admin@example.com', 'x')
+        cls.titular = User.objects.create_user(
+            'titular', 'titular@example.com', 'x', first_name='Ti', last_name='Tular'
+        )
+        cls.customer = SimpleNamespace(user=cls.titular)
+
+    def _notify(self, source):
+        # La llamada siempre pasa el cliente: lo que decide quién lo recibe es
+        # la política de la fuente, no el llamador.
+        return notify_audience(
+            source=source,
+            severity=Notification.Severity.INFO,
+            title='Aviso de prueba',
+            dedupe_key=make_dedupe_key('audiencia', source, 'test'),
+            customers=[self.customer],
+        )
+
+    def test_una_fuente_interna_no_alcanza_al_cliente(self):
+        self._notify('huey')
+
+        self.assertEqual(
+            list(Notification.objects.values_list('recipient__username', flat=True)),
+            [self.admin.username],
+        )
+
+    def test_una_fuente_de_cliente_alcanza_al_titular(self):
+        self._notify('invoice')
+
+        self.assertEqual(
+            set(Notification.objects.values_list('recipient__username', flat=True)),
+            {self.admin.username, self.titular.username},
+        )
+
+    def test_el_admin_que_es_tambien_el_titular_recibe_una_sola_fila(self):
+        self.customer.user = self.admin
+
+        created = self._notify('subscription')
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(Notification.objects.count(), 1)
+
+    def test_un_titular_inactivo_no_recibe_el_aviso(self):
+        self.titular.is_active = False
+        self.titular.save(update_fields=['is_active'])
+
+        self._notify('subscription')
+
+        self.assertEqual(
+            list(Notification.objects.values_list('recipient__username', flat=True)),
+            [self.admin.username],
+        )
+
+    def test_notify_superusers_sigue_siendo_solo_para_admins(self):
+        """El envoltorio no hereda la audiencia de cliente de la fuente."""
+        notify_superusers(
+            source='subscription',
+            severity=Notification.Severity.INFO,
+            title='Aviso interno',
+            dedupe_key=make_dedupe_key('audiencia', 'wrapper', 'test'),
+        )
+
+        self.assertEqual(
+            list(Notification.objects.values_list('recipient__username', flat=True)),
+            [self.admin.username],
+        )
+
+
 class TaskFailureNotificationTests(TestCase):
     """Prueba 7 de `design.md` §9: el fallo de una tarea avisa, la de factura no.
 
@@ -220,3 +301,84 @@ class TaskFailureNotificationTests(TestCase):
     def test_una_tarea_desconocida_no_avisa(self):
         self.assertEqual(notify_task_failure('limpiar_cache', error='x'), [])
         self.assertEqual(Notification.objects.count(), 0)
+
+
+class NotificationPreferenceTests(TestCase):
+    """T12: dos canales con interruptores independientes y opt-out por defecto.
+
+    Lo que se prueba no es que el modelo guarde dos booleanos, sino que cada
+    canal lea el suyo: apagar la campana no corta el correo y apagar el correo no
+    borra la campana.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_superuser('admin-pref', 'admin-pref@example.com', 'x')
+        cls.cliente = User.objects.create_user(
+            'cliente-pref',
+            'cliente-pref@example.com',
+            'x',
+            first_name='Cli',
+            last_name='Ente',
+        )
+        cls.customer = SimpleNamespace(user=cls.cliente)
+
+    def _notify(self, source='invoice'):
+        return notify_audience(
+            source=source,
+            severity=Notification.Severity.INFO,
+            title='Aviso de prueba',
+            dedupe_key=make_dedupe_key('pref', source, 'test'),
+            customers=[self.customer],
+        )
+
+    def _recipientes(self, source='invoice'):
+        return set(
+            Notification.objects.filter(source=source).values_list('recipient__username', flat=True)
+        )
+
+    def test_sin_fila_el_aviso_in_app_llega(self):
+        self._notify()
+
+        self.assertEqual(self._recipientes(), {self.admin.username, self.cliente.username})
+
+    def test_apagar_in_app_quita_el_aviso_al_cliente_y_no_al_admin(self):
+        NotificationPreference.objects.create(user=self.cliente, source='invoice', in_app=False)
+
+        self._notify()
+
+        self.assertEqual(self._recipientes(), {self.admin.username})
+
+    def test_apagar_el_correo_no_apaga_el_aviso_in_app(self):
+        NotificationPreference.objects.create(
+            user=self.cliente, source='invoice', in_app=True, email=False
+        )
+
+        self._notify()
+
+        self.assertIn(self.cliente.username, self._recipientes())
+        self.assertIn('cliente-pref@example.com', muted_email_addresses('invoice'))
+
+    def test_apagar_in_app_no_apaga_el_correo(self):
+        NotificationPreference.objects.create(
+            user=self.cliente, source='invoice', in_app=False, email=True
+        )
+
+        self._notify()
+
+        self.assertNotIn(self.cliente.username, self._recipientes())
+        self.assertNotIn('cliente-pref@example.com', muted_email_addresses('invoice'))
+
+    def test_un_admin_con_preferencia_sigue_recibiendo_sus_avisos(self):
+        """La preferencia es del cliente: no puede silenciar al que administra."""
+        NotificationPreference.objects.create(user=self.admin, source='invoice', in_app=False)
+
+        self._notify()
+
+        self.assertIn(self.admin.username, self._recipientes())
+
+    def test_no_puede_haber_dos_preferencias_para_el_mismo_usuario_y_fuente(self):
+        NotificationPreference.objects.create(user=self.cliente, source='invoice')
+
+        with self.assertRaises(IntegrityError):
+            NotificationPreference.objects.create(user=self.cliente, source='invoice')

@@ -147,7 +147,45 @@ def notify(
     return obj
 
 
-def notify_superusers(
+# Techo de audiencia por fuente (cambio 030, `design.md` §7.1). Una fuente que
+# no esté aquí alcanza solo a los superusuarios: lo desconocido se trata como
+# interno porque el error caro es mandarle a un cliente un aviso de operación.
+# `invoice` incluye a los titulares pero los avisos de fallo no pasan clientes,
+# así que siguen siendo solo para admins.
+CLIENT_SOURCES = frozenset({'invoice', 'subscription'})
+
+
+def in_app_enabled(user, source):
+    """¿El usuario quiere ver en la campana los avisos de esa fuente?
+
+    Opt-out: sin fila de preferencia está activado. Los admins no tienen filas,
+    así que este camino nunca les quita sus avisos.
+    """
+    from apps.core.models import NotificationPreference
+
+    preference = NotificationPreference.objects.filter(user=user, source=source).first()
+    return preference is None or preference.in_app
+
+
+def muted_email_addresses(source):
+    """Direcciones cuyo dueño apagó el canal de correo para esa fuente.
+
+    Devuelve el correo en minúsculas porque `Subscriber.email` se normaliza así
+    al guardarse; comparar sin normalizar dejaría pasar al que escribió el
+    correo con mayúsculas en su perfil.
+    """
+    from apps.core.models import NotificationPreference
+
+    return {
+        email.lower()
+        for email in NotificationPreference.objects.filter(source=source, email=False).values_list(
+            'user__email', flat=True
+        )
+        if email
+    }
+
+
+def notify_audience(
     *,
     source,
     severity,
@@ -157,22 +195,51 @@ def notify_superusers(
     dedupe_key,
     expires_at=None,
     repeat_after=None,
+    customers=(),
 ):
-    """Notifica a todos los superusuarios activos y devuelve las recién creadas.
+    """Notifica a los admins y, si la fuente lo permite, a los titulares.
 
-    "Creadas" no es "destinatarios": si un aviso ya existía sin leer, esta
-    corrida no hizo nada por ese admin y no debe contarlo. El conjunto de
-    destinatarios es fijo a propósito (dos admins en el repo): una tabla de
-    preferencias por usuario sería complejidad sin uso. Si algún día entra un rol
-    que deba ver solo una parte, esa es la señal para agregarla.
+    `customers` son los clientes afectados por el hecho. Quién los recibe no lo
+    decide el llamador sino la fuente: con una fuente interna no llegan aunque
+    se pasen, de modo que un error de llamada no le manda a un cliente un aviso
+    pensado para quien administra.
 
-    `repeat_after` se reenvía tal cual a `_notify_or_get`: lo usan los
-    recordatorios que deben reaparecer si el hecho sigue pendiente.
+    Devuelve las notificaciones **recién creadas**, igual que
+    `notify_superusers`: un aviso que ya estaba sin leer no cuenta como
+    entregado en esta corrida.
     """
     from django.contrib.auth import get_user_model
 
+    # Por `pk`: un admin que además es el titular del cliente recibe una sola
+    # fila, no dos con la misma clave.
+    recipients = {
+        user.pk: user for user in get_user_model().objects.filter(is_superuser=True, is_active=True)
+    }
+    if source in CLIENT_SOURCES:
+        for customer in customers:
+            user = getattr(customer, 'user', None)
+            if user is not None and getattr(user, 'is_active', False):
+                recipients.setdefault(user.pk, user)
+
+    # Preferencias en una sola consulta: apagar la campana de una fuente no
+    # afecta al correo ni a las demás fuentes. Los admins sin fila siguen
+    # recibiendo, porque la ausencia de preferencia es «activado».
+    from apps.core.models import NotificationPreference
+
+    preferences = {
+        preference.user_id: preference
+        for preference in NotificationPreference.objects.filter(
+            user_id__in=recipients, source=source
+        )
+    }
+    recipients = {
+        pk: user
+        for pk, user in recipients.items()
+        if user.is_superuser or pk not in preferences or preferences[pk].in_app
+    }
+
     created = []
-    for user in get_user_model().objects.filter(is_superuser=True, is_active=True):
+    for user in recipients.values():
         obj, was_created = _notify_or_get(
             user,
             source=source,
@@ -187,6 +254,44 @@ def notify_superusers(
         if was_created:
             created.append(obj)
     return created
+
+
+def notify_superusers(
+    *,
+    source,
+    severity,
+    title,
+    body='',
+    url='',
+    dedupe_key,
+    expires_at=None,
+    repeat_after=None,
+):
+    """Atajo de `notify_audience` sin clientes: solo superusuarios.
+
+    Es el caso de todo lo que hoy nace interno —una tarea de Huey, un envío
+    masivo, un fallo de factura— y no debe heredar la audiencia de cliente de
+    su fuente aunque la fuente la tenga.
+
+    "Creadas" no es "destinatarios": si un aviso ya existía sin leer, esta
+    corrida no hizo nada por ese admin y no debe contarlo. El conjunto de
+    destinatarios es fijo a propósito (dos admins en el repo): una tabla de
+    preferencias por usuario sería complejidad sin uso. Si algún día entra un rol
+    que deba ver solo una parte, esa es la señal para agregarla.
+
+    `repeat_after` se reenvía tal cual a `_notify_or_get`: lo usan los
+    recordatorios que deben reaparecer si el hecho sigue pendiente.
+    """
+    return notify_audience(
+        source=source,
+        severity=severity,
+        title=title,
+        body=body,
+        url=url,
+        dedupe_key=dedupe_key,
+        expires_at=expires_at,
+        repeat_after=repeat_after,
+    )
 
 
 def notify_task_failure(task_name, *, task_id='', logical_key='', error=''):

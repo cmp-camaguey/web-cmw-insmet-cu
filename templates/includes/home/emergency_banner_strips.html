@@ -1,0 +1,136 @@
+{% load my_filters %}
+{% if candidates %}
+  {% comment %}
+    La franja se resuelve con dos scripts, y no con uno, por una razón concreta:
+    cuál se ve depende de lo que el visitante cerró, y eso solo lo sabe el
+    navegador.
+
+    El primero va ANTES de las franjas y resuelve el caso incómodo antes del
+    primer paint: si el aviso que encabeza la lista está cerrado, esconde todo.
+    Sin él, quien cerró el ciclón ayer lo vería aparecer y desaparecer en cada
+    página mientras el script de después decide mostrar la alerta siguiente.
+
+    El segundo va DESPUÉS porque consulta las franjas ya escritas: elige la
+    primera que el visitante no haya cerrado, esconde el resto y, si cerró
+    todas, deja todo oculto. Las franjas vienen del servidor en orden de
+    gravedad, así que la elegida es la más grave que no haya visto.
+
+    `localStorage` guarda una LISTA de cierres `{id, until}`. Cerrar el aviso
+    más grave no puede esconder el siguiente, y editar la vigencia de uno ya
+    cerrado lo muestra otra vez, porque es un hecho nuevo.
+
+    Sin JavaScript se ve la primera, que es la más grave: el degradado es
+    prudente, nunca esconde una emergencia.
+  {% endcomment %}
+  <script>
+    (function () {
+      try {
+        var stored = JSON.parse(
+          window.localStorage.getItem('cmp.emergencyBanner.dismissed') || '[]'
+        );
+        /* El formato anterior era un único objeto; se acepta para no resucitar
+           el aviso que el visitante ya había cerrado. */
+        if (stored && !Array.isArray(stored)) {
+          stored = [stored];
+        }
+        var first = {
+          id: '{{ candidates.0.warning.uuid }}',
+          until: '{{ candidates.0.warning.valid_until|date:"c" }}'
+        };
+        for (var i = 0; i < stored.length; i++) {
+          if (stored[i] && stored[i].id === first.id && stored[i].until === first.until) {
+            document.documentElement.classList.add('emergency-banner-dismissed');
+            return;
+          }
+        }
+      } catch (error) {
+        /* Sin almacenamiento: se muestra la primera. Nunca al revés. */
+      }
+    })();
+  </script>
+  {% for candidate in candidates %}
+    {% with warning=candidate.warning %}
+      <aside class="emergency-banner emergency-banner--{{ warning.warning_type }}"
+             aria-label="Aviso meteorológico vigente"
+             data-emergency-banner
+             data-warning-id="{{ warning.uuid }}"
+             data-warning-valid-until="{{ warning.valid_until|date:'c' }}"
+             {% if not forloop.first %}hidden{% endif %}>
+        <div class="container-xl">
+          <div class="emergency-banner__body">
+            <span class="emergency-banner__marker" aria-hidden="true"></span>
+            <div class="emergency-banner__main">
+              <p class="emergency-banner__eyebrow">
+                <span class="emergency-banner__dot" aria-hidden="true"></span>
+                Aviso vigente · {{ warning.get_warning_type_display }}
+              </p>
+              <p class="emergency-banner__title">{{ warning.title|default:warning.summary }}</p>
+              {% if warning.title %}
+                <p class="emergency-banner__summary">{{ warning.summary|truncatechars:200 }}</p>
+              {% endif %}
+            </div>
+            <div class="emergency-banner__meta">
+              <span class="emergency-banner__date">
+                <i class="icon ti ti-clock" aria-hidden="true"></i>
+                Válido hasta {{ warning.valid_until|local_datetime:'d/m/Y' }}
+              </span>
+              <a class="emergency-banner__cta" href="{% url candidate.url_name %}">
+                {% if candidate.extra %}
+                  Ver los {{ candidate.total }} avisos
+                {% else %}
+                  Ver detalles
+                {% endif %}
+                <i class="icon ti ti-arrow-up-right" aria-hidden="true"></i>
+              </a>
+              <button type="button"
+                      class="emergency-banner__close"
+                      data-emergency-banner-close
+                      aria-label="Ocultar este aviso"
+                      title="Ocultar este aviso">
+                <i class="icon ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    {% endwith %}
+  {% endfor %}
+  <script>
+    (function () {
+      try {
+        var stored = JSON.parse(
+          window.localStorage.getItem('cmp.emergencyBanner.dismissed') || '[]'
+        );
+        if (stored && !Array.isArray(stored)) {
+          stored = [stored];
+        }
+        var dismissed = {};
+        for (var i = 0; i < stored.length; i++) {
+          if (stored[i] && stored[i].id) {
+            dismissed[stored[i].id + '|' + stored[i].until] = true;
+          }
+        }
+        var banners = document.querySelectorAll('[data-emergency-banner]');
+        var shown = false;
+        for (var j = 0; j < banners.length; j++) {
+          var banner = banners[j];
+          var closed = dismissed[
+            banner.getAttribute('data-warning-id') + '|' +
+            banner.getAttribute('data-warning-valid-until')
+          ];
+          if (!shown && !closed) {
+            banner.removeAttribute('hidden');
+            shown = true;
+          } else {
+            banner.setAttribute('hidden', 'hidden');
+          }
+        }
+        document.documentElement.classList.toggle('emergency-banner-dismissed', !shown);
+      } catch (error) {
+        /* Si algo falla aquí, mejor una franja de más que ninguna: la primera
+           ya viene visible desde el HTML. */
+        document.documentElement.classList.remove('emergency-banner-dismissed');
+      }
+    })();
+  </script>
+{% endif %}

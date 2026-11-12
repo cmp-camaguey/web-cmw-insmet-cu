@@ -7,4 +7,8 @@ class UserAuthConfig(AppConfig):
     verbose_name = 'Usuarios'
 
     def ready(self):
-        pass
+        # Importar el módulo registra los receptores de `Profile`. Sin esto la
+        # casilla «Recibir novedades por email» no aplica nada: Django no
+        # importa `signals.py` por su cuenta. Es el mismo motivo por el que
+        # `CoreConfig.ready()` importa sus tareas.
+        from apps.user_auth import signals  # noqa: F401
