@@ -8,7 +8,7 @@ from django.urls import reverse_lazy
 from django.views.generic import UpdateView
 
 from apps.core.forms.site_configuration import SiteConfigurationForm, TimezoneConfigurationForm
-from apps.core.models import SiteConfiguration
+from apps.core.models import ActivityLog, SiteConfiguration
 from apps.core.utils import log_action
 
 
@@ -90,7 +90,7 @@ class SiteConfigurationUpdateView(LoginRequiredMixin, PermissionRequiredMixin, U
             log_action(
                 user=request.user,
                 obj=site,
-                action_flag=6,  # maintenance mode (own activity-log family/icon)
+                action_flag=ActivityLog.ACTIVITY_MAINTENANCE,
                 message=f'El usuario {request.user.username} {verb} el modo de mantenimiento.',
             )
             return JsonResponse({'ok': True, 'maintenance_mode': site.maintenance_mode})
