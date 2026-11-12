@@ -596,6 +596,13 @@ UPDATE_STATUS_FILE = os.getenv('UPDATE_STATUS_FILE', '/var/lib/webcmp/deploy-sta
 UPDATE_PROGRESS_FILE = os.getenv('UPDATE_PROGRESS_FILE', '/var/lib/webcmp/deploy-progress.json')
 # El panel escribe la peticion; una unidad systemd .path la recoge al aparecer.
 UPDATE_REQUEST_FILE = os.getenv('UPDATE_REQUEST_FILE', '/var/lib/webcmp/deploy-request')
+# Boton "Aplicar cambios" del panel de entorno (change 033-entorno-servidor).
+# Mismo mecanismo y mismo directorio: el proceso web escribe la peticion, la
+# unidad `webcmp-apply.path` la recoge y reinicia los servicios. El panel nunca
+# ejecuta `systemctl`; no tiene privilegios y no los pide.
+ENV_APPLY_REQUEST_FILE = os.getenv('ENV_APPLY_REQUEST_FILE', '/var/lib/webcmp/apply-request')
+# El ejecutor escribe aca el resultado del reinicio (JSON), que la pagina lee.
+ENV_APPLY_STATUS_FILE = os.getenv('ENV_APPLY_STATUS_FILE', '/var/lib/webcmp/apply-status.json')
 # Cuanto dura el resultado de `git ls-remote` en cache, y cuanto se espera al
 # remoto. El panel es de administracion: 5 minutos de cache evitan que cada
 # visita al dashboard abra una conexion, y 15 segundos acotan lo que puede

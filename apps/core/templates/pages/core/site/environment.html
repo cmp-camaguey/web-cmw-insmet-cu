@@ -8,8 +8,9 @@
             <i class="icon ti ti-info-circle"></i>
           </div>
           <div>
-            Los cambios se aplican cuando se reinicie el servicio. Mientras no se reinicie,
-            el sitio sigue usando los valores de <strong>En ejecución</strong>.
+            Los cambios se aplican cuando se reinicie el servicio. <strong>Aplicar cambios</strong>
+            guarda y reinicia de una vez; <strong>Guardar</strong> solo escribe los valores, y el
+            sitio sigue usando los de <strong>En ejecución</strong> hasta el próximo reinicio.
           </div>
         </div>
       </div>
@@ -24,6 +25,34 @@
             <div>
               El proceso web no puede guardar la configuración. Los parámetros quedan en solo
               lectura hasta que un operador revise los permisos del servidor.
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+    {% if apply_status %}
+      <div class="col-12">
+        <div class="alert alert-{{ apply_status.tone }}" role="alert">
+          <div class="d-flex">
+            <div class="me-2">
+              <i class="icon ti ti-{{ apply_status.icon }}"></i>
+            </div>
+            <div>{{ apply_status.text }}</div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+    {% if can_write and not can_apply %}
+      <div class="col-12">
+        <div class="alert alert-warning" role="alert">
+          <div class="d-flex">
+            <div class="me-2">
+              <i class="icon ti ti-plug-off"></i>
+            </div>
+            <div>
+              El reinicio automático no está disponible en este servidor, así que el botón
+              <strong>Aplicar cambios</strong> queda deshabilitado. Guarde los cambios y reinicie
+              el servicio desde el servidor.
             </div>
           </div>
         </div>
@@ -121,6 +150,18 @@
                   class="btn btn-primary"
                   {% if not can_write %}disabled{% endif %}>
             <i class="icon ti ti-device-floppy"></i> Guardar
+          </button>
+          {% comment %}
+            `formaction` y no un segundo formulario: los campos son los mismos y
+            un POST aparte obligaría a duplicar el formulario completo, con el
+            riesgo de que los dos se separen.
+          {% endcomment %}
+          <button type="submit"
+                  formaction="{% url 'core:environment_apply' %}"
+                  class="btn btn-warning"
+                  onclick="return confirm('Se guardarán los cambios y se reiniciarán los servicios. El sitio dejará de responder unos segundos. ¿Continuar?')"
+                  {% if not can_write or not can_apply %}disabled{% endif %}>
+            <i class="icon ti ti-refresh"></i> Aplicar cambios
           </button>
         </div>
       </form>

@@ -8,6 +8,7 @@ from apps.core.views import (
     EmailRecipientListDeleteView,
     EmailRecipientListListView,
     EmailRecipientListUpdateView,
+    EnvironmentConfigApplyView,
     EnvironmentConfigView,
     SiteConfigurationUpdateView,
     TimezoneConfigurationUpdateView,
@@ -25,6 +26,11 @@ urlpatterns = [
         name='timezone_configuration',
     ),
     path('entorno/', EnvironmentConfigView.as_view(), name='environment_config'),
+    path(
+        'entorno/aplicar/',
+        EnvironmentConfigApplyView.as_view(),
+        name='environment_apply',
+    ),
     path('listas-correo/', EmailRecipientListListView.as_view(), name='email_recipient_list'),
     path(
         'listas-correo/crear/',
