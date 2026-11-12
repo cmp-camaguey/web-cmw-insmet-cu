@@ -14,7 +14,7 @@ para correos y PDFs. Interfaz y configuración en español (`es-mx`, `America/Ha
 ## Índice
 
 - [Arranque rápido](#arranque-rápido) — entorno de desarrollo en 3 pasos
-- [Cómo funciona la configuración](#cómo-funciona-la-configuración) — perfiles, claves y por qué falla cerrado
+- [Cómo funciona la configuración](#cómo-funciona-la-configuración) — perfiles y claves
 - [Organización del proyecto](#organización-del-proyecto) — qué hace cada app
 - [Convenciones que te van a morder](#convenciones-que-te-van-a-morder) — las reglas duras del proyecto
 - [Tests](#tests) — cómo correrlos
@@ -36,14 +36,10 @@ cd webcmp
 # Dependencias del sistema para PDFs (wkhtmltopdf)
 sudo apt install libcairo2-dev pkg-config python3-dev wkhtmltopdf
 
-# En Python 3.14 no hay ruedas para varios pins de requirements/prod.txt
-# (pycairo entre otros) y hay que compilar. Sin esto pip falla con
-# "Running cc --version gave [Errno 2] No such file or directory: 'cc'".
+# Compilador: varios pins de requirements/prod.txt no tienen rueda en 3.14.
 sudo apt install build-essential
 
-# WeasyPrint (facturacion en PDF) carga libpango por cffi. Sin esto,
-# `manage.py check` muere con "ffi.dlopen('libpango-1.0.so.0')".
-# Ojo con el nombre: en Ubuntu 24.04+ es libpango1.0-dev, NO libpango-1.0-dev.
+# WeasyPrint (PDF) carga libpango por cffi. El nombre es libpango1.0-dev.
 sudo apt install libpango1.0-dev
 
 make setup
@@ -97,9 +93,8 @@ git config core.hooksPath .githooks
 
 ### PostgreSQL en desarrollo (obligatorio)
 
-El proyecto corre sobre **PostgreSQL en los tres perfiles**. No hay respaldo a
-SQLite: si falta `DB_ENGINE`, `manage.py` falla al arrancar en vez de crear un
-`db.sqlite3` que mida un motor que no existe en producción.
+El proyecto corre sobre **PostgreSQL en los tres perfiles**. Si falta
+`DB_ENGINE`, `manage.py` falla al arrancar.
 
 ```bash
 # 1. Rol y base locales (una vez). El rol necesita CREATEDB: la suite crea y
@@ -122,10 +117,7 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-`python scripts/generate_env.py --development` escribe ese bloque por vos. Si un
-`.env` viejo dice `DB_ENGINE=sqlite3`, el arranque falla con un mensaje que lo
-explica: los datos de `db.sqlite3` **no se convierten solos**, hay que volcarlos
-aparte antes de borrar el archivo.
+`python scripts/generate_env.py --development` escribe ese bloque por vos.
 
 ### Dependencias: un archivo por entorno
 
@@ -148,7 +140,7 @@ pip install -r requirements/prod.txt  # producción
 
 ## Cómo funciona la configuración
 
-`config/settings/` es un **paquete con perfiles**, no un monolito. El dispatcher
+`config/settings/` es un paquete con perfiles. El dispatcher
 (`config/settings/__init__.py`) elige el perfil antes de importar nada:
 
 | Condición | Perfil | Para qué |
@@ -157,13 +149,12 @@ pip install -r requirements/prod.txt  # producción
 | `DEBUG=True` | `dev` | Desarrollo con `.env` |
 | sin `.env` | `testing` | Suite de tests |
 
-`PRODUCTION` gana sobre `DEBUG`. Los tres perfiles importan `base.py`, así que
-comparten la misma configuración y se comportan igual salvo donde declaran una
-diferencia.
+`PRODUCTION` gana sobre `DEBUG`. Los tres perfiles importan `base.py` y solo
+declaran sus diferencias.
 
 ### Las claves se generan fuera de Django
 
-`manage.py` importa los settings antes de despachar el comando, así que el generador de claves es un script plano que corre cuando la aplicación todavía no puede arrancar:
+El generador de claves es un script suelto: `manage.py` importa los settings antes de despachar el comando y no puede arrancar sin `.env`.
 
 ```bash
 python scripts/generate_env.py --development   # PostgreSQL local, correo a consola
@@ -171,7 +162,7 @@ python scripts/generate_env.py --production    # PostgreSQL, SMTP, fail-closed
 python scripts/generate_env.py --production --rotate-keys   # invalida sesiones
 ```
 
-`base.load_secret_key()` levanta `ImproperlyConfigured` en cualquier perfil si no hay material descifrable: no hay fallback a una clave aleatoria. El perfil `testing` inyecta un par determinista antes de importar `base`, y por eso la suite corre en un clon limpio sin `.env`.
+`base.load_secret_key()` levanta `ImproperlyConfigured` si no hay material descifrable: no hay fallback a una clave aleatoria. El perfil `testing` inyecta un par determinista, y por eso la suite corre en un clon limpio.
 
 ### La `ENCRYPTION_KEY` no va en el `.env`
 
@@ -277,10 +268,9 @@ commit. Viajan versionados en `.githooks/pre-commit` y `make setup` los activa c
 
 ## Probar el worker y los correos
 
-El flujo de factura (PDF + correo) tiene tres dependencias que fallan en
-silencio: el binario `wkhtmltopdf`, el worker corriendo, y el backend de correo.
-Sin esto, el síntoma es siempre el mismo y engañoso: Huey reintenta tres veces y
-la factura queda con `email_sent=True` sin que haya salido nada de tu máquina.
+El flujo de factura (PDF + correo) depende de tres cosas que fallan en silencio:
+el binario `wkhtmltopdf`, el worker corriendo y el backend de correo. Si falta
+alguna, Huey reintenta y la factura queda con `email_sent=True` sin haber salido.
 
 Este comando valida las dependencias antes de tocar la base:
 
@@ -336,16 +326,13 @@ NPM (otra máquina, TLS) → Nginx del servidor (HTTP, estáticos, media)
                         → Gunicorn (socket unix) → PostgreSQL
 ```
 
-**Nginx se instala en las dos topologías**: la diferencia es quién termina el TLS,
-no si hay Nginx. En ambas, Gunicorn escucha únicamente en
-`/run/webcmp/gunicorn.sock` y Nginx sirve `/static/` y `/media/`. Con `DEBUG=False`
-Django no publica `/media/`, así que sin el Nginx local cada PDF subido y el
-favicon dan 404 mientras el resto del sitio responde 200.
+Nginx se instala en las dos topologías: cambia quién termina el TLS, no si hay
+Nginx. Gunicorn escucha solo en `/run/webcmp/gunicorn.sock` y Nginx sirve
+`/static/` y `/media/`; con `DEBUG=False` Django no publica `/media/`.
 
-Redis es opcional —el caché por defecto corre en memoria del proceso—, pero
-`scripts/generate_env.py --production` escribe `USE_REDIS_CACHE=True`: o instalás
-Redis, o ponés `False` en el `.env`. Sin Redis el caché vive en cada worker de
-Gunicorn, así que invalidar en uno no alcanza a los demás.
+Redis es opcional, pero `scripts/generate_env.py --production` escribe
+`USE_REDIS_CACHE=True`: instalalo o poné `False` en el `.env`. Sin Redis el caché
+vive en cada worker de Gunicorn.
 
 Todo lo que se instala en el servidor está versionado en `deploy/`:
 
@@ -363,9 +350,6 @@ Todo lo que se instala en el servidor está versionado en `deploy/`:
 aplicación (pasos 1 a 7), andamiaje del deploy, el botón "Actualizar" del panel,
 el rollback, las notificaciones, la franja de aviso y los errores que solo
 aparecen en producción.
-
-La lógica del deploy vive en `deploy/deploy.sh`; el panel es un cliente delgado
-que lo invoca.
 
 ---
 
@@ -396,9 +380,8 @@ por `dev` con PR en squash; `main` sólo recibe promociones por lote (merge comm
 y hotfixes. `dev` no exige aprobación —el gate son los required status checks—,
 `main` sí exige una aprobación humana vía `.github/CODEOWNERS`.
 
-El ciclo completo, los required checks, la limpieza de ramas y el criterio de
-aprobación están en [`AGENTS.md`](AGENTS.md#flujo-de-ramas-dev--main), que es donde
-vive la regla y donde se actualiza.
+El ciclo completo, los required checks y el criterio de aprobación están en
+[`AGENTS.md`](AGENTS.md#flujo-de-ramas-dev--main).
 
 Autores: el Instituto de Meteorología de Cuba.
 

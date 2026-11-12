@@ -65,8 +65,7 @@ make hooks                             # solo activar el hook
 .venv/bin/pre-commit run --all-files   # correr todo una vez
 ```
 
-- `pre-commit install` y `core.hooksPath` son excluyentes: `core.hooksPath` hace que git ignore `.git/hooks`. Usar `pre-commit install --install-hooks` solo para poblar los entornos de los hooks, nunca para activarlos.
-- Los hooks descargan sus entornos desde PyPI en la primera ejecución; conviene hacerlo antes del primer commit.
+- `pre-commit install` y `core.hooksPath` son excluyentes: `core.hooksPath` hace que git ignore `.git/hooks`. `pre-commit install --install-hooks` sirve solo para descargar los entornos, no para activar el hook.
 - Falso positivo nuevo de `detect-secrets`: regenerar el baseline y commitear `.secrets.baseline`.
 
 ```bash
@@ -105,16 +104,16 @@ Required checks en las dos ramas: *Detect affected apps*, *Tests (Django)*, *Lin
 
 Dependabot apunta a `dev` en los tres ecosistemas (`target-branch: dev`).
 
-## Concurrencia entre sesiones
+## Trabajo en paralelo
 
-Varias sesiones pueden escribir sobre la misma copia. `git commit` usa la rama checked out, no la que la sesión cree estar usando.
+`git commit` usa la rama checked out, no la que crees estar usando.
 
-- Cada sesión que escribe usa su propio worktree: `git worktree add ../<repo>-worktrees/<nombre> -b <tipo>/<descripcion> dev`.
-- Antes de commitear: `git branch --show-current` y confirmar que es la rama propia.
-- No cambiar de rama en un checkout compartido con el árbol sucio.
+- Si vas a escribir mientras otro trabaja en la misma copia, usa un worktree: `git worktree add ../<repo>-worktrees/<nombre> -b <tipo>/<descripcion> dev`.
+- Antes de commitear: `git branch --show-current`.
+- No cambies de rama en un checkout compartido con el árbol sucio.
 - Al terminar: `git worktree remove <ruta>`.
-- En un worktree no hay `.venv/`; para commitear, prestar el venv del checkout principal: `PATH=<checkout-principal>/.venv/bin:$PATH git commit ...`.
-- Una rama mergeada por squash no es ancestro de `dev`. La fuente autoritativa es el PR: `gh pr list --head <rama> --state all`. `MERGED` es borrado seguro.
+- En un worktree no hay `.venv/`; para commitear, presta el del checkout principal: `PATH=<checkout-principal>/.venv/bin:$PATH git commit ...`.
+- Una rama mergeada por squash no es ancestro de `dev`: consulta el PR con `gh pr list --head <rama> --state all`.
 
 ## Apps + Modelos
 
@@ -162,7 +161,7 @@ Los cambios activos viven en `openspec/changes/` como features OpenSpec. No se v
 6. Marcar tasks `[x]` y commitear (incluir número y nombre del cambio)
 7. Al cerrar: promover los specs y mover el directorio a `openspec/changes/archive/<fecha>-<nombre>/`
 
-Antes de codificar, si hace falta clarificar, preguntar: ¿tipo de cambio? ¿app(s) afectada(s)? ¿cambios de DB? ¿URLs/permisos? ¿templates? ¿criterios de aceptación? ¿número de feature?
+Antes de codificar, define: tipo de cambio, apps afectadas, cambios de base de datos, URLs y permisos, templates y criterios de aceptación.
 
 ## Checklist proyecto-específico
 
@@ -205,7 +204,7 @@ Ningún lint detecta estos items. Verificarlos siempre:
 
 ## Verificación antes de commit
 
-Los hooks (`ruff`, `djlint`, `detect-secrets`, `gga`) se configuran en `.githooks/pre-commit` y en el `Makefile`: no agregar pasos nuevos. Si `make setup` ya corrió, se ejecutan solos.
+Los hooks (`ruff`, `djlint`, `detect-secrets`) se configuran en `.githooks/pre-commit` y en el `Makefile`. Si `make setup` ya corrió, se ejecutan solos.
 
 La verificación funcional se corre según lo que cambió:
 
@@ -220,7 +219,8 @@ La verificación funcional se corre según lo que cambió:
 
 `python manage.py check` corre siempre.
 
-Un diff contra `dev` compara de dos puntos: una rama que salió de un `dev` anterior aparece revirtiendo los commits que entraron después. Usar el punto de rama como frontera: `git diff $(git merge-base dev <rama>)...<rama>`.
+Para revisar un diff, usa el punto de rama como frontera:
+`git diff $(git merge-base dev <rama>)...<rama>`.
 
 ## API + Deploy + Locale
 
