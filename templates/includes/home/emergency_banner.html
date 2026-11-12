@@ -1,46 +1,21 @@
 {% load my_filters %}
 {% if emergency_banner %}
-  {% with warning=emergency_banner.warning %}
-    {% comment %}
-      `severe_only` recorta la franja a ciclón tropical y tormenta. Lo usa el
-      landing: es la raíz del dominio y no replica el contenido vivo del home,
-      pero un aviso grave no puede quedar a un clic de distancia. Un `early`
-      por lluvias es rutina y ahí solo enseña a ignorar la franja.
-    {% endcomment %}
-    {% if not severe_only or warning.warning_type != 'early' %}
-      <aside class="emergency-banner emergency-banner--{{ warning.warning_type }}"
-             aria-label="Aviso meteorológico vigente">
-        <div class="container-xl">
-          <div class="emergency-banner__body">
-            <span class="emergency-banner__marker" aria-hidden="true"></span>
-            <div class="emergency-banner__main">
-              <p class="emergency-banner__eyebrow">
-                <span class="emergency-banner__dot" aria-hidden="true"></span>
-                Aviso vigente · {{ warning.get_warning_type_display }}
-              </p>
-              <p class="emergency-banner__title">{{ warning.title|default:warning.summary }}</p>
-              {% if warning.title %}
-                <p class="emergency-banner__summary">{{ warning.summary|truncatechars:200 }}</p>
-              {% endif %}
-            </div>
-            <div class="emergency-banner__meta">
-              <span class="emergency-banner__date">
-                <i class="icon ti ti-clock" aria-hidden="true"></i>
-                Válido hasta {{ warning.valid_until|local_datetime:'d/m/Y' }}
-              </span>
-              <a class="emergency-banner__cta"
-                 href="{% url emergency_banner.url_name %}">
-                {% if emergency_banner.extra %}
-                  Ver los {{ emergency_banner.total }} avisos
-                {% else %}
-                  Ver detalles
-                {% endif %}
-                <i class="icon ti ti-arrow-up-right" aria-hidden="true"></i>
-              </a>
-            </div>
-          </div>
-        </div>
-      </aside>
-    {% endif %}
-  {% endwith %}
+  {% comment %}
+    `severe_only` recorta la franja a ciclón tropical y tormenta. Lo usa el
+    landing: es la raíz del dominio y no replica el contenido vivo del home,
+    pero un aviso grave no puede quedar a un clic de distancia. Un `early`
+    por lluvias es rutina y ahí solo enseña a ignorar la franja.
+
+    La lista se filtra en el servidor y no con CSS: un aviso temprano no debe
+    estar en el HTML del landing ni siquiera oculto.
+  {% endcomment %}
+  {% if severe_only %}
+    {% with candidates=emergency_banner.severe_candidates %}
+      {% include 'includes/home/emergency_banner_strips.html' %}
+    {% endwith %}
+  {% else %}
+    {% with candidates=emergency_banner.candidates %}
+      {% include 'includes/home/emergency_banner_strips.html' %}
+    {% endwith %}
+  {% endif %}
 {% endif %}

@@ -59,10 +59,13 @@
 </div>
 {% include 'includes/dashboard/form_card.html' with card_title='Notificación' %}
 <div class="mb-3">
-  <label class="form-label required">{{ form.email_recipient_list.label }}</label>
-  {{ form.email_recipient_list }}
-  {% if form.email_recipient_list.errors %}
-    <div class="invalid-feedback d-block">{{ form.email_recipient_list.errors.0 }}</div>
+  <label class="form-check">
+    {{ form.send_email }}
+    <span class="form-check-label">{{ form.send_email.label }}</span>
+  </label>
+  <small class="form-hint">{{ form.send_email.help_text }}</small>
+  {% if form.send_email.errors %}
+    <div class="invalid-feedback d-block">{{ form.send_email.errors.0 }}</div>
   {% endif %}
 </div>
 </div>

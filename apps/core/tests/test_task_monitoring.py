@@ -29,18 +29,19 @@ class TaskExecutionLogUuidTests(TestCase):
 
 
 class CustomPermissionLabelTests(TestCase):
-    """Los permisos custom van en español, salvo el codename que ya existe.
+    """Los permisos custom usan el codename nativo de Django y etiqueta española.
 
-    Cambiar el codename rompería los permisos ya asignados en producción; la
-    etiqueta sí se puede corregir y es lo que ve el administrador.
+    El codename en minúsculas es el que Django genera solo: los permisos se
+    renombraron en sitio (fila de `auth_permission` conservada, ver la migración
+    `0004` de `core`), así que los grupos mantienen lo que ya tenían asignado.
     """
 
     def test_task_execution_log_permissions_are_labelled_in_spanish(self):
         labels = dict(TaskExecutionLog._meta.permissions)
-        self.assertEqual(labels['view_taskExecutionLog'], 'Ver')
-        self.assertEqual(labels['add_taskExecutionLog'], 'Añadir')
-        self.assertEqual(labels['change_taskExecutionLog'], 'Editar')
-        self.assertEqual(labels['delete_taskExecutionLog'], 'Eliminar')
+        self.assertEqual(labels['view_taskexecutionlog'], 'Ver')
+        self.assertEqual(labels['add_taskexecutionlog'], 'Añadir')
+        self.assertEqual(labels['change_taskexecutionlog'], 'Editar')
+        self.assertEqual(labels['delete_taskexecutionlog'], 'Eliminar')
 
     def test_company_settings_declares_four_custom_permissions(self):
         codenames = {codename for codename, _ in CompanySettings._meta.permissions}

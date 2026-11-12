@@ -39,6 +39,7 @@
         `staticfiles/`
       - `bash -n` de los 4 scripts, YAML parseable, `git diff --check` limpio
       - `deploy/tests/run.sh` → 65 ok, 0 fallas
-- [ ] **T8. Release**: tag anotado nuevo sobre el commit de promocion y
-      `gh release create` con notas. No mover `v0.2.0`. **Pendiente de la
-      decision del usuario sobre el numero de version.**
+- [x] **T8. Release**: tag anotado nuevo sobre el commit de promocion y
+      `gh release create` con notas. No mover `v0.2.0`. Hecho el 2026-11-11:
+      version **v0.4.0**, tag anotado sobre `7fc600c` (merge de #190) y release
+      en https://github.com/cmp-camaguey/webcmp/releases/tag/v0.4.0

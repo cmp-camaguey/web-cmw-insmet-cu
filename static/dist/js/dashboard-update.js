@@ -156,12 +156,22 @@
     }
 
     if (run.status === 'failed') {
+      // `state.state === 'failed'` es lo que responde el backend cuando el
+      // intento fallido fue sobre el commit que sigue pendiente: ahi el boton
+      // sirve para reintentar, que es lo que hace falta despues de arreglar la
+      // causa. En cualquier otro caso el fallo es historia (el servidor ya
+      // quedo al dia por otra via) y ofrecer el boton mandaria a desplegar lo
+      // que ya se esta sirviendo.
+      var retry = state.state === 'failed';
       paint({
         badge: 'red',
         icon: 'ti ti-alert-triangle',
         title: 'El despliegue falló',
         message: run.message || 'El despliegue falló.',
-        detail: 'Revisa el log del servidor. El commit anterior sigue sirviendo.',
+        detail: retry
+          ? 'Revisa el log del servidor. El commit anterior sigue sirviendo; puedes reintentar.'
+          : 'Revisa el log del servidor. El commit anterior sigue sirviendo.',
+        action: retry,
       });
       return;
     }

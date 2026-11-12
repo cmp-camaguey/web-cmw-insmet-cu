@@ -109,10 +109,17 @@ class UnreadEndpointTests(TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.json(), {'unread': 1})
 
-    def test_no_responde_a_un_usuario_normal(self):
-        self.client.force_login(_user())
+    def test_responde_al_cliente_con_su_propio_conteo(self):
+        """Desde 030 la campana del cliente consulta el mismo endpoint."""
+        cliente = _user('cliente-contador')
+        _notification(cliente, title='Su factura')
+        _notification(self.admin, title='Aviso interno')
 
-        self.assertEqual(self.client.get(reverse(URL_NAME)).status_code, 403)
+        self.client.force_login(cliente)
+        response = self.client.get(reverse(URL_NAME))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'unread': 1})
 
     def test_no_responde_a_un_anonimo(self):
         self.assertEqual(self.client.get(reverse(URL_NAME)).status_code, 403)

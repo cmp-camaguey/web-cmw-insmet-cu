@@ -68,6 +68,21 @@
       opacity: 1 !important;
     }
 
+    /* ─── MODO OSCURO: párrafos e iconos legibles ───
+       Sobre la superficie casi negra los párrafos de las tarjetas heredaban el
+       gris de cuerpo y se leían como texto secundario; los iconos de la
+       sección de servicios usaban `--tblr-primary` (#2b4b9b), que sobre ese
+       fondo desaparece. Se recupera el blanco atenuado de los párrafos y un
+       azul claro para el icono y su recuadro. Los recuadros de las tarjetas
+       llevan utilidades `bg-white`/`text-white` y no se ven afectados. */
+    [data-bs-theme="dark"] .section-tarjetas p {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+    [data-bs-theme="dark"] .section .shape {
+      --tblr-primary: #7f9fe0;
+      --tblr-primary-lt: rgba(127, 159, 224, 0.16);
+    }
+
     /* ─── BOTÓN DEL BOLETÍN: Gris en oscuro, Blanco en claro ─── */
     [data-bs-theme="dark"] .section-boletin .btn-outline-light {
       color: var(--tblr-secondary) !important;
@@ -76,6 +91,17 @@
     [data-bs-theme="dark"] .section-boletin .btn-outline-light:hover {
       color: var(--tblr-dark) !important;
       background-color: var(--tblr-secondary) !important;
+    }
+
+    /* ─── AYUDA BAJO EL FORMULARIO: legible sobre azul y sobre oscuro ───
+       `.form-hint` trae el gris de Tabler, que sobre el azul del boletín no se
+       lee. En claro hereda el blanco atenuado del párrafo; en oscuro conserva
+       el texto secundario, que es el que contrasta con la superficie. */
+    [data-bs-theme="light"] .section-boletin .form-hint {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+    [data-bs-theme="dark"] .section-boletin .form-hint {
+      color: var(--tblr-secondary-color) !important;
     }
   </style>
 {% endblock %}
@@ -292,26 +318,33 @@
   <section class="section section-boletin py-8 pt-0">
     <div class="container mt-6">
       <div class="section-header mb-6">
-        <h2 class="section-title">Suscríbase al boletín del Centro</h2>
+        <h2 class="section-title">Manténgase informado</h2>
         <p>Reciba en su correo los avisos, pronósticos y novedades del Centro Meteorológico Provincial de Camagüey.</p>
       </div>
     </div>
     <div class="container-tight">
-      <div class="row">
-        <div class="col">
-          <!-- Campo de texto nativo de Tabler -->
-          <input class="w-100 form-control form-control-lg"
-                 placeholder="Su correo electrónico"
-                 type="email">
+      <form method="post" action="{% url 'home:newsletter_subscribe' %}">
+        {% csrf_token %}
+        <div class="row">
+          <div class="col">
+            <label class="visually-hidden" for="newsletter-email">Su correo electrónico</label>
+            <input class="w-100 form-control form-control-lg"
+                   id="newsletter-email"
+                   name="email"
+                   placeholder="Su correo electrónico"
+                   type="email"
+                   required>
+          </div>
+          <div class="col-auto">
+            <!-- Botón que se adapta a ambos temas mediante CSS -->
+            <button type="submit" class="btn btn-lg btn-outline-light">
+              <i class="icon ti ti-mail me-2" aria-hidden="true"></i>
+              Suscribirse
+            </button>
+          </div>
         </div>
-        <div class="col-auto">
-          <!-- Botón que se adapta a ambos temas mediante CSS -->
-          <button type="submit" class="btn btn-lg btn-outline-light">
-            <i class="icon ti ti-mail me-2" aria-hidden="true"></i>
-            Suscribirse
-          </button>
-        </div>
-      </div>
+        <small class="form-hint mt-2 d-block text-center">Le enviaremos un correo para confirmar la suscripción.</small>
+      </form>
     </div>
   </section>
 {% endblock %}

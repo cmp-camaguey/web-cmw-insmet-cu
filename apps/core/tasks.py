@@ -101,6 +101,31 @@ def send_email_task(
     logger.info(f'Correo enviado: {subject}')
 
 
+@huey.periodic_task(crontab(minute=30, hour=4), name='mantener_suscriptores_pendientes')
+def mantener_suscriptores_pendientes():
+    """Recordatorio único y limpieza de las altas que nunca se confirmaron.
+
+    Corre media hora después de la poda de avisos, por la misma razón que ella a
+    las 4 UTC: es medianoche en `America/Havana` y no compite con nadie.
+
+    La limpieza va ANTES del recordatorio. Al revés, a quien se va a borrar por
+    llevar una semana sin confirmar se le mandaría un correo para borrar su fila
+    en la línea siguiente, y el enlace llegaría muerto.
+    """
+    from apps.core.subscriptions import purge_stale_pending, remind_pending_subscribers
+
+    deleted = purge_stale_pending()
+    reminders = remind_pending_subscribers()
+
+    if deleted or reminders:
+        logger.info(
+            'Suscriptores pendientes: %s recordatorio(s) encolado(s), %s eliminado(s)',
+            reminders,
+            deleted,
+        )
+    return {'reminders': reminders, 'deleted': deleted}
+
+
 @huey.periodic_task(crontab(minute=0, hour=4), name='podar_notificaciones')
 def podar_notificaciones():
     """Poda diaria de avisos (cambio 026, fase 4).

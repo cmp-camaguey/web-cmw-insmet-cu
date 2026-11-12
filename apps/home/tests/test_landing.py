@@ -238,9 +238,23 @@ class LandingRenderTests(TestCase):
             self.assertNotIn(marker, self.html, msg=marker)
 
     def test_newsletter_cta_renders(self):
-        self.assertIn('Suscríbase al boletín del Centro', self.html)
+        self.assertIn('Manténgase informado', self.html)
         self.assertIn('Reciba en su correo los avisos, pronósticos y novedades', self.html)
         self.assertIn('Suscribirse', self.html)
+
+    def test_newsletter_form_is_real(self):
+        """El formulario del diseño tiene que enviar, no ser un mock.
+
+        El rediseño de las páginas públicas trajo un `<input>` y un botón
+        `type="submit"` sin `<form>`: se veía igual y no hacía nada. Doble
+        opt-in exige `action`, `method`, CSRF y el campo con nombre.
+        """
+        self.assertIn(f'action="{reverse("home:newsletter_subscribe")}"', self.html)
+        self.assertIn('method="post"', self.html)
+        self.assertIn('name="csrfmiddlewaretoken"', self.html)
+        self.assertIn('name="email"', self.html)
+        self.assertIn('id="newsletter-email"', self.html)
+        self.assertIn('Le enviaremos un correo para confirmar la suscripción', self.html)
 
     def test_public_footer_socials_on_landing(self):
         """Big footer stays on the landing with its 4 social-gray anchors."""
@@ -281,29 +295,35 @@ class LandingSevereWarningStripTests(TestCase):
             valid_until=timezone.now() + timezone.timedelta(days=1),
         )
 
+    # Se busca `data-emergency-banner`, el atributo del `<aside>` de la franja, y
+    # no la cadena `emergency-banner`: `scripts.html` carga
+    # `emergency-banner.js` en todas las páginas, así que esa cadena aparece en
+    # el HTML aunque no haya ningún aviso vigente.
+    BANNER_MARKER = 'data-emergency-banner'
+
     def test_tropical_cyclone_warning_renders_strip_on_landing(self):
         self._create_warning('tropical_cyclone', 'Huracán acercándose a la provincia')
         html = self.client.get('/').content.decode()
-        self.assertIn('emergency-banner', html)
+        self.assertIn(self.BANNER_MARKER, html)
         self.assertIn('Huracán acercándose a la provincia', html)
 
     def test_storm_warning_renders_strip_on_landing(self):
         self._create_warning('storm', 'Tormenta eléctrica severa')
         html = self.client.get('/').content.decode()
-        self.assertIn('emergency-banner', html)
+        self.assertIn(self.BANNER_MARKER, html)
         self.assertIn('Tormenta eléctrica severa', html)
 
     def test_early_warning_does_not_render_strip_on_landing(self):
         self._create_warning('early', 'Alerta por lluvias intensas')
         html = self.client.get('/').content.decode()
-        self.assertNotIn('emergency-banner', html)
+        self.assertNotIn(self.BANNER_MARKER, html)
         self.assertNotIn('Alerta por lluvias intensas', html)
 
     def test_early_warning_still_renders_on_home(self):
         """El home conserva la franja para cualquier aviso vigente."""
         self._create_warning('early', 'Alerta por lluvias intensas')
         html = self.client.get(reverse('home:index')).content.decode()
-        self.assertIn('emergency-banner', html)
+        self.assertIn(self.BANNER_MARKER, html)
         self.assertIn('Alerta por lluvias intensas', html)
 
 
@@ -315,7 +335,7 @@ class LandingMarketingRedesignEmptyTests(TestCase):
         response = self.client.get('/')
         self.assertEqual(200, response.status_code)
         self.assertIn(
-            'Suscríbase al boletín del Centro',
+            'Manténgase informado',
             response.content.decode(),
         )
 
@@ -338,7 +358,7 @@ class LandingEmptyStateTests(TestCase):
         html = response.content.decode()
         self.assertNotIn('Traceback', html)
         self.assertNotIn('Avisos meteorológicos activos', html)
-        self.assertIn('Suscríbase al boletín del Centro', html)
+        self.assertIn('Manténgase informado', html)
 
 
 class LandingNavbarTests(TestCase):

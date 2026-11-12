@@ -348,6 +348,16 @@ def build_state(refresh=False, include_commits=True):
         state = 'unknown'
     elif deployed == remote['sha']:
         state = 'up_to_date'
+    elif run and run['status'] == 'failed' and run['sha'] == remote['sha']:
+        # El ultimo intento fue contra ESTE commit y fallo. El commit sigue
+        # pendiente, pero anunciarlo como `available` miente dos veces: oculta
+        # el fallo y sugiere que nunca se intento. Paso en produccion el
+        # 2026-11-11: el deploy murio antes de escribir /etc/webcmp/deployed y
+        # el panel repitio "Actualizacion disponible" para siempre.
+        #
+        # Se compara el SHA a proposito: un fallo viejo sobre un commit que ya
+        # quedo atras no dice nada del que esta pendiente ahora.
+        state = 'failed'
     else:
         state = 'available'
 
@@ -363,7 +373,8 @@ def build_state(refresh=False, include_commits=True):
         reason = 'Este servidor no registra qué versión está sirviendo.'
 
     # Solo se pregunta cuando hay algo pendiente: en `up_to_date` no hay rango
-    # que comparar, y en `unknown` no hay con que comparar. Un fallo de la API
+    # que comparar, en `unknown` no hay con que comparar, y en `failed` el
+    # rango es exactamente el commit que acaba de fallar. Un fallo de la API
     # devuelve `None` y no cambia el estado: los SHA siguen siendo ciertos.
     commits = None
     if include_commits and state == 'available':
@@ -424,7 +435,10 @@ class UpdateRequestView(LoginRequiredMixin, UserPassesTestMixin, View):
                 },
                 status=409,
             )
-        if state['state'] != 'available':
+        # `failed` tambien se acepta: el commit sigue pendiente, lo que cambio es
+        # que ya se intento una vez. Sin esto el panel mostraria el fallo y el
+        # boton no haria nada, y el unico camino que quedaria es entrar por SSH.
+        if state['state'] not in ('available', 'failed'):
             return JsonResponse(
                 {'ok': False, 'reason': 'No hay ninguna actualización pendiente.'}, status=409
             )
