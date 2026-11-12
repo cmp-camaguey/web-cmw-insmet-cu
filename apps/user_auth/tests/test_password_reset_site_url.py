@@ -1,7 +1,5 @@
 """El enlace de restablecimiento de contraseña sale de `SITE_URL`.
 
-Ver `odd/tasks/url-canonica-del-sitio.md`.
-
 El host del `request` es el host por el que el operador entró: la IP del
 servidor en la red interna o `localhost`. Quien recibe el correo de
 restablecimiento está fuera de esa red, así que un enlace armado con ese host

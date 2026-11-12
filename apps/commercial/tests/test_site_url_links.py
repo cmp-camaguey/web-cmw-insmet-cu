@@ -1,7 +1,5 @@
 """Los correos comerciales (factura y certificado) enlazan con `SITE_URL`.
 
-Ver `odd/tasks/url-canonica-del-sitio.md`.
-
 El host del `request` es el host por el que el operador entró: la IP del
 servidor en la red interna o `localhost`. El cliente que recibe el correo está
 fuera de esa red, así que un enlace armado con ese host no abre. `SITE_URL` es

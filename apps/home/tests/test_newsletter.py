@@ -1,7 +1,4 @@
-"""Suscripción pública al boletín: alta, confirmación y baja sin cuenta.
-
-Ver `odd/tasks/030-boletin-y-suscripcion.md` S5–S8 y S12.
-"""
+"""Suscripción pública al boletín: alta, confirmación y baja sin cuenta."""
 
 from django.contrib.auth.models import User
 from django.core import mail

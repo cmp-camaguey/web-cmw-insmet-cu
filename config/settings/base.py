@@ -9,7 +9,7 @@ REGLA ESTRUCTURAL (no negociable): este módulo NO ramifica sobre `DEBUG` ni
 sobre `IS_PRODUCTION`, solo los lee como valores planos. Cada perfil hace
 `from .base import *`, que ejecuta este archivo ANTES de que el perfil pueda
 corregir nada: si aquí se calculara `DATABASES` con el `DEBUG` de `base`, el
-perfil ya no podría imponer el suyo. Ver odd/tasks/split-config-settings.md.
+perfil ya no podría imponer el suyo.
 """
 
 import logging

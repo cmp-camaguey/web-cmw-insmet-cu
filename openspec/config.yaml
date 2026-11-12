@@ -1,25 +1,21 @@
 schema: spec-driven
 
 context: |
-  Project: webcmp (Centro Meteorológico Provincial Camagüey)
-  Stack: Django 5.2.17 (pinned in requirements/base.txt; legacy tech-stack.md removed
-         in fresh-start — single source of truth is requirements/base.txt + AGENTS.md),
-         DRF 3.17, drf-spectacular + sidecar, Python 3.14.
-  Architecture: Monolith Django; apps live under apps/ (api, user_auth, core,
+  Project: webcmp — Centro Meteorológico Provincial Camagüey. Public weather
+           portal, admin dashboard and REST API for third parties.
+  Stack: Django 5.2, DRF 3.17, drf-spectacular, Python 3.14. Exact versions in
+         requirements/base.txt.
+  Architecture: Django monolith. Apps live under apps/ (api, user_auth, core,
                 dashboard, commercial, meteo, home, publications); config/ holds
-                settings, root urls, wsgi/asgi, Huey.
-  UI: Tabler (Bootstrap 5) via Django Templates; djlint-formatted (2-space indent).
-  Persistence: SQLite (dev), PostgreSQL/MySQL (prod). Async: Huey (not Celery).
-  Testing: Django unittest via `python manage.py test apps.<app>`; NO pytest.
+                settings, root urls, wsgi/asgi and Huey.
+  UI: Tabler (Bootstrap 5) through Django Templates, formatted with djlint
+      (2-space indent). Vanilla JS, no bundler and no build step.
+  Persistence: PostgreSQL in all three profiles (dev, test, prod). Async: Huey.
+  Testing: Django unittest via `python manage.py test apps.<app>`; no pytest.
   Lint/Format: ruff + ruff-format; djlint for templates; pre-commit hooks.
   CI: GitHub Actions — per-app tests on PR (dorny/paths-filter), full suite on
-      push to main; plus lint, security (pip-audit + makemigrations --check),
-      templates (djlint), precommit jobs.
-  Git identity: Yoelvis Mariné Ramos <yoelvismr@gmail.com>.
-  Existing SDD docs: NONE. Historical specs and the old constitution/
-      (roadmap, tech-stack, mission) were removed in the fresh-start; only
-      openspec/changes/ holds the 9 live pending features. Project context lives
-      in AGENTS.md.
+      push to main, plus lint, security (pip-audit + makemigrations --check),
+      templates and pre-commit jobs.
 
 rules:
   proposal:
@@ -74,7 +70,8 @@ testing:
     - unit: apps/*/tests/test_*.py (Django TestCase)
     - integration: apps/api/tests/test_api.py (DRF APITestCase)
   gotchas:
-    - "Django is pinned to 5.2.17 in requirements/base.txt; do not assume 4.x/5.1 APIs"
-    - "App test labels must be full dotted path (apps.meteo); short label no longer resolves in Django 5.2+."
-    - "Migrations are NOT versioned (.gitignore); always run makemigrations in setup."
-    - "pre-commit hooks download from PyPI on first run; use `pre-commit install --install-hooks` (not bare `pre-commit install`) behind proxy."
+    - "Django is pinned to 5.2 in requirements/base.txt; do not assume 4.x APIs."
+    - "App test labels must be the full dotted path (apps.meteo); the short label does not resolve in Django 5.2+."
+    - "Migrations are versioned: commit makemigrations output in the same PR."
+    - "Without PRODUCTION in the environment, manage.py uses the testing profile, not dev."
+    - "pre-commit hooks download from PyPI on first run; use `pre-commit install --install-hooks`."

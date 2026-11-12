@@ -4,7 +4,7 @@ Ninguna vista, signal ni comando escribe esos modelos por su cuenta. Si lo
 hicieran, el consentimiento dejaría de tener un solo significado y volveríamos
 al defecto que motivó el cambio 030: un `newsletter=True` que miente.
 
-Ver `openspec/changes/030-boletin-y-notificaciones-de-clientes/design.md` §3.
+Ver `openspec/specs/boletin-y-suscripcion/spec.md`.
 """
 
 import logging

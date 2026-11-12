@@ -2,8 +2,6 @@
 
 La audiencia es automática, así que el operador no elige lista: lo único que
 decide es si este guardado manda correo o no. Estos tests fijan ese contrato.
-
-Ver `odd/tasks/030-boletin-y-suscripcion.md` S11 y S13.
 """
 
 from django.contrib.auth.models import User

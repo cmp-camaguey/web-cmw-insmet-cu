@@ -9,7 +9,7 @@ envío tiene que ser un acto explícito (la casilla «Enviar por correo» de cad
 publicación), porque un envío automático disparado por cada guardado sería spam
 en el buzón de todo el mundo.
 
-Ver `openspec/changes/030-boletin-y-notificaciones-de-clientes/design.md` §4.
+Ver `openspec/specs/boletin-y-suscripcion/spec.md`.
 """
 
 from apps.core.models import EmailRecipientList, Subscriber
