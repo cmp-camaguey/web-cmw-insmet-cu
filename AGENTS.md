@@ -163,6 +163,23 @@ Los cambios activos viven en `openspec/changes/` como features OpenSpec. No se v
 
 Antes de codificar, define: tipo de cambio, apps afectadas, cambios de base de datos, URLs y permisos, templates y criterios de aceptación.
 
+## Documentación
+
+Los documentos describen el sistema que corre hoy. Cómo se llegó hasta acá lo guardan `git log` y los PRs; no hace falta escribirlo dos veces.
+
+- Escribí para quien tiene que operar o modificar el sistema ahora: qué es, cómo se usa, qué rompe si se cambia.
+- No narres decisiones ni alternativas descartadas. No expliques cómo era el código antes, ni qué bug hubo, ni en qué fecha.
+- Sin referencias a cambios cerrados, a versiones anteriores del propio documento ni a las herramientas con las que se trabajó.
+- Si un párrafo no cambia lo que el lector hace, sobra.
+- Antes de agregar una sección, comprobá que no exista en otro archivo: enlazá en vez de repetir. Un documento que crece sin control deja de leerse.
+- El historial de features cerradas no se versiona: los specs promovidos viven en `openspec/specs/` y el resto se archiva fuera de git.
+
+Al borrar o mover un archivo o un directorio, buscá quién lo menciona antes de cerrar el cambio:
+
+```bash
+grep -rn '<ruta>' --include='*.py' --include='*.md' --include='*.yaml' . | grep -v '^./.venv'
+```
+
 ## Checklist proyecto-específico
 
 Ningún lint detecta estos items. Verificarlos siempre:
