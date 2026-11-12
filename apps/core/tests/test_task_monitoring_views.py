@@ -133,7 +133,7 @@ class TaskMonitoringViewTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        # Botón con data-action->eliminar + pk + tooltip "Eliminar".
+        # Botón con data-action->eliminar + uuid + tooltip "Eliminar".
         self.assertIn('action-btn', content)
         self.assertIn('data-action="eliminar"', content)
         self.assertIn('data-bs-original-title="Eliminar">', content)
@@ -141,6 +141,31 @@ class TaskMonitoringViewTests(TestCase):
         self.assertIn('id="confirmTaskDeleteModal"', content)
         self.assertIn('id="confirmTaskDeleteForm"', content)
         self.assertIn('name="action" value="delete"', content)
+
+    def test_action_urls_use_uuid_not_pk(self):
+        """Las acciones de la tabla se direccionan por uuid, no por pk.
+
+        Es la convención del proyecto para modelos expuestos; el pk numérico
+        deja adivinable la fila y no debe aparecer en la URL ni en `data-uuid`.
+        """
+        execution = TaskExecutionLog.objects.create(
+            task_id='uuid-url-1',
+            task_name='generate_invoice_pdf_and_email_task',
+            status=TaskExecutionLog.STATUS_ERROR,
+            enqueued_at=timezone.now(),
+            func_name='apps.core.tasks.generate_invoice_pdf_and_email_task',
+            func_args='{"args": ["00000000-0000-0000-0000-000000000000", "http://x"]}',
+            logical_key='invoice:00000000-0000-0000-0000-000000000000',
+        )
+        self.client.force_login(self.superuser)
+        content = self.client.get(self.url).content.decode()
+        self.assertIn(f'data-uuid="{execution.uuid}"', content)
+        self.assertIn(
+            reverse('dashboard:tasks_action', args=[execution.uuid]),
+            content,
+        )
+        self.assertNotIn(f'data-uuid="{execution.pk}"', content)
+        self.assertNotIn(f'/tasks/{execution.pk}/action/', content)
 
     def test_retry_button_only_on_error(self):
         """ "Reintentar" solo aparece en tareas que fallaron.
@@ -412,9 +437,9 @@ class TaskMonitoringViewTests(TestCase):
         self.client.force_login(self.superuser)
         content = self.client.get(self.url).content.decode()
 
-        fila = content.split(f'data-bs-target="#tb-{log.pk}"', 1)[1].split('</tr>', 1)[0]
-        self.assertIn(f'form="retry-{log.pk}"', fila)
-        self.assertIn(f'<form id="retry-{log.pk}"', fila)
+        fila = content.split(f'data-bs-target="#tb-{log.uuid}"', 1)[1].split('</tr>', 1)[0]
+        self.assertIn(f'form="retry-{log.uuid}"', fila)
+        self.assertIn(f'<form id="retry-{log.uuid}"', fila)
 
     def test_auto_refresh_is_wired(self):
         """La página carga el JS del polling y la tabla trae su URL de refresco."""
@@ -473,7 +498,7 @@ class TaskMonitoringActionTests(TestCase):
         pending_before = huey.pending_count()
         self.client.force_login(self.superuser)
         response = self.client.post(
-            reverse('dashboard:tasks_action', args=[execution.pk]),
+            reverse('dashboard:tasks_action', args=[execution.uuid]),
             {'action': 'retry'},
         )
         self.assertEqual(response.status_code, 302)
@@ -496,7 +521,7 @@ class TaskMonitoringActionTests(TestCase):
         task_id_original = execution.task_id
 
         self.client.post(
-            reverse('dashboard:tasks_action', args=[execution.pk]),
+            reverse('dashboard:tasks_action', args=[execution.uuid]),
             {'action': 'retry'},
         )
 
@@ -526,7 +551,7 @@ class TaskMonitoringActionTests(TestCase):
         )
         self.client.force_login(self.superuser)
         response = self.client.post(
-            reverse('dashboard:tasks_action', args=[execution.pk]),
+            reverse('dashboard:tasks_action', args=[execution.uuid]),
             {'action': 'retry'},
         )
         self.assertEqual(response.status_code, 302)
@@ -538,7 +563,7 @@ class TaskMonitoringActionTests(TestCase):
         execution = self._log()
         self.client.force_login(self.superuser)
         response = self.client.post(
-            reverse('dashboard:tasks_action', args=[execution.pk]),
+            reverse('dashboard:tasks_action', args=[execution.uuid]),
             {'action': 'delete'},
         )
         self.assertEqual(response.status_code, 302)
@@ -556,7 +581,7 @@ class TaskMonitoringActionTests(TestCase):
             )
         )
         response = self.client.post(
-            reverse('dashboard:tasks_action', args=[execution.pk]),
+            reverse('dashboard:tasks_action', args=[execution.uuid]),
             {'action': 'delete'},
         )
         self.assertEqual(response.status_code, 403)

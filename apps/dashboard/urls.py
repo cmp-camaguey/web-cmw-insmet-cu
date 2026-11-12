@@ -22,7 +22,7 @@ urlpatterns = [
     # Monitoreo de tareas asíncronas (Huey)
     path('tasks/', TaskMonitoringView.as_view(), name='tasks'),
     # Acciones sobre un registro de tarea (reintentar/limpiar)
-    path('tasks/<int:pk>/action/', TaskMonitoringActionView.as_view(), name='tasks_action'),
+    path('tasks/<uuid:uuid>/action/', TaskMonitoringActionView.as_view(), name='tasks_action'),
     # Actualizaciones del servidor (estado y petición de despliegue)
     path('update/', UpdateStatusView.as_view(), name='update_status'),
     path('update/request/', UpdateRequestView.as_view(), name='update_request'),

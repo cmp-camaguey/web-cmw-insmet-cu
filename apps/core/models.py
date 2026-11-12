@@ -458,6 +458,7 @@ class TaskExecutionLog(models.Model):
         (STATUS_REVOKED, 'Revoked'),
     ]
 
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     task_id = models.CharField(max_length=255, db_index=True)
     task_name = models.CharField(max_length=255)
     logical_key = models.CharField(max_length=255, blank=True, default='', db_index=True)

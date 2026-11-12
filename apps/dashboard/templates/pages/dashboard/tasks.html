@@ -110,14 +110,17 @@
         if (!btn) return
         var action = btn.dataset.action
         if (action === 'eliminar') {
-          var pk = btn.dataset.pk
+          var uuid = btn.dataset.uuid
           var name = btn.dataset.name
           document.getElementById('confirmTaskDeleteBody').innerHTML =
             '<p>¿Está seguro de <strong class="text-danger">eliminar</strong> el registro de ' +
             '<strong>' + name + '</strong>?</p>' +
             '<p class="text-muted">El historial de esta ejecución se borrará de manera permanente.</p>'
           document.getElementById('confirmTaskDeleteForm').action =
-            '{% url "dashboard:tasks_action" 0 %}'.replace('/0/', '/' + pk + '/')
+            '{% url "dashboard:tasks_action" "00000000-0000-0000-0000-000000000000" %}'.replace(
+              '00000000-0000-0000-0000-000000000000',
+              uuid
+            )
           if (modalInstance) modalInstance.show()
         }
       })
