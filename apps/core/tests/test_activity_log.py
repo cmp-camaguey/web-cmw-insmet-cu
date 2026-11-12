@@ -1,4 +1,7 @@
+import re
 from datetime import date, timedelta
+from datetime import timezone as dt_timezone
+from unittest import mock
 
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry
@@ -8,10 +11,25 @@ from django.db import connection
 from django.test import RequestFactory, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.core.admin import ActivityLogAdmin
+from apps.core.middleware import CurrentRequestMiddleware
 from apps.core.models import ActivityLog, SiteConfiguration
-from apps.core.utils import local_day_window, log_action, log_activity_from_request
+from apps.core.request_context import current_request, reset_current_request, set_current_request
+from apps.core.utils import (
+    client_ip,
+    local_day_window,
+    log_action,
+    log_activity_from_request,
+)
+
+# Zona fija UTC-5, sin horario de verano. El portal usa America/Havana, pero su
+# regla de verano depende de la versión de tzdata instalada: el runner de CI y
+# un equipo de desarrollo resuelven el mismo instante con una hora de
+# diferencia. Lo que el registro promete es presentar la fecha en la zona
+# activa, así que la prueba fija la zona y no el huso de Cuba.
+ZONA_FIJA = dt_timezone(timedelta(hours=-5))
 
 
 def disable_maintenance_mode():
@@ -43,16 +61,119 @@ class LogActionRecordingTests(TestCase):
         self.assertEqual(al.object_repr, str(obj))
         self.assertEqual(al.content_type, ContentType.objects.get_for_model(obj))
         self.assertEqual(al.object_id, str(obj.pk))
-        # Sin request: IP y user_agent quedan vacíos (retrocompatibilidad).
+        # Fuera de una petición no hay request que consultar, ni parámetro ni
+        # ContextVar: la fila se guarda sin IP en vez de inventar una.
         self.assertIsNone(al.ip_address)
         self.assertEqual(al.user_agent, '')
 
-    def test_log_action_without_request_leaves_ip_blank(self):
+    def test_log_action_outside_a_request_leaves_ip_blank(self):
         log_action(self.user, self.user, 1, 'Adición sin request')
-
         al = ActivityLog.objects.order_by('-action_time').first()
         self.assertIsNone(al.ip_address)
         self.assertEqual(al.user_agent, '')
+
+    def test_a_failed_activity_log_write_does_not_leave_a_django_entry(self):
+        """Las dos filas son el mismo hecho: o quedan las dos o ninguna.
+
+        Sin la transacción, un fallo al escribir `ActivityLog` deja el log de
+        Django con una entrada que la auditoría del portal no tiene, y esa
+        diferencia no se nota hasta que alguien audita.
+        """
+        before = LogEntry.objects.count()
+
+        with (
+            mock.patch(
+                'apps.core.utils.ActivityLog.objects.create', side_effect=RuntimeError('boom')
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            log_action(self.user, self.user, 1, 'No debe quedar registrada')
+
+        self.assertEqual(LogEntry.objects.count(), before)
+
+    def test_log_action_takes_the_request_from_the_context_when_not_passed(self):
+        """El respaldo que arregla las 70 vistas que no pasan `request`.
+
+        Sin esto, la fila nacía sin IP ni User-Agent aunque el operador
+        estuviera actuando desde una petición real, y la tabla de auditoría
+        mostraba guiones en las dos columnas que permiten reconstruir el hecho.
+        """
+        request = RequestFactory().get('/')
+        request.META['HTTP_X_FORWARDED_FOR'] = '198.51.100.4'
+        request.META['HTTP_USER_AGENT'] = 'Mozilla/5.0 Respaldo'
+        token = set_current_request(request)
+        self.addCleanup(reset_current_request, token)
+
+        log_action(self.user, self.user, 2, 'Cambio desde una vista que no lo pasa')
+
+        al = ActivityLog.objects.order_by('-action_time').first()
+        self.assertEqual(al.ip_address, '198.51.100.4')
+        self.assertEqual(al.user_agent, 'Mozilla/5.0 Respaldo')
+
+
+class ClientIpTests(TestCase):
+    """`client_ip` detrás de Nginx: la IP fiable es la última del encabezado."""
+
+    def test_uses_the_last_forwarded_entry_not_the_first(self):
+        # La primera entrada la escribe el cliente y puede ser cualquiera: si se
+        # guardara, cualquiera firmaría la auditoría con la IP que quisiera.
+        request = RequestFactory().get('/')
+        request.META['HTTP_X_FORWARDED_FOR'] = '1.2.3.4, 198.51.100.7'
+        request.META['REMOTE_ADDR'] = '127.0.0.1'
+
+        self.assertEqual(client_ip(request), '198.51.100.7')
+
+    def test_falls_back_to_remote_addr_when_forwarded_is_not_an_ip(self):
+        request = RequestFactory().get('/')
+        request.META['HTTP_X_FORWARDED_FOR'] = 'basura'
+        request.META['REMOTE_ADDR'] = '203.0.113.9'
+
+        self.assertEqual(client_ip(request), '203.0.113.9')
+
+    def test_returns_none_when_no_candidate_is_valid(self):
+        # Un valor inventado en un `GenericIPAddressField` haría fallar el
+        # INSERT, que es justo la línea que no se puede perder.
+        request = RequestFactory().get('/')
+        request.META['HTTP_X_FORWARDED_FOR'] = 'nada, tampoco'
+        request.META['REMOTE_ADDR'] = 'tampoco'
+
+        self.assertIsNone(client_ip(request))
+
+    def test_ignores_the_header_when_the_peer_is_not_the_proxy(self):
+        """Gunicorn expuesto directo: el encabezado lo escribió el visitante.
+
+        El despliegue real escucha en un socket Unix, así que el par no deja
+        `REMOTE_ADDR`; un proxy local deja loopback. Cualquier otra dirección
+        significa que la petición llegó sin proxy de por medio y su
+        `X-Forwarded-For` no vale nada.
+        """
+        request = RequestFactory().get('/')
+        request.META['HTTP_X_FORWARDED_FOR'] = '1.2.3.4'
+        request.META['REMOTE_ADDR'] = '203.0.113.9'
+
+        self.assertEqual(client_ip(request), '203.0.113.9')
+
+    def test_returns_none_without_a_request(self):
+        self.assertIsNone(client_ip(None))
+
+
+class CurrentRequestMiddlewareTests(TestCase):
+    def test_leaves_the_request_available_and_restores_it_afterwards(self):
+        middleware = CurrentRequestMiddleware(lambda req: current_request())
+        request = RequestFactory().get('/')
+
+        self.assertIs(middleware(request), request)
+        self.assertIsNone(current_request(), 'el request debe soltarse al terminar')
+
+    def test_restores_the_request_even_when_the_view_raises(self):
+        def boom(_request):
+            raise RuntimeError('falló la vista')
+
+        middleware = CurrentRequestMiddleware(boom)
+        with self.assertRaises(RuntimeError):
+            middleware(RequestFactory().get('/'))
+
+        self.assertIsNone(current_request(), 'un `finally` faltante fugaría el request')
 
 
 class LogActivityFromRequestTests(TestCase):
@@ -128,12 +249,28 @@ class ActivityLogViewTests(TestCase):
 
     def test_filter_by_date_range_accepts_picker_dd_mm_yyyy_format(self):
         # El picker Tempus envía dd/mm/yyyy: un formato inválido sería un 500.
+        # Y el rango tiene que FILTRAR: la fila sembrada es de hoy, así que un
+        # 13/09/2026 no puede devolverla. Sin esta segunda mitad, la prueba
+        # seguiría verde con el filtro ignorado por completo.
         self.client.force_login(self.superuser)
         response = self.client.get(
             reverse('core:activity_log'),
             {'date_from': '13/09/2026', 'date_to': '13/09/2026'},
         )
         self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Registro creado por superuser')
+
+    def test_filter_by_date_range_keeps_the_rows_inside_the_range(self):
+        # La otra mitad del contrato: un rango que sí incluye hoy no puede
+        # vaciar la tabla.
+        self.client.force_login(self.superuser)
+        hoy = timezone.localdate().strftime('%d/%m/%Y')
+        response = self.client.get(
+            reverse('core:activity_log'),
+            {'date_from': hoy, 'date_to': hoy},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Registro creado por superuser')
 
     def test_partial_returns_table_body_only(self):
         self.client.force_login(self.superuser)
@@ -177,6 +314,64 @@ class ActivityLogViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<table>')
         self.assertContains(response, '<tbody>')
+        # El partial también filtra: si ignorara las fechas, devolvería la fila
+        # sembrada (de hoy) y el filtro del operador no serviría de nada.
+        self.assertNotContains(response, 'Registro creado por superuser')
+
+    def test_una_fecha_iso_guardada_se_muestra_en_hora_local(self):
+        """El registro es histórico: lo guardado no se toca, se presenta legible.
+
+        Las filas anteriores al arreglo de los `__str__` guardaron el
+        `datetime` en ISO con microsegundos; el operador tiene que leer una
+        fecha, no un `repr`.
+        """
+        ActivityLog.objects.create(
+            user=self.superuser,
+            action_flag=2,
+            object_repr='Ciclón Tropical - 2026-11-07 22:41:39.815152+00:00',
+            message='fila anterior al arreglo',
+        )
+        self.client.force_login(self.superuser)
+        with timezone.override(ZONA_FIJA):
+            response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
+
+            self.assertContains(response, 'Ciclón Tropical - 07/11/2026 17:41')
+            self.assertNotContains(response, '2026-11-07 22:41:39.815152+00:00')
+
+    def test_las_celdas_no_llevan_atributos_que_el_refresco_ajax_perderia(self):
+        """Carga inicial y refresco AJAX tienen que verse igual.
+
+        `activity-log-filters.js` reconstruye la tabla con `rows.add()`, que
+        crea celdas nuevas desde el `innerHTML` y descarta los atributos del
+        `<td>`. Una clase puesta en el `<td>` (por ejemplo `text-nowrap`) se ve
+        al cargar y desaparece al filtrar o limpiar. La regla es simple: el
+        `<td>` no lleva atributos; las clases van dentro, sobre el contenido.
+        """
+        self.client.force_login(self.superuser)
+        response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
+        celdas = re.findall(r'<td([^>]*)>', response.content.decode())
+
+        self.assertTrue(celdas)
+        self.assertEqual([attrs for attrs in celdas if attrs.strip()], [])
+
+    def test_missing_user_and_ip_are_labelled_instead_of_dashes(self):
+        """Un «—» no dice si el dato falta o si el usuario se borró.
+
+        La FK es SET_NULL, así que una fila huérfana es un hecho real de la
+        auditoría, no un hueco: tiene que poder leerse.
+        """
+        ActivityLog.objects.create(
+            user=None,
+            action_flag=1,
+            object_repr='fila huérfana',
+            message='sin usuario ni ip',
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get(reverse('core:activity_log'), {'partial': '1'})
+
+        self.assertContains(response, 'Usuario eliminado')
+        self.assertContains(response, 'No registrada')
+        self.assertNotContains(response, '—')
 
     def test_el_filtro_por_fecha_recorta_el_dia_local_por_sus_bordes(self):
         """El rango del picker es [inicio, fin) del dia local, no un `__date`.

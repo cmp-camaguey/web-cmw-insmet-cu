@@ -5,13 +5,43 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.core.models import SiteConfiguration
+from apps.core.request_context import reset_current_request, set_current_request
 from apps.core.timezone_utils import reset_request_time_format, set_request_time_format
 from apps.user_auth.models import Profile
+
+
+class CurrentRequestMiddleware:
+    """Deja el request en un `ContextVar` mientras dura la petición.
+
+    Existe por la auditoría: `log_action` no recibe el request en la mayoría de
+    las vistas y la fila quedaba sin IP. Con esto el dato se captura igual,
+    aunque la vista se olvide de pasarlo.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        token = set_current_request(request)
+        try:
+            return self.get_response(request)
+        finally:
+            reset_current_request(token)
 
 
 class CheckUserProfileMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
+        # El redirect a "complete su perfil" no puede atrapar el login ni la
+        # baja de sesión. Si los atrapara, quien tiene el perfil a medias queda
+        # encerrado: el modo mantenimiento exime `/logout/` justamente para que
+        # pueda cerrar sesión, pero este middleware corre antes y lo devuelve al
+        # formulario. La excepción tiene que estar en los dos.
+        self.exempt_paths = {
+            reverse('user_auth:login'),
+            reverse('user_auth:logout'),
+            reverse('user_auth:profile_update'),
+        }
 
     def __call__(self, request):
         user = get_user(request)
@@ -31,19 +61,16 @@ class CheckUserProfileMiddleware:
                         missing_company = True
                         break
 
-            if missing_personal or missing_company:
+            if (missing_personal or missing_company) and request.path not in self.exempt_paths:
                 update_url = reverse('user_auth:profile_update')
-                if request.path != update_url:
-                    if missing_company:
-                        messages.warning(
-                            request,
-                            'Por favor, complete los datos de su cliente antes de continuar.',
-                        )
-                    else:
-                        messages.warning(
-                            request, 'Por favor, complete su perfil antes de continuar.'
-                        )
-                    return redirect(update_url)
+                if missing_company:
+                    messages.warning(
+                        request,
+                        'Por favor, complete los datos de su cliente antes de continuar.',
+                    )
+                else:
+                    messages.warning(request, 'Por favor, complete su perfil antes de continuar.')
+                return redirect(update_url)
 
         return self.get_response(request)
 

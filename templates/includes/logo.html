@@ -1,6 +1,10 @@
 {% if site_branding.brand_logo %}
   <img src="{{ site_branding.brand_logo.url }}"
        alt="Centro Meteorológico Provincial Camagüey"
+       {% if role %}
+         role="{{ role }}"{% endif %}
+       {% if aria_label %}
+         aria-label="{{ aria_label }}"{% endif %}
        {% if class %}
          class="{{ class }}"{% endif %}
        {% if style %}
@@ -8,6 +12,10 @@
 {% else %}
   <svg xmlns="http://www.w3.org/2000/svg"
        viewBox="0 0 514.9 158.95"
+       {% if role %}
+         role="{{ role }}"{% endif %}
+       {% if aria_label %}
+         aria-label="{{ aria_label }}"{% endif %}
        {% if class %}
          class="{{ class }}"{% endif %}
        {% if style %}

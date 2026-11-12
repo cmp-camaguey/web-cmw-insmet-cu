@@ -24,23 +24,42 @@ _EMERGENCY_URL_NAMES = {
 
 
 def _build_emergency_banner(active_warnings):
-    """Datos de la franja, o `None` si no hay nada vigente que anunciar.
+    """Candidatos de la franja, o `None` si no hay nada vigente que anunciar.
 
-    Elige el aviso más grave y, entre varios de la misma gravedad, el más
-    reciente. Devuelve también el total para que el enlace diga "ver los N
-    avisos" en vez de esconder que hay más.
+    Devuelve dos listas con el mismo orden: `candidates` con todos los avisos y
+    `severe_candidates` con los graves. El landing usa la segunda: un aviso
+    temprano por lluvias es rutina y en la portada solo enseña a ignorar la
+    franja.
+
+    El orden es el de la franja: primero el más grave y, entre varios de la
+    misma gravedad, el más reciente. Cuál de ellos se ve NO lo decide esto sino
+    el navegador: cerrar un aviso es un hecho de `localStorage`, y el servidor
+    no lo conoce. Entrega la lista completa y el script en línea muestra el
+    primero que el visitante no haya cerrado.
     """
     if not active_warnings or not getattr(settings, 'EMERGENCY_BANNER_ENABLED', True):
         return None
 
     newest_first = sorted(active_warnings, key=lambda warning: warning.date, reverse=True)
-    top = min(newest_first, key=lambda warning: _EMERGENCY_PRIORITY.get(warning.warning_type, 9))
+    ordered = sorted(
+        newest_first,
+        key=lambda warning: _EMERGENCY_PRIORITY.get(warning.warning_type, 9),
+    )
+    total = len(ordered)
+
+    def entry(warning):
+        return {
+            'warning': warning,
+            'url_name': _EMERGENCY_URL_NAMES.get(warning.warning_type, 'home:warnings_early'),
+            'total': total,
+            'extra': total - 1,
+        }
 
     return {
-        'warning': top,
-        'url_name': _EMERGENCY_URL_NAMES.get(top.warning_type, 'home:warnings_early'),
-        'total': len(active_warnings),
-        'extra': len(active_warnings) - 1,
+        'candidates': [entry(warning) for warning in ordered],
+        'severe_candidates': [
+            entry(warning) for warning in ordered if warning.warning_type != 'early'
+        ],
     }
 
 

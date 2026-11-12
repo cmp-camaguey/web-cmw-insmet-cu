@@ -1,6 +1,25 @@
 {% load my_filters %}
-<td class="text-nowrap">{{ object.action_time|local_datetime:'d/m/Y' }}</td>
-<td>{{ object.user|default:'—' }}</td>
+{% comment %}
+  Las clases van dentro de las celdas, nunca en el `<td>`: tras filtrar o
+  limpiar, `activity-log-filters.js` reconstruye la tabla con `rows.add()`,
+  que crea celdas nuevas y pierde los atributos del `<td>`. Por eso este
+  template no usa `text-nowrap` en las columnas de fecha e IP: en la carga
+  inicial esas celdas no envolvían y al refrescar sí, y la tabla cambiaba de
+  aspecto. Sin la clase, ambos estados son el mismo.
+
+  La fecha va con `local_datetime` para que respete la zona y el formato 12/24 h
+  configurados en el sitio.
+{% endcomment %}
+<td>{{ object.action_time|local_datetime:'d/m/Y H:i' }}</td>
+<td>
+  {% if object.user %}
+    {{ object.user }}
+  {% else %}
+    {# La FK es SET_NULL: la fila existe pero el usuario ya no. Decir «—» #}
+    {# deja al operador sin saber si el dato falta o si la cuenta se borró. #}
+    <span class="text-secondary fst-italic">Usuario eliminado</span>
+  {% endif %}
+</td>
 <td>
   {% if object.action_flag == 1 %}
     <span class="badge bg-green-lt">Adición</span>
@@ -16,6 +35,14 @@
     <span class="badge bg-secondary-lt">{{ object.get_action_flag_display }}</span>
   {% endif %}
 </td>
-<td>{{ object.object_repr|truncatechars:60 }}</td>
+<td>{{ object.object_repr|local_datetime_in_text|truncatechars:60 }}</td>
 <td>{{ object.message|truncatechars:80 }}</td>
-<td class="text-nowrap">{{ object.ip_address|default:'—' }}</td>
+<td>
+  {% if object.ip_address %}
+    {{ object.ip_address }}
+  {% else %}
+    {# Filas anteriores al arreglo de captura (o peticiones sin IP válida). #}
+    {# «No registrada» dice que el dato no se guardó; «—» no decía nada. #}
+    <span class="text-secondary fst-italic">No registrada</span>
+  {% endif %}
+</td>
