@@ -93,4 +93,15 @@ for step in code deps checks backup migrate static restart healthcheck rollback;
         "$(cat "$DEPLOY_SH")"
 done
 
+# --- El rollback se anuncia ANTES de revertir --------------------------------
+#
+# Al reves, la barra seguiria en el paso que fallo mientras el script ya esta
+# revirtiendo: dice "instalando dependencias" cuando en realidad esta volviendo
+# atras. Se comparan las lineas para no depender de la redaccion.
+
+rollback_line=$(grep -n '^    progress rollback$' "$DEPLOY_SH" | cut -d: -f1)
+revert_line=$(grep -n 'Se revierte el codigo' "$DEPLOY_SH" | cut -d: -f1)
+assert_eq 'rollback: anuncia el paso antes de revertir' 'si' \
+    "$([ -n "$rollback_line" ] && [ -n "$revert_line" ] && [ "$rollback_line" -lt "$revert_line" ] && printf 'si' || printf 'no')"
+
 rm -rf "$tmp"

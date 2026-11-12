@@ -309,12 +309,23 @@ class UpdateProgressTest(UpdateTestCase):
             {'step': 'migrate', 'message': 'Aplicando migraciones', 'percent': 65},
         )
 
-    def test_primer_y_ultimo_paso_del_recorrido(self):
-        self.set_progress(step='code')
-        self.assertEqual(self.running()['progress']['percent'], 0)
-
-        self.set_progress(step='healthcheck')
-        self.assertEqual(self.running()['progress']['percent'], 95)
+    def test_cada_paso_da_el_porcentaje_de_la_tabla(self):
+        # La tabla es el contrato con deploy.sh: si un peso se toca, la barra deja
+        # de corresponder con los pasos reales y nada mas lo detecta.
+        esperado = {
+            'code': 0,
+            'deps': 15,
+            'checks': 45,
+            'backup': 55,
+            'migrate': 65,
+            'static': 85,
+            'restart': 90,
+            'healthcheck': 95,
+        }
+        for step, percent in esperado.items():
+            with self.subTest(step=step):
+                self.set_progress(step=step)
+                self.assertEqual(self.running()['progress']['percent'], percent)
 
     def test_sin_archivo_la_barra_es_indeterminada(self):
         # Ventana real entre que el ejecutor escribe `running` y el primer paso
@@ -346,6 +357,28 @@ class UpdateProgressTest(UpdateTestCase):
         # pintar la barra al 99% para siempre.
         self.set_progress(step='migrate', percent=99)
         self.assertEqual(self.running()['progress']['percent'], 65)
+
+    def test_la_clave_coincide_solo_exacta(self):
+        # Una clave con espacios o en mayusculas no es "casi" el paso: si se
+        # aceptara por parecido, un archivo mal escrito daria un porcentaje
+        # creible y equivocado.
+        for step in (' migrate ', 'MIGRATE', 'migrate\n'):
+            with self.subTest(step=step):
+                self.set_progress(step=step)
+                self.assertEqual(
+                    self.running()['progress'],
+                    {'step': None, 'message': 'Preparando el despliegue…', 'percent': None},
+                )
+
+    def test_la_ruta_del_archivo_no_llega_al_navegador(self):
+        # El navegador no tiene por que saber donde vive el archivo de progreso:
+        # es infraestructura del servidor, no un dato del panel.
+        self.set_progress(step='migrate')
+
+        body = json.dumps(self.running())
+
+        self.assertNotIn(self.tmpdir, body)
+        self.assertNotIn('deploy-progress.json', body)
 
     def test_rollback_es_indeterminado(self):
         # Revertir no avanza hacia el final: un porcentaje ahi mentiria.
