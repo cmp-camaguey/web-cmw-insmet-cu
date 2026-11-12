@@ -116,8 +116,7 @@ Secuencia de activación (el orden importa):
 Este repo se trabaja a veces con más de un agente a la vez sobre la misma copia.
 `git commit` commitea en la rama que está checked out, no en la que la sesión cree
 estar usando, y `git checkout` arrastra los cambios sin commitear a la rama
-destino. Así fue como el commit de una tarea aterrizó en la rama de otra y
-contaminó el candidato de una revisión con archivos ajenos.
+destino.
 
 - Cada sesión que va a escribir usa su propio worktree, fuera del repo:
   `git worktree add ../<repo>-worktrees/<nombre> -b <tipo>/<descripcion> dev`.
@@ -152,13 +151,7 @@ Resumen: **`dev` no exige aprobación, `main` sí.** No hay bot aprobando PRs, y
 | `dev` | No | — (sólo required status checks) |
 | `main` | Sí, 1 | `@orl92` o `@yoelvismr`, vía `CODEOWNERS` + `require_code_owner_review` |
 
-### Por qué no un bot que apruebe
-
-Hubo un workflow (`auto-approve.yml`) que aprobaba los PR de una lista blanca con la identidad `github-actions[bot]`. Se descartó por un problema de fondo, no de implementación:
-
-**el CI que da el verde lo define el propio PR.** Un run disparado por `pull_request` ejecuta el `ci.yml` de la rama del PR, así que una cuenta habilitada podía vaciar un job, conservar su nombre, obtener verde y recibir la aprobación del bot. Los `required_status_checks` cierran la mitad fácil —borrar o renombrar un job deja el check sin reportar y bloquea el merge— pero no la difícil: dejar el nombre y vaciar el cuerpo.
-
-Y hay un límite que ninguna automatización cruza: **nada detecta que el autor borró el test que lo habría atrapado.** Un gate que vive dentro del repo lo puede desarmar quien puede mergear. Por eso la exigencia de persona se coloca donde el radio de daño es real —la frontera de producción— y no repartida por rutas ni simulada por un bot.
+Un bot no puede ser code owner: la aprobación de una cuenta automática no cuenta para `require_code_owner_review`. Por eso el gate de producción es humano y el de `dev` son los status checks.
 
 ### CODEOWNERS
 
@@ -188,7 +181,7 @@ Consecuencia útil: un colaborador futuro con `write` puede mergear en `dev`, pe
 | `apps/meteo/` | Forecasts/ForecastRegions/ForecastExtendedDay, Warning (con warning_type), WeatherReport (today/tomorrow/commentary/note), Province, Town, Station |
 | `apps/home/` | Páginas públicas: tiempo, modelos, satélites, servicios, institución |
 | `apps/publications/` | ScientificPublication, Author — publicaciones científicas |
-| `openspec/changes/` | SDD features (OpenSpec); gentle-ai lee este directorio |
+| `openspec/changes/` | SDD features (OpenSpec) |
 
 ## Convenciones
 
@@ -209,43 +202,11 @@ Consecuencia útil: un colaborador futuro con `write` puede mergear en `dev`, pe
 - **Templates (formato)**: indentación de 2 espacios, formateados con djlint (`profile = "django"`, config en `pyproject.toml`). Verificar con `djlint . --reformat --check` y `djlint . --lint` antes de commit (hooks de pre-commit). Los templates de correo en `*/emails/` están excluidos (whitespace-sensitive): NO reindentarlos a mano ni con djlint.
 - **Apps**: todas las apps Django viven en `apps/`. Importar como `from apps.commercial.models import ...`, nunca como `from commercial.models import ...`.
 
-## Skills
+## Flujo de cambios (OpenSpec)
 
-La lista `<available_skills>` del sistema es la fuente autoritativa de skills cargadas en la sesión. Las skills de proyecto viven en `.opencode/skills/` (viajan con el repo en cualquier clon); las globales en `~/.config/opencode/skills/`.
+Los **cambios activos** (trabajo pendiente) viven en `openspec/changes/` como features OpenSpec. El código ya construido es el repo en sí; no se versiona historial de features previas.
 
-> **Uso automático**: usa MCPs y skills de forma proactiva cuando la tarea lo requiera, sin esperar a que el usuario los pida. Ver reglas globales en `~/.config/opencode/AGENTS.md`.
-
-### Skills del proyecto (`.opencode/skills/`)
-- `using-agent-skills` — árbol de decisión para elegir la skill correcta según la tarea
-- `django-expert` — modelos, ORM, DRF, auth, tests, performance Django
-- `frontend-design` — diseño visual con identidad (Tabler.io)
-- `web-design-guidelines` — auditoría de accesibilidad y UI
-
-### Skills globales (opencode)
-- **SDD**: `sdd-init`, `sdd-explore`, `sdd-propose`, `sdd-spec`, `sdd-design`, `sdd-tasks`, `sdd-apply`, `sdd-verify`, `sdd-archive`, `sdd-onboard`
-- **Git/PR**: `branch-pr`, `chained-pr`, `work-unit-commits`, `issue-creation`, `systemic-issue-triage`
-- **Revisión**: `judgment-day`, `rdd-defect-workflow`, `go-testing`, `gentle-ai-bench`
-- **Meta**: `skill-creator`, `skill-improver`, `skill-registry`, `cognitive-doc-design`, `comment-writer`, `customize-opencode`
-
-### Configuración de OpenCode (global, no versionada)
-Los agentes de gentle-ai (`gentle-orchestrator`, los `review-*`, los `jd-*`) viven en la configuración **global** de OpenCode (`~/.config/opencode/opencode.jsonc`), no en el repo. Son una capacidad de la máquina —cómo trabajas con IA—, no una propiedad del proyecto: el repo aporta `AGENTS.md` y `.opencode/skills/`, nada más. Se refrescan con `gentle-ai sync --scope global`.
-
-El repo **no versiona** `opencode.json`. Si aparece uno en la raíz es el residuo de una instalación vieja con `--scope workspace`: está en `.gitignore` y conviene borrarlo, porque `gentle-ai sync` lo reescribe y el 62 % de sus 143 KB era el prompt regenerado del orquestador —un artefacto, no fuente—. Versionarlo metía cambios del arnés en PRs que no lo tocaban y dejaba el prompt commiteado derivando en silencio contra la versión instalada.
-
-Consecuencia asumida de que `default_agent` sea global: `gentle-orchestrator` es el agente por defecto en **todos** los proyectos de la máquina, no sólo en éste.
-
-**Trabajar en el repo sin gentle-ai es perfectamente válido.** La app no depende de nada de esto: Django, `pip install -r requirements/`, PostgreSQL y `manage.py` funcionan igual. Lo único que no tienes son el orquestador y los reviewers; OpenCode arranca con sus agentes por defecto. Los MCP (`context7`, `engram`, `tabler`) también son herramientas de máquina, no del proyecto, y por eso viven en la sección [MCP](#mcp) y no en un archivo versionado: se agregan con `opencode mcp add` si los quieres. Nada de esto es requisito para contribuir.
-
-### MCP
-- `context7` — documentación actualizada de librerías/frameworks (Django, DRF, drf-spectacular, etc.). Usarlo siempre que se necesiten APIs, ejemplos o configuración de una librería; formato `use library /django/django`
-- `engram` — memoria persistente del proyecto (decisiones, descubrimientos, convenciones)
-- `tabler` — server MCP de Tabler.io (proyecto comunitario, MIT) para buscar íconos, componentes, layouts, paleta y docs de Tabler. Es un server stdio local (`npx -y tabler-mcp-server`) configurado en el opencode del agente, NO en el repo. Las sugerencias de CDN que genera se ignoran, porque el proyecto vendorea Tabler en `static/dist/css/` y `static/dist/js/` (legacy; ver `templates/includes/base/head.html` y `scripts.html`).
-
-## Flujo SDD (gentle-ai / OpenSpec)
-
-El proyecto ya existía antes de adoptar gentle-ai; la herramienta se usa para refinar y evolucionar el código de forma trazable. El código ya construido es el repo en sí; los **cambios activos** (work pendiente) viven en `openspec/changes/` como features OpenSpec. No se versiona historial de features previas.
-
-Cada cambio nuevo sigue este flujo (layout **OpenSpec**; gentle-ai lee `openspec/changes/`):
+Cada cambio nuevo sigue este flujo:
 
 1. `openspec/changes/NNN-nombre/proposal.md` (motivación + solución + criterios de aceptación)
 2. `design.md` (plan técnico) + `tasks.md` (checkboxes `- [ ]`/`- [x]`) + `specs/NNN-nombre/spec.md` (requisitos delta)
@@ -253,15 +214,13 @@ Cada cambio nuevo sigue este flujo (layout **OpenSpec**; gentle-ai lee `openspec
 4. Si hay cambios de modelo: `python manage.py makemigrations`
 5. Verificar: `python manage.py check && python manage.py test apps.<app>`; crear test si falta
 6. Marcar tasks `[x]` y commitear (incluir número y nombre del cambio)
-7. Al cerrar: `gentle-ai sdd-archive` promueve los specs y archiva el cambio
-
-> El bootstrap (`openspec/config.yaml`, `.atl/skill-registry.md`) lo genera `gentle-ai` vía el skill `sdd-init`.
+7. Al cerrar: promover los specs y mover el directorio a `openspec/changes/archive/<fecha>-<nombre>/`
 
 Antes de codificar, si hace falta clarificar, preguntar: ¿tipo de cambio? ¿app(s) afectada(s)? ¿cambios de DB? ¿URLs/permisos? ¿templates? ¿criterios de aceptación? ¿número de feature?
 
 ## Checklist proyecto-específico
 
-Estos items NO los cubren los skills genéricos. Verificarlos siempre:
+Estos items son específicos del proyecto y ningún lint los detecta. Verificarlos siempre:
 
 - [ ] `default_permissions = ()` + 4 permisos custom (view/add/change/delete) en español
 - [ ] Kwarg `uuid` (no `pk`) en URLs de modelos con UUIDField
@@ -300,9 +259,9 @@ Estos items NO los cubren los skills genéricos. Verificarlos siempre:
 
 ## Verificación antes de commit
 
-**Gentle AI ya cubre los hooks (`pre-commit`) y la revisión del diff (RDD/4R). No los repitas acá**: no lances un subagente de revisión si la revisión nativa está activa, y no agregues pasos de hook — se configuran en `.githooks/pre-commit` y `Makefile`.
+Los hooks (`ruff`, `djlint`, `detect-secrets`, `gga`) se configuran en `.githooks/pre-commit` y en el `Makefile`: no agregues pasos nuevos, y si `make setup` ya corrió, corren solos.
 
-Lo que gentle-ai **no** cubre es la verificación funcional (`review validate --gate` solo valida sintaxis y reporta política; no ejecuta nada). Córrela según lo que cambió, no por ritual:
+La verificación **funcional** es aparte y se corre según lo que cambió, no por ritual:
 
 | Cambio | Verificación |
 |---|---|
@@ -315,10 +274,7 @@ Lo que gentle-ai **no** cubre es la verificación funcional (`review validate --
 
 `python manage.py check` es barato (~1s): correlo siempre.
 
-**Frontera de revisión.** `gentle-ai review` con `--base-ref dev` compara de dos
-puntos: una rama que salió de un `dev` anterior aparece *revirtiendo* los commits
-que entraron después, y el reviewer revisa trabajo ajeno. Usar el punto de rama
-como frontera: `--base-ref $(git merge-base dev <rama>)`.
+**Frontera de revisión.** Un diff contra `dev` compara de dos puntos: una rama que salió de un `dev` anterior aparece *revirtiendo* los commits que entraron después, y se termina revisando trabajo ajeno. Usar el punto de rama como frontera: `git diff $(git merge-base dev <rama>)...<rama>`.
 
 ## API + Deploy + Locale
 
