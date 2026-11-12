@@ -259,14 +259,9 @@ huey.db-wal
 # los tapa; lo que protege la ruta es ignorar el directorio. Ver EMAIL_FILE_PATH.
 tmp/
 
-### CodeGraph + dirs de trabajo temporales ###
+### Estado local de herramientas ###
 .codegraph/
 squashfs-root/
 .gentle-ai-instance
-# gentle-ai local state: records the previous OpenCode default agent so
-# `gentle-ai uninstall` can restore it. Per-installation, never shared.
 .gentle-ai-default-agent.json
-# El `opencode.json` de la raíz NO se versiona: es un artefacto de `gentle-ai`
-# que `gentle-ai sync` reescribe. La configuración de proyecto versionada vive
-# en `.opencode/opencode.jsonc` (servidores MCP del proyecto).
 /opencode.json
