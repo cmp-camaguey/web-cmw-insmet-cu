@@ -2,8 +2,6 @@
 
 Vive fuera de `views/` por la misma razón que `notifications.py`: el hecho es de
 dominio y no de la pantalla que lo provoca.
-
-Ver `odd/tasks/030b-avisos-de-clientes.md` S5 y A3.
 """
 
 import logging

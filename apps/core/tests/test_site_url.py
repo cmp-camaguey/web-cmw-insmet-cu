@@ -1,7 +1,5 @@
 """Los enlaces que viajan en un correo salen de `SITE_URL`, no del host del `request`.
 
-Ver `odd/tasks/url-canonica-del-sitio.md`.
-
 El host del `request` es el host por el que el operador entró: la IP del
 servidor en la red interna (`10.0.0.5:8000`), `localhost` o el nombre de la
 máquina de desarrollo. El destinatario del correo está fuera de esa red, así que

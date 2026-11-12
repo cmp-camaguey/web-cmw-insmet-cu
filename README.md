@@ -370,8 +370,9 @@ openspec/changes/030-lo-que-sea/
 └── specs/030-lo-que-sea/spec.md
 ```
 
-Cuando el cambio llega a producción, los specs se promueven y el directorio se
-mueve a `openspec/changes/archive/<fecha>-<nombre>/`.
+Cuando el cambio llega a producción, los specs se promueven a `openspec/specs/`
+y el directorio del cambio se archiva en `openspec/changes/archive/`, que es
+local y no se versiona.
 
 ### Ramas, PRs y CI
 

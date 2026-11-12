@@ -259,6 +259,11 @@ huey.db-wal
 # los tapa; lo que protege la ruta es ignorar el directorio. Ver EMAIL_FILE_PATH.
 tmp/
 
+### Historial local de OpenSpec ###
+# El archivo de cambios cerrados no se versiona: los specs promovidos viven en
+# openspec/specs/ y el directorio del cambio queda como registro local.
+openspec/changes/archive/
+
 ### Estado local de herramientas ###
 .codegraph/
 squashfs-root/

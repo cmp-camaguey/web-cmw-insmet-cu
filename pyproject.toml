@@ -10,9 +10,6 @@ exclude = [
     "*/migrations/*",
     "schema.yml",
     "spec",
-    # Archived SDD changes are historical records; the ruff-format hook covers
-    # markdown, so without this it rewrites their code blocks on every tool bump.
-    "openspec/changes/archive",
 ]
 
 [tool.ruff.lint]

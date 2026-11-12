@@ -4,7 +4,7 @@ La notificación se crea **en el borde que conoce el hecho**, nunca por una
 señal genérica: un `post_save` sobre `Invoice` que mire `pdf_status` y otro
 sobre `TaskExecutionLog` se pisarían, porque el PDF fallido de una factura
 también deja una tarea en `ERROR` y el admin vería dos avisos del mismo hecho.
-Ver `openspec/changes/026-sistema-notificaciones/design.md` §3.
+Ver `openspec/specs/notificaciones-operativas/spec.md`.
 """
 
 import hashlib

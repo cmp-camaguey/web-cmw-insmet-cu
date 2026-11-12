@@ -159,7 +159,7 @@ Los cambios activos viven en `openspec/changes/` como features OpenSpec. No se v
 4. Si hay cambios de modelo: `python manage.py makemigrations`
 5. Verificar: `python manage.py check && python manage.py test apps.<app>`; crear test si falta
 6. Marcar tasks `[x]` y commitear (incluir número y nombre del cambio)
-7. Al cerrar: promover los specs y mover el directorio a `openspec/changes/archive/<fecha>-<nombre>/`
+7. Al cerrar: promover los specs a `openspec/specs/` y archivar el directorio del cambio en `openspec/changes/archive/` (local, fuera de git)
 
 Antes de codificar, define: tipo de cambio, apps afectadas, cambios de base de datos, URLs y permisos, templates y criterios de aceptación.
 

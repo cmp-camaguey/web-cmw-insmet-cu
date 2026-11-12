@@ -1,7 +1,6 @@
 """Consentimiento de correo: alta, confirmación, baja y movimiento de dirección.
 
-Ver `openspec/changes/030-boletin-y-notificaciones-de-clientes/design.md` §3 y
-`odd/tasks/030-boletin-y-suscripcion.md` S5–S10.
+Ver `openspec/specs/boletin-y-suscripcion/spec.md`.
 """
 
 import uuid
