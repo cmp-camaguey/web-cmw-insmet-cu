@@ -11,6 +11,7 @@ SCRIPTS=(
     deploy/tests/run.sh
     deploy/tests/lib.sh
     deploy/tests/test_install_sh_blocks.sh
+    deploy/tests/test_deploy_sh_progress.sh
     deploy/tests/test_shell_scripts.sh
     run_huey.sh
     .githooks/pre-commit
