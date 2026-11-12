@@ -1,3 +1,4 @@
+{% load my_filters %}
 {% load static %}
 {% if show_alerts %}
   <!-- Sección: Alertas Activas -->
@@ -38,11 +39,11 @@
                   <div class="alert-details">
                     <div class="row g-1">
                       <div class="col-12">
-                        <span class="text-muted small">Emitido: {{ alert.date|date:'d/m h:i A' }}</span>
+                        <span class="text-muted small">Emitido: {{ alert.date|local_datetime:'d/m' }}</span>
                       </div>
                       {% if alert.valid_until %}
                         <div class="col-12">
-                          <span class="text-muted small">Válido hasta: {{ alert.valid_until|date:'d/m h:i A' }}</span>
+                          <span class="text-muted small">Válido hasta: {{ alert.valid_until|local_datetime:'d/m' }}</span>
                         </div>
                       {% endif %}
                     </div>
@@ -96,11 +97,11 @@
                   <div class="alert-details">
                     <div class="row g-1">
                       <div class="col-12">
-                        <span class="text-muted small">Emitido: {{ alert.date|date:'d/m h:i A' }}</span>
+                        <span class="text-muted small">Emitido: {{ alert.date|local_datetime:'d/m' }}</span>
                       </div>
                       {% if alert.valid_until %}
                         <div class="col-12">
-                          <span class="text-muted small">Válido hasta: {{ alert.valid_until|date:'d/m h:i A' }}</span>
+                          <span class="text-muted small">Válido hasta: {{ alert.valid_until|local_datetime:'d/m' }}</span>
                         </div>
                       {% endif %}
                     </div>
@@ -154,11 +155,11 @@
                   <div class="alert-details">
                     <div class="row g-1">
                       <div class="col-12">
-                        <span class="text-muted small">Emitido: {{ alert.date|date:'d/m h:i A' }}</span>
+                        <span class="text-muted small">Emitido: {{ alert.date|local_datetime:'d/m' }}</span>
                       </div>
                       {% if alert.valid_until %}
                         <div class="col-12">
-                          <span class="text-muted small">Válido hasta: {{ alert.valid_until|date:'d/m h:i A' }}</span>
+                          <span class="text-muted small">Válido hasta: {{ alert.valid_until|local_datetime:'d/m' }}</span>
                         </div>
                       {% endif %}
                     </div>

@@ -1,3 +1,4 @@
+{% load my_filters %}
 {% if candidates %}
   {% comment %}
     La franja se resuelve con dos scripts, y no con uno, por una razón concreta:
@@ -71,7 +72,7 @@
             <div class="emergency-banner__meta">
               <span class="emergency-banner__date">
                 <i class="icon ti ti-clock" aria-hidden="true"></i>
-                Válido hasta {{ warning.valid_until|date:'d/m/Y H:i' }}
+                Válido hasta {{ warning.valid_until|local_datetime:'d/m/Y' }}
               </span>
               <a class="emergency-banner__cta" href="{% url candidate.url_name %}">
                 {% if candidate.extra %}

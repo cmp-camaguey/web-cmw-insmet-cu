@@ -1,3 +1,4 @@
+{% load my_filters %}
 {% load static %}
 {% comment %}
   Partial de la tabla de tareas: se devuelve con ?partial=1 para el polling.
@@ -61,9 +62,9 @@
           {% endif %}
         </td>
         <td class="text-center">{{ execution.attempts }}</td>
-        <td>{{ execution.enqueued_at|date:"d/m/Y H:i:s"|default:"Sin registrar" }}</td>
-        <td>{{ execution.started_at|date:"d/m/Y H:i:s"|default:"Sin iniciar" }}</td>
-        <td>{{ execution.finished_at|date:"d/m/Y H:i:s"|default:"Sin finalizar" }}</td>
+        <td>{{ execution.enqueued_at|local_datetime_seconds:"d/m/Y"|default:"Sin registrar" }}</td>
+        <td>{{ execution.started_at|local_datetime_seconds:"d/m/Y"|default:"Sin iniciar" }}</td>
+        <td>{{ execution.finished_at|local_datetime_seconds:"d/m/Y"|default:"Sin finalizar" }}</td>
         <td class="text-nowrap">
           <div class="btn-list">
             {% if execution.status == 'ERROR' %}

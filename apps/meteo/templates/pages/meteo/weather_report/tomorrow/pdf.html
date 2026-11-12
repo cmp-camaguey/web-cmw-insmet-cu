@@ -1,3 +1,4 @@
+{% load my_filters %}
 <!DOCTYPE html>
 <html>
   <head>
@@ -24,7 +25,7 @@
     <div class="section">
       <strong>Fecha:</strong> {{ weather_tomorrow.date|date:'j \d\e F \d\e Y' }}
       <br />
-      <strong>Hora:</strong> {{ weather_tomorrow.date|time:'h:i A' }}
+      <strong>Hora:</strong> {{ weather_tomorrow.date|local_time }}
       <br />
       <strong>Autor:</strong> {{ weather_tomorrow.user.get_full_name|default:weather_tomorrow.user.username }}
     </div>

@@ -39,3 +39,35 @@ class SiteConfigurationForm(forms.ModelForm):
         if not HEX_COLOR_RE.match(value):
             raise forms.ValidationError('El color debe tener formato #RRGGBB.')
         return value
+
+
+class TimezoneConfigurationForm(forms.ModelForm):
+    """Zona horaria y formato de hora del sitio.
+
+    El offset solo se exige en modo manual. En automático el selector puede
+    llegar deshabilitado por la interfaz (y por lo tanto ausente del POST), así
+    que el campo es opcional y se conserva el valor guardado.
+    """
+
+    class Meta:
+        model = SiteConfiguration
+        fields = ['timezone_mode', 'utc_offset_hours', 'time_format']
+        widgets = {
+            'timezone_mode': forms.Select(attrs={'class': 'form-select'}),
+            'utc_offset_hours': forms.Select(attrs={'class': 'form-select'}),
+            'time_format': forms.Select(attrs={'class': 'form-select'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['utc_offset_hours'].required = False
+
+    def clean(self):
+        cleaned_data = super().clean()
+        mode = cleaned_data.get('timezone_mode')
+        offset = cleaned_data.get('utc_offset_hours')
+        if mode == SiteConfiguration.TimeZoneMode.MANUAL and offset in (None, ''):
+            self.add_error('utc_offset_hours', 'Seleccione la diferencia con UTC.')
+        elif offset in (None, '') and self.instance.pk:
+            cleaned_data['utc_offset_hours'] = self.instance.utc_offset_hours
+        return cleaned_data

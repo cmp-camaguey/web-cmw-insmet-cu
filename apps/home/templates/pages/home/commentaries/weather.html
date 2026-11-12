@@ -9,9 +9,9 @@
         {% if weather_commentary %}
           {% if weather_commentary.file %}
             {% url 'home:weather_report_pdf' weather_commentary.uuid as report_pdf_url %}
-            {% include 'includes/home/document_card.html' with title='Comentario del Tiempo' summary=weather_commentary.summary publisher=weather_commentary.user.get_full_name publisher_avatar=weather_commentary.user.profile.get_avatar date=weather_commentary.date|date:'d/m/Y h:i A' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Comentario del Tiempo' %}
+            {% include 'includes/home/document_card.html' with title='Comentario del Tiempo' summary=weather_commentary.summary publisher=weather_commentary.user.get_full_name publisher_avatar=weather_commentary.user.profile.get_avatar date=weather_commentary.date|local_datetime:'d/m/Y' pdf_url=report_pdf_url|add:'?inline=1' pdf_title='Comentario del Tiempo' %}
           {% else %}
-            {% include 'includes/home/document_card.html' with title='Comentario del Tiempo' summary=weather_commentary.summary publisher=weather_commentary.user.get_full_name publisher_avatar=weather_commentary.user.profile.get_avatar date=weather_commentary.date|date:'d/m/Y h:i A' %}
+            {% include 'includes/home/document_card.html' with title='Comentario del Tiempo' summary=weather_commentary.summary publisher=weather_commentary.user.get_full_name publisher_avatar=weather_commentary.user.profile.get_avatar date=weather_commentary.date|local_datetime:'d/m/Y' %}
           {% endif %}
         {% else %}
           <div class="row row-cards">

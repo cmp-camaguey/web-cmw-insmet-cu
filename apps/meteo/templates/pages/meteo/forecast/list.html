@@ -1,4 +1,5 @@
 {% extends 'layouts/list.html' %}
+{% load my_filters %}
 {% load static %}
 {% block title_actions %}
   <div class="col-auto ms-auto d-print-none">
@@ -196,13 +197,13 @@
                   </tr>
                   <tr>
                     <td>Salida Sol</td>
-                    <td>{{ forecast.sunrise|time:'g:i A'|default:'–' }}</td>
+                    <td>{{ forecast.sunrise|local_time|default:'–' }}</td>
                     <td>&nbsp;</td>
                     <td>&nbsp;</td>
                   </tr>
                   <tr>
                     <td>Puesta Sol</td>
-                    <td>{{ forecast.sunset|time:'g:i A'|default:'–' }}</td>
+                    <td>{{ forecast.sunset|local_time|default:'–' }}</td>
                     <td>&nbsp;</td>
                     <td>&nbsp;</td>
                   </tr>

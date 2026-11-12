@@ -1,3 +1,4 @@
+import datetime
 import os
 import re
 import uuid
@@ -160,8 +161,21 @@ THEME_RADIUS_CHOICES = [
     ('2', '2'),
 ]
 
+# La diferencia manual se elige de hora en hora: el operador piensa en "UTC-5"
+# o "UTC+2", no en zonas IANA. El modo automático sigue usando la zona del
+# servidor, con su horario de verano.
+UTC_OFFSET_CHOICES = [(hour, f'UTC{hour:+d}') for hour in range(-12, 15)]
+
 
 class SiteConfiguration(FileHandlerMixin):
+    class TimeZoneMode(models.TextChoices):
+        AUTO = 'auto', 'Automático'
+        MANUAL = 'manual', 'Manual'
+
+    class TimeFormat(models.TextChoices):
+        H24 = '24', '24 horas'
+        H12 = '12', '12 horas (AM/PM)'
+
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     maintenance_mode = models.BooleanField(default=True, verbose_name='Modo mantenimiento')
     primary_color = models.CharField(max_length=7, default='#2b4b9b', verbose_name='Color primario')
@@ -182,6 +196,23 @@ class SiteConfiguration(FileHandlerMixin):
         choices=THEME_RADIUS_CHOICES,
         default='1',
         verbose_name='Radio de esquina',
+    )
+    timezone_mode = models.CharField(
+        max_length=10,
+        choices=TimeZoneMode.choices,
+        default=TimeZoneMode.AUTO,
+        verbose_name='Modo de zona horaria',
+    )
+    utc_offset_hours = models.SmallIntegerField(
+        choices=UTC_OFFSET_CHOICES,
+        default=-5,
+        verbose_name='Diferencia con UTC (horas)',
+    )
+    time_format = models.CharField(
+        max_length=2,
+        choices=TimeFormat.choices,
+        default=TimeFormat.H24,
+        verbose_name='Formato de hora',
     )
     brand_logo = models.ImageField(
         upload_to='brand/',
@@ -225,6 +256,22 @@ class SiteConfiguration(FileHandlerMixin):
         if not self.pk and SiteConfiguration.objects.exists():
             return
         super().save(*args, **kwargs)
+
+    def get_timezone(self):
+        """Zona horaria efectiva del sitio.
+
+        En automático se usa la zona del servidor (``settings.TIME_ZONE``), que
+        respeta el horario de verano. En manual, un offset fijo respecto a UTC.
+        """
+        if self.timezone_mode == self.TimeZoneMode.MANUAL:
+            return datetime.timezone(datetime.timedelta(hours=self.utc_offset_hours))
+        return timezone.get_default_timezone()
+
+    def get_time_format(self):
+        """Patrón de hora para `date_format`/`strftime` según el formato elegido."""
+        if self.time_format == self.TimeFormat.H12:
+            return 'h:i A'
+        return 'H:i'
 
 
 class CompanySettings(models.Model):
