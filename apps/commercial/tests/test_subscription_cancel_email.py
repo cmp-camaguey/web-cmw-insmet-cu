@@ -1,8 +1,7 @@
 """Aviso al cliente cuando se anula su suscripción.
 
-Ver `odd/tasks/030b-avisos-de-clientes.md` S5 y A3: de los tres cambios de
-estado, solo la anulación necesita correo propio, porque `pending` ya manda la
-factura y `paid` ya manda el certificado.
+De los tres cambios de estado, solo la anulación necesita correo propio: `pending`
+ya manda la factura y `paid` ya manda el certificado.
 """
 
 from django.contrib.auth.models import User

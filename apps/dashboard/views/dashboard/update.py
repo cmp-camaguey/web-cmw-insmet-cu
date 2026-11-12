@@ -59,6 +59,28 @@ RUN_MESSAGES = {
 # deja el panel en "Desplegando…" para siempre y el boton no vuelve nunca.
 RUN_STALE_SECONDS = 3600
 
+# --- Progreso del despliegue ------------------------------------------------
+# Pasos que publica `deploy.sh` en `UPDATE_PROGRESS_FILE`, en orden, con el peso
+# de COMPLETAR cada uno. El porcentaje de un paso es la suma de los pesos
+# anteriores: lo que ya se hizo, no lo que se esta haciendo. Suma 100 a
+# proposito, y un peso que no sume 100 no rompe nada: el ultimo paso se queda en
+# el porcentaje que corresponda, que es cierto igual.
+PROGRESS_STEPS = (
+    ('code', 'Actualizando el código', 15),
+    ('deps', 'Instalando dependencias', 30),
+    ('checks', 'Validando la configuración', 10),
+    ('backup', 'Respaldando la base de datos', 10),
+    ('migrate', 'Aplicando migraciones', 20),
+    ('static', 'Recolectando estáticos', 5),
+    ('restart', 'Reiniciando los servicios', 5),
+    ('healthcheck', 'Comprobando el sitio', 5),
+)
+# Pasos sin avance medible. El rollback no avanza hacia el final: vuelve atras,
+# asi que un porcentaje ahi mentiria. La barra se muestra indeterminada.
+PROGRESS_INDETERMINATE = {'rollback': 'Revirtiendo el código'}
+# Ventana entre que el ejecutor escribe `running` y el primer paso del script.
+PROGRESS_IDLE_MESSAGE = 'Preparando el despliegue…'
+
 # --- Mensajes de los commits pendientes -------------------------------------
 # La clave lleva los dos SHA: un rango cacheado no sirve despues de desplegar,
 # porque el commit desplegado ya es otro.
@@ -321,12 +343,62 @@ def last_run():
     }
 
 
+def _progress_step():
+    """Clave del paso que publica ``deploy.sh``, o ``None`` si no sirve.
+
+    Igual que el SHA y las fechas del estado: el archivo lo escribe otro usuario,
+    asi que se valida antes de usarlo. Una clave desconocida no es un error, es
+    "todavia no hay paso" — el panel la muestra como preparacion.
+    """
+    raw = _read_text(settings.UPDATE_PROGRESS_FILE)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning('%s no es JSON valido', settings.UPDATE_PROGRESS_FILE)
+        return None
+    if not isinstance(data, dict):
+        return None
+    step = data.get('step')
+    return step if isinstance(step, str) else None
+
+
+def deployment_progress():
+    """Paso en curso, con la etiqueta y el porcentaje que le toca.
+
+    El archivo de progreso aporta SOLO la clave del paso. La etiqueta y el
+    numero los pone esta tabla, igual que ``RUN_MESSAGES``: un archivo escrito
+    por root no puede meter texto ni porcentajes en el desplegable del
+    administrador.
+
+    Siempre devuelve un objeto. Quien llama lo usa solo cuando el despliegue esta
+    en curso, y ahi "todavia no hay paso" —el ejecutor resolviendo el commit— es
+    una respuesta: la barra se pinta indeterminada en vez de quedarse en 0%.
+    """
+    step = _progress_step()
+    completed = 0
+    for key, label, weight in PROGRESS_STEPS:
+        if key == step:
+            return {'step': key, 'message': label, 'percent': completed}
+        completed += weight
+
+    if step in PROGRESS_INDETERMINATE:
+        return {'step': step, 'message': PROGRESS_INDETERMINATE[step], 'percent': None}
+
+    return {'step': None, 'message': PROGRESS_IDLE_MESSAGE, 'percent': None}
+
+
 def build_state(refresh=False, include_commits=True):
     """Estado que consume el panel. Una sola forma, la use quien la use.
 
     ``include_commits`` existe para la peticion de despliegue: decide con los
     SHA, no con los mensajes, y no tiene por que esperar una segunda salida de
     red que ademas puede tardar el timeout entero.
+
+    ``progress`` solo viaja con el despliegue en curso, y es un objeto derivado
+    de una clave de paso validada, no el contenido del archivo (ver
+    ``deployment_progress``).
 
     El contador de avisos sin leer **no** viaja aqui. Este JSON lee archivos,
     consulta el remoto y compara commits: es caro por diseno y por eso solo lo
@@ -380,6 +452,11 @@ def build_state(refresh=False, include_commits=True):
     if include_commits and state == 'available':
         commits = pending_commits(deployed, remote['sha'], refresh=refresh)
 
+    # El progreso solo tiene sentido con el despliegue en curso. Fuera de
+    # `running` no se envia: un archivo que quedo de un intento anterior no
+    # puede pintar una barra en un panel que ya dice "al dia" o "fallo".
+    progress = deployment_progress() if state == 'running' else None
+
     return {
         'state': state,
         'reason': reason,
@@ -389,6 +466,7 @@ def build_state(refresh=False, include_commits=True):
         'latest_short': remote['sha'][:7] if remote['sha'] else None,
         'check_error': remote['error'],
         'last_run': run,
+        'progress': progress,
         'commits': commits,
     }
 

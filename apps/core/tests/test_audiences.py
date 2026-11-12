@@ -1,7 +1,4 @@
-"""Audiencia automática de los envíos masivos.
-
-Ver `odd/tasks/030-boletin-y-suscripcion.md` S11 y S13.
-"""
+"""Audiencia automática de los envíos masivos."""
 
 from django.contrib.auth.models import User
 from django.core import mail

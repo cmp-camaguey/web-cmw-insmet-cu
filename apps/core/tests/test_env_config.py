@@ -580,6 +580,7 @@ class EnvironmentConfigViewTests(TestCase):
             getattr(settings, 'UPDATE_DEPLOYED_SHA_FILE', ''),
             getattr(settings, 'UPDATE_STATUS_FILE', ''),
             getattr(settings, 'UPDATE_REQUEST_FILE', ''),
+            getattr(settings, 'UPDATE_PROGRESS_FILE', ''),
         ):
             if value:
                 self.assertNotContains(response, str(value))

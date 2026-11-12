@@ -9,7 +9,7 @@ REGLA ESTRUCTURAL (no negociable): este módulo NO ramifica sobre `DEBUG` ni
 sobre `IS_PRODUCTION`, solo los lee como valores planos. Cada perfil hace
 `from .base import *`, que ejecuta este archivo ANTES de que el perfil pueda
 corregir nada: si aquí se calculara `DATABASES` con el `DEBUG` de `base`, el
-perfil ya no podría imponer el suyo. Ver odd/tasks/split-config-settings.md.
+perfil ya no podría imponer el suyo.
 """
 
 import logging
@@ -590,6 +590,10 @@ UPDATE_BRANCH_REF = os.getenv('UPDATE_BRANCH_REF', 'refs/heads/main')
 UPDATE_DEPLOYED_SHA_FILE = os.getenv('UPDATE_DEPLOYED_SHA_FILE', '/etc/webcmp/deployed')
 # El usuario de despliegue escribe aca el estado del ultimo intento (JSON).
 UPDATE_STATUS_FILE = os.getenv('UPDATE_STATUS_FILE', '/var/lib/webcmp/deploy-status.json')
+# `deploy.sh` escribe aca el paso que esta corriendo (JSON, 0644). Es lo unico
+# que alimenta la barra de progreso del desplegable: sin archivo, la barra es
+# indeterminada.
+UPDATE_PROGRESS_FILE = os.getenv('UPDATE_PROGRESS_FILE', '/var/lib/webcmp/deploy-progress.json')
 # El panel escribe la peticion; una unidad systemd .path la recoge al aparecer.
 UPDATE_REQUEST_FILE = os.getenv('UPDATE_REQUEST_FILE', '/var/lib/webcmp/deploy-request')
 # Cuanto dura el resultado de `git ls-remote` en cache, y cuanto se espera al

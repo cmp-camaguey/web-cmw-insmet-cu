@@ -1,4 +1,4 @@
-"""Truth table de los perfiles de `config.settings` (odd/tasks/split-config-settings.md).
+"""Truth table de los perfiles de `config.settings`.
 
 Cada perfil se carga con `importlib` bajo un entorno controlado —`dotenv`
 neutralizado y `os.environ` limpio— así que la tabla se verifica en los estados
@@ -551,7 +551,6 @@ class SecretKeyFailClosedTests(SimpleTestCase):
     La regla tiene un solo dueño, `base.load_secret_key()`, y es implementable
     porque el generador (`scripts/generate_env.py`) no importa Django: corre en el
     estado exacto en que la aplicación todavía no puede arrancar.
-    Ver odd/tasks/production-deploy-systemd.md.
     """
 
     def load_base(self, env):

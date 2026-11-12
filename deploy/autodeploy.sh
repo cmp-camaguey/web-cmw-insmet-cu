@@ -20,6 +20,8 @@ set -Eeuo pipefail
 readonly REPO_URL=${REPO_URL:-https://github.com/cmp-camaguey/webcmp.git}
 readonly BRANCH_REF=${BRANCH_REF:-refs/heads/main}
 readonly STATUS_FILE=${STATUS_FILE:-/var/lib/webcmp/deploy-status.json}
+# Paso en curso del despliegue, que escribe `deploy.sh` para la barra del panel.
+readonly PROGRESS_FILE=${PROGRESS_FILE:-/var/lib/webcmp/deploy-progress.json}
 readonly REQUEST_FILE=${REQUEST_FILE:-/var/lib/webcmp/deploy-request}
 readonly DEPLOY_SCRIPT=${DEPLOY_SCRIPT:-/usr/local/sbin/webcmp-deploy}
 # El lock vive en el MISMO directorio que el estado, y no en /var/lock: este
@@ -89,6 +91,11 @@ command -v git >/dev/null 2>&1 || die "git no esta instalado."
 target=$(GIT_TERMINAL_PROMPT=0 git ls-remote "$REPO_URL" "$BRANCH_REF" \
     | awk 'NR==1 {print $1}') || true
 [[ "$target" =~ ^[0-9a-f]{40}$ ]] || die "No se pudo resolver $BRANCH_REF en $REPO_URL."
+
+# El progreso del intento anterior no describe este: se borra ANTES de escribir
+# `running`, o el panel abriria la barra en el ultimo paso del deploy viejo
+# mientras este todavia resuelve el commit.
+rm -f "$PROGRESS_FILE" 2>/dev/null || true
 
 write_status running "$target"
 log "Desplegando $target"

@@ -3,7 +3,7 @@
 Las tres vistas son públicas y no requieren cuenta. La única que escribe es la
 de alta, y siempre a través de `apps.core.subscriptions`.
 
-Ver `openspec/changes/030-boletin-y-notificaciones-de-clientes/design.md` §3 y §5.
+Ver `openspec/specs/boletin-y-suscripcion/spec.md`.
 """
 
 from django import forms

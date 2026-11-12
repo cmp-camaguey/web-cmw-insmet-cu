@@ -30,6 +30,9 @@
   var detail = document.getElementById('update-navbar-detail');
   var button = document.getElementById('update-navbar-button');
   var commitsBox = document.getElementById('update-navbar-commits');
+  var progressBox = document.getElementById('update-navbar-progress');
+  var progressBar = document.getElementById('update-navbar-progress-bar');
+  var progressStep = document.getElementById('update-navbar-progress-step');
 
   var statusUrl = root.getAttribute('data-status-url');
   var requestUrl = root.getAttribute('data-request-url');
@@ -107,6 +110,42 @@
     commitsBox.classList.remove('d-none');
   }
 
+  // Barra de progreso del despliegue en curso.
+  //
+  // `percent` viene calculado del servidor a partir de una clave de paso
+  // validada; acá no se interpreta nada del archivo de progreso. Cuando no hay
+  // numero (preparación, rollback) la barra es indeterminada: una barra quieta
+  // en 0% mientras el ejecutor trabaja es una mentira peor que ninguna barra.
+  function paintProgress(progress) {
+    if (!progressBar) {
+      return;
+    }
+
+    var percent =
+      progress && typeof progress.percent === 'number'
+        ? Math.max(0, Math.min(100, progress.percent))
+        : null;
+    var indeterminate = percent === null;
+
+    progressBar.classList.toggle('progress-bar-indeterminate', indeterminate);
+    // Indeterminada: SIN ancho. Tabler dibuja el barrido con los pseudoelementos
+    // dentro de la pista; con `width: 100%` la barra queda llena y se lee como
+    // "terminado". Verificado en el navegador, no es teoria.
+    progressBar.style.width = indeterminate ? '' : percent + '%';
+
+    if (indeterminate) {
+      progressBar.removeAttribute('aria-valuenow');
+      progressBar.setAttribute('aria-valuetext', 'En curso');
+    } else {
+      progressBar.setAttribute('aria-valuenow', String(percent));
+      progressBar.removeAttribute('aria-valuetext');
+    }
+
+    if (progressStep) {
+      progressStep.textContent = (progress && progress.message) || 'Desplegando…';
+    }
+  }
+
   function paint(options) {
     // `badge` es la senal: un punto rojo en el navbar. El resto del texto vive
     // dentro del desplegable, que solo se ve si el admin lo abre.
@@ -119,6 +158,18 @@
     title.textContent = options.title || 'Actualizaciones';
     text.textContent = options.message || '';
     detail.textContent = options.detail || '';
+
+    // Con barra, el texto "Desplegando…" sobra: la barra ocupa su lugar, no se
+    // suma al lado. Si el template en cache no trae el bloque de progreso, el
+    // texto se queda: esconderlo sin barra dejaria el desplegable vacio.
+    var showProgress = Boolean(options.progress) && Boolean(progressBox);
+    if (progressBox) {
+      progressBox.classList.toggle('d-none', !showProgress);
+    }
+    text.classList.toggle('d-none', showProgress);
+    if (showProgress) {
+      paintProgress(options.progress);
+    }
 
     button.classList.toggle('d-none', !options.action);
     button.disabled = !options.action || Boolean(options.busy);
@@ -137,7 +188,9 @@
         icon: 'ti ti-loader',
         title: 'Desplegando',
         message: run.message || 'Desplegando…',
-        detail: 'El servidor se está reiniciando. La página puede no responder unos segundos.',
+        // Sin detalle: la accion en curso va debajo de la barra, y decir "se
+        // esta reiniciando" durante un `pip install` seria falso.
+        progress: state.progress || null,
         busy: true,
       });
       return;

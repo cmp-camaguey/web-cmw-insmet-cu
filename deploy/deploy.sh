@@ -46,6 +46,10 @@ readonly CONFIG=/etc/webcmp/deploy.env
 # Lo escribe este script y no el panel: el proceso web no puede saber con
 # certeza que commit se aplico, solo lo sabe el que lo aplico.
 readonly DEPLOYED_STATE=/etc/webcmp/deployed
+# En que paso va el despliegue, para la barra de progreso del panel. Vive en el
+# mismo directorio que la peticion y el estado del ejecutor (2775 deploy:webcmp),
+# asi que el proceso web solo tiene que leerlo.
+readonly PROGRESS_FILE=${PROGRESS_FILE:-/var/lib/webcmp/deploy-progress.json}
 
 log() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mAVISO:\033[0m %s\n' "$*" >&2; }
@@ -68,6 +72,37 @@ usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
 gitapp() {
     sudo -u "$DEPLOY_USER" git -C "$APP_DIR" "$@"
 }
+
+# >>> TEST-BLOCK: deploy-progress
+# Publica en que paso va el despliegue, para la barra del panel.
+#
+# El archivo lleva SOLO la clave del paso: la etiqueta y el porcentaje los pone
+# el panel desde una tabla cerrada (apps/dashboard/views/dashboard/update.py).
+# Asi este archivo, escrito por root y leido por el proceso web, no es un canal
+# de texto hacia el navegador del administrador.
+#
+# Best-effort y silencioso a proposito: corre en cada seccion del deploy y un
+# servidor sin el andamiaje del boton (o un deploy a mano en un host de pruebas)
+# no puede abortar por un adorno. Con `set -e`, un fallo aca mataria un
+# despliegue que estaba funcionando, asi que NUNCA devuelve != 0.
+#
+# Escritura atomica por la misma razon que el estado del ejecutor: el panel lee
+# este archivo cada dos segundos y no puede encontrarse un JSON a medias.
+progress() {
+    local step=$1 tmp
+    [ -n "$step" ] || return 0
+    [ -d "$(dirname "$PROGRESS_FILE")" ] || return 0
+    tmp=$(mktemp "${PROGRESS_FILE}.XXXXXX" 2>/dev/null) || return 0
+    if printf '{"step": "%s", "updated_at": "%s"}\n' "$step" "$(date -Is)" \
+        >"$tmp" 2>/dev/null; then
+        chmod 0644 "$tmp" 2>/dev/null || true
+        mv -f "$tmp" "$PROGRESS_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    else
+        rm -f "$tmp" 2>/dev/null || true
+    fi
+    return 0
+}
+# <<< TEST-BLOCK: deploy-progress
 
 # --------------------------------------------------------------------------
 # Modos: deploy (por defecto, el camino de CI) | --configure | --check
@@ -782,6 +817,11 @@ rollback() {
         exit "$status"
     fi
 
+    # La barra del panel vuelve a indeterminada: un porcentaje congelado en el
+    # paso que fallo miente sobre lo que esta pasando ahora (se esta volviendo
+    # atras, no avanzando).
+    progress rollback
+
     warn "El despliegue fallo (status $status). Se revierte el codigo a $(gitapp rev-parse --short "$previous_sha")."
     warn "NO se tocan la base de datos ni los archivos de media/."
 
@@ -960,6 +1000,8 @@ trap rollback EXIT
 # 1. Codigo
 # --------------------------------------------------------------------------
 
+progress code
+
 if [ -n "$(gitapp status --porcelain --untracked-files=no)" ]; then
     die "El checkout tiene cambios versionados sin commitear. Se aborta para no perderlos:
   sudo -u $DEPLOY_USER git -C $APP_DIR status
@@ -974,6 +1016,7 @@ gitapp checkout --force --quiet "$target_sha"
 current_sha=$(gitapp rev-parse HEAD)
 
 # 2. Dependencias
+progress deps
 log "Instalando requirements/prod.txt"
 sudo -u "$DEPLOY_USER" env "PIP_CACHE_DIR=$PIP_CACHE_DIR" \
     "${PIP_CMD[@]}" install --quiet --disable-pip-version-check -r "$APP_DIR/requirements/prod.txt"
@@ -991,6 +1034,7 @@ sudo -u "$DEPLOY_USER" env "PIP_CACHE_DIR=$PIP_CACHE_DIR" \
 # La migracion se revisa en el PR. El rollback del codigo no revierte el
 # esquema, y sigue siendo cierto: una migracion destructiva ya aplicada deja la
 # base con el esquema nuevo.
+progress checks
 log "Gate: las migraciones versionadas cubren los modelos"
 manage makemigrations --check --dry-run
 
@@ -1012,6 +1056,7 @@ manage check --deploy --fail-level WARNING
 # Va DESPUES de los dos gates a proposito. Un commit que no pasa
 # `makemigrations --check` o `check --deploy` no toca la base, asi que respaldar
 # ahi seria llenar el disco por deploys que abortan antes de migrar.
+progress backup
 if pending_migrations; then
     log "Migraciones pendientes: respaldando la base antes de aplicar"
     command -v pg_dump >/dev/null 2>&1 \
@@ -1035,6 +1080,7 @@ else
 fi
 
 # 6. Migraciones: antes de que el codigo nuevo atienda un solo request
+progress migrate
 log "Aplicando migraciones"
 manage migrate --noinput
 migrated=1
@@ -1045,6 +1091,7 @@ migrated=1
 manage migrate --check
 
 # 7. Estaticos: antes de que el codigo nuevo emita HTML que los referencia
+progress static
 log "Recolectando estaticos"
 manage collectstatic --no-input
 
@@ -1054,6 +1101,7 @@ manage collectstatic --no-input
 # master recargue su configuracion y los workers se re-forkean desde el master.
 # El master tiene el codigo viejo en memoria, asi que los workers nuevos tambien.
 # El sitio serviria el template viejo con los estaticos nuevos.
+progress restart
 log "Reiniciando $GUNICORN_UNIT y $HUEY_UNIT"
 systemctl restart "$GUNICORN_UNIT"
 systemctl restart "$HUEY_UNIT"
@@ -1079,6 +1127,7 @@ systemctl is-active --quiet "$HUEY_UNIT" || die "$HUEY_UNIT quedo inactivo."
 # Las cuatro estan validadas en el arranque (validate_healthcheck_target): un
 # valor mal formado tiene que morir con un mensaje que diga cual es, no con un
 # `000` veinte segundos mas tarde.
+progress healthcheck
 log "Health check"
 
 hc_url=${HEALTHCHECK_URL:-https://$PUBLIC_HOSTNAME/}
