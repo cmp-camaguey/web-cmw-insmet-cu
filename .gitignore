@@ -266,3 +266,9 @@ squashfs-root/
 # gentle-ai local state: records the previous OpenCode default agent so
 # `gentle-ai uninstall` can restore it. Per-installation, never shared.
 .gentle-ai-default-agent.json
+
+# Config de OpenCode del proyecto: fija modelos y prompts de agentes, y los
+# modelos son los que cada quien tenga habilitados en su instalación. Estuvo
+# versionado desde el PR #184, lo que obligaba a arrastrar la config de una
+# máquina a todas las demás. Ahora es local.
+opencode.json
