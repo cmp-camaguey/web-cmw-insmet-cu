@@ -76,19 +76,15 @@ TIMEOUT="300"
 
 # OpenCode provider: optional agent profile
 # Keep this lightweight. Agent prompts can add significant token overhead.
+# MUST be set in this repo: `opencode.json` pins default_agent to
+# `gentle-orchestrator`, so an unset agent makes gga run the full ODD
+# orchestrator instead of a plain reviewer.
 #
-# `gga-reviewer` es un agente mínimo cuya única función es fijar el modelo de la
-# revisión. Antes era `build`, cuyo modelo es el default de OpenCode: cuando se
-# agotó la cuota gratuita de ese modelo, gga salió con 1 y el hook bloqueó todos
-# los commits.
-#
-# OJO: `opencode.json` ya NO viaja con el repo (es config local, ver
-# `.gitignore`), así que `gga-reviewer` tampoco. Cada clon con `gga` instalado
-# tiene que definirlo en su propio `opencode.json`; el snippet está en
-# `AGENTS.md`, sección "gga (revisor IA del hook)".
-#
-# No dejar esto vacío para "caer al default": si el agente por defecto es el
-# orquestador ODD, la revisión arrastra su prompt completo.
+# `gga-reviewer` is a minimal agent defined in `opencode.json` whose only
+# purpose is to pin the review model. It was `build`, whose model is the
+# OpenCode default: when that model's free quota ran out, gga exited 1 and the
+# hook blocked every commit. The model now lives next to the agent instead of
+# depending on a global default nobody declared.
 OPENCODE_AGENT="gga-reviewer"
 
 # Base branch for --pr-mode (auto-detects main/master/develop if empty)
