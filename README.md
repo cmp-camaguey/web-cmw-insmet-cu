@@ -33,7 +33,7 @@ Requiere **Python 3.14** (el CI la fija y ruff apunta a `py314`).
 git clone https://github.com/cmp-camaguey/webcmp.git
 cd webcmp
 
-# Dependencias del sistema para PDFs (wkhtmltopdf) y MySQL (libmysqlclient)
+# Dependencias del sistema para PDFs (wkhtmltopdf)
 sudo apt install libcairo2-dev pkg-config python3-dev wkhtmltopdf
 
 # En Python 3.14 no hay ruedas para varios pins de requirements/prod.txt
@@ -50,7 +50,8 @@ make setup
 ```
 
 `make setup` crea el venv, instala las dependencias de desarrollo y tests, genera el
-`.env` con un par de claves usable y activa los hooks de git. Faltan dos pasos:
+`.env` con un par de claves usable y activa los hooks de git. Después hay que
+crear la base local —se hace una sola vez, en la sección siguiente— y arrancar:
 
 ```bash
 python manage.py migrate             # las migraciones ya vienen versionadas
@@ -59,8 +60,8 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-En `http://127.0.0.1:8000/`. El perfil de desarrollo usa SQLite y correo a consola:
-cero configuración de infraestructura.
+En `http://127.0.0.1:8000/`. El perfil de desarrollo usa PostgreSQL y correo a
+consola.
 
 | Target | Qué hace |
 | --- | --- |
@@ -126,10 +127,6 @@ python manage.py runserver
 explica: los datos de `db.sqlite3` **no se convierten solos**, hay que volcarlos
 aparte antes de borrar el archivo.
 
-Lo que se valida en SQLite no prueba lo que corre en PostgreSQL: `LIKE` con
-mayúsculas, orden de `NULL`, constraints, secuencias y transacciones no se
-comportan igual.
-
 ### Dependencias: un archivo por entorno
 
 Cada archivo es autocontenido (incluye `base.txt` con `-r base.txt`).
@@ -166,37 +163,19 @@ diferencia.
 
 ### Las claves se generan fuera de Django
 
-El bootstrap de un proyecto Django tiene una trampa: `manage.py` importa los
-settings **antes** de despachar el comando, así que un comando que genera la clave
-necesita que los settings ya tolerate no tenerla. Por eso el generador es un script
-plano, que corre exactamente en el estado donde la aplicación todavía no puede
-arrancar:
+`manage.py` importa los settings antes de despachar el comando, así que el generador de claves es un script plano que corre cuando la aplicación todavía no puede arrancar:
 
 ```bash
-python scripts/generate_env.py --development   # SQLite, correo a consola
+python scripts/generate_env.py --development   # PostgreSQL local, correo a consola
 python scripts/generate_env.py --production    # PostgreSQL, SMTP, fail-closed
 python scripts/generate_env.py --production --rotate-keys   # invalida sesiones
 ```
 
-Y por eso los settings pueden **fallar cerrado**: `base.load_secret_key()` levanta
-`ImproperlyConfigured` en cualquier perfil si no hay material descifrable. No hay
-fallback a una clave aleatoria ni aviso silencioso — un perfil de producción sin
-clave correcta no se distingue del que la tiene, y esa es exactamente la
-diferencia que no querés.
-
-El perfil `testing` es la excepción, y es deliberada: inyecta un par determinista
-antes de importar `base`, que es lo que permite correr la suite en un clon limpio
-sin `.env`.
+`base.load_secret_key()` levanta `ImproperlyConfigured` en cualquier perfil si no hay material descifrable: no hay fallback a una clave aleatoria. El perfil `testing` inyecta un par determinista antes de importar `base`, y por eso la suite corre en un clon limpio sin `.env`.
 
 ### La `ENCRYPTION_KEY` no va en el `.env`
 
-El `.env` guarda la `SECRET_KEY` **cifrada con** `ENCRYPTION_KEY`. Si las dos están
-en el mismo archivo, un `.env` filtrado entrega el secreto ya descifrado: la clave
-con la que se cifró viaja junto al texto cifrado.
-
-En producción el script escribe la clave de descifrado aparte, en
-`/etc/webcmp/encryption.env` (`600`, root), y systemd la carga con
-`EnvironmentFile=-`. Un `.env` filtrado no entrega nada por sí solo.
+El `.env` guarda la `SECRET_KEY` cifrada con `ENCRYPTION_KEY`. En producción la clave de descifrado va aparte, en `/etc/webcmp/encryption.env` (`600`, root), y systemd la carga con `EnvironmentFile=-`. Un `.env` filtrado no entrega nada por sí solo.
 
 ---
 
@@ -230,9 +209,9 @@ Huey— están en [`AGENTS.md`](AGENTS.md), que es la referencia técnica del pr
 Estas reglas no son estilo: rompen cosas si no las seguís.
 
 **No hay Node.js.** Ni bundlers, ni paso de build, ni `package.json`. Todo el
-frontend es Django Templates + Tabler + JavaScript vanilla ya vendoreado. Por
-legado, Tabler (CSS y JS) está en `static/dist/css/` y `static/dist/js/`; el resto
-de librerías en `static/dist/libs/`. Un PR que agregue npm no se merges.
+frontend es Django Templates + Tabler + JavaScript vanilla ya vendoreado. Tabler
+(CSS y JS) está en `static/dist/css/` y `static/dist/js/`; el resto de librerías
+en `static/dist/libs/`. Un PR que agregue npm no se mergea.
 
 **Las migraciones se versionan.** Si cambias un modelo, corres `makemigrations` y
 commiteas el archivo generado en el mismo PR. El diff de la migración es donde se
@@ -247,8 +226,9 @@ revisa un `ALTER` destructivo; CI y deploy fallan con
 perder archivos al reubicar en `media/`.
 
 **Soft delete en modelos de negocio con datos sensibles** (Customer, Service,
-ServiceSubscription, Invoice, Contract, Certificate, Warning). Se consulta por el
-manager por defecto, que ya filtra `record_active=True`.
+ServiceSubscription, Invoice, Contract, Certificate). Se consulta por el manager
+por defecto, que ya filtra `record_active=True`. `Warning` se borra físicamente:
+su protección es el permiso `delete_warning`.
 
 **URLs por `uuid`, no por `pk`,** en los modelos expuestos.
 
@@ -256,9 +236,8 @@ manager por defecto, que ya filtra `record_active=True`.
 (`make djlint`). Los templates de correo en `*/emails/` están excluidos porque son
 whitespace-sensitive.
 
-**El worker de Huey no es decorativo.** Los correos y los PDFs se generan ahí, así
-que corre como un servicio aparte (`deploy/systemd/webcmp-huey.service`), no dentro
-del proceso web.
+**El worker de Huey corre como servicio aparte.** Los correos y los PDFs se
+generan ahí (`deploy/systemd/webcmp-huey.service`), no dentro del proceso web.
 
 ---
 
@@ -303,20 +282,20 @@ silencio: el binario `wkhtmltopdf`, el worker corriendo, y el backend de correo.
 Sin esto, el síntoma es siempre el mismo y engañoso: Huey reintenta tres veces y
 la factura queda con `email_sent=True` sin que haya salido nada de tu máquina.
 
-Este comando te dice **cuál** falta, antes de encolar nada:
+Este comando valida las dependencias antes de tocar la base:
 
 ```bash
-# Chequeo previo: crea datos de prueba solo si todo lo demás está en su sitio
-python manage.py send_test_invoice --demo
+# Crea cliente, factura e item de prueba y ejecuta la tarea en este proceso
+python manage.py send_test_invoice --demo --escribir-en-dev
 
-# Encolar para el worker (que corre aparte: ./run_huey.sh)
-python manage.py send_test_invoice --demo
+# Deja la tarea en la cola para que la tome ./run_huey.sh
+python manage.py send_test_invoice --demo --escribir-en-dev --encolar
 
-# Ejecutar en este proceso, sin levantar el worker
-python manage.py send_test_invoice --demo --now
-
-# Una factura que ya existe
+# Procesa una factura que ya existe
 python manage.py send_test_invoice <uuid>
+
+# Borra lo que dejaron las corridas con --demo
+python manage.py send_test_invoice --purge-demo
 ```
 
 > `wkhtmltopdf` no se instala con `pip`: es una dependencia del sistema. En
@@ -357,15 +336,11 @@ NPM (otra máquina, TLS) → Nginx del servidor (HTTP, estáticos, media)
                         → Gunicorn (socket unix) → PostgreSQL
 ```
 
-**Nginx se instala en las dos topologías.** La diferencia no es "con Nginx o sin
-Nginx", es quién termina el TLS. Y en las dos, Gunicorn escucha únicamente en
-`/run/webcmp/gunicorn.sock`: no se expone a la red.
-
-Por qué Nginx es obligatorio incluso cuando el TLS lo termina otro: es el único
-que sirve `media/` desde ese filesystem. Con `DEBUG=False`, Django no publica
-`/media/` y WhiteNoise sirve únicamente `staticfiles`. Sin el Nginx local, el logo
-y el favicon de todas las páginas dan 404, igual que cada PDF subido, mientras el
-resto del sitio responde 200.
+**Nginx se instala en las dos topologías**: la diferencia es quién termina el TLS,
+no si hay Nginx. En ambas, Gunicorn escucha únicamente en
+`/run/webcmp/gunicorn.sock` y Nginx sirve `/static/` y `/media/`. Con `DEBUG=False`
+Django no publica `/media/`, así que sin el Nginx local cada PDF subido y el
+favicon dan 404 mientras el resto del sitio responde 200.
 
 Redis es opcional —el caché por defecto corre en memoria del proceso—, pero
 `scripts/generate_env.py --production` escribe `USE_REDIS_CACHE=True`: o instalás
@@ -389,20 +364,16 @@ aplicación (pasos 1 a 7), andamiaje del deploy, el botón "Actualizar" del pane
 el rollback, las notificaciones, la franja de aviso y los errores que solo
 aparecen en producción.
 
-La separación es deliberada: **toda la lógica del deploy vive en
-`deploy/deploy.sh`** y el panel es un cliente delgado que lo invoca. Un deploy
-que se puede correr a mano desde el servidor es un deploy que se puede depurar;
-uno que solo existe como YAML de GitHub no.
+La lógica del deploy vive en `deploy/deploy.sh`; el panel es un cliente delgado
+que lo invoca.
 
 ---
 
 ## Contribuir
 
-El proyecto usa un ciclo de trabajo con registro: los cambios con impacto se
-describen en `openspec/changes/<NNN-nombre>/` antes de implementarse, y
-`AGENTS.md` describe las convenciones que hay que respetar. Es el mismo flujo que
-usa la documentación interna; no es burocracia de comité, es lo que permite
-retomar un trabajo a medias.
+El proyecto registra los cambios con impacto: se describen en
+`openspec/changes/<NNN-nombre>/` antes de implementarse. Las convenciones que hay
+que respetar están en `AGENTS.md`.
 
 Un cambio en OpenSpec son cuatro archivos, y el `tasks.md` es el que se va
 marcando:

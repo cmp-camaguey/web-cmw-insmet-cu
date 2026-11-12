@@ -189,9 +189,8 @@ vez**, en la consola de Proxmox, y no lo automatiza nada de este repo.
 
 ### Contenedor LXC
 
-Se despliega en un contenedor LXC sin privilegios, no en una VM. Y conviene decir
-por que eso es seguro **en este proyecto concreto**, porque la primera version de
-este documento decia lo contrario:
+Se despliega en un contenedor LXC sin privilegios, no en una VM. Es seguro en
+este proyecto porque `install.sh` no toca nada del host.
 
 `install.sh` no toca nada del host. No hace `mount`, ni `sysctl`, ni `modprobe`,
 ni maneja `apparmor`, ni red con `iptables`. Lo que hace es `apt-get`, crear un
@@ -1000,20 +999,11 @@ falla y `manage.py` no llega a importar.
 | `postgresql-client` | `pg_dump` para el respaldo previo a migrar. Sin el, un deploy con migraciones pendientes se niega a correr |
 | `libcairo2-dev pkg-config python3-dev` | Los que si lista el paso 1, para `pycairo` |
 
-### El `generate_env.py` del paso 3 no funciona como esta escrito
+### Generar el `.env` como root
 
-Esto ya no aplica al camino automatico: `install.sh` genera el `.env` como root
-y devuelve el archivo a `webcmp`. Queda documentado para el camino manual. El
-paso 3 dice generar el entorno asi:
-
-```
-sudo -u webcmp .venv/bin/python scripts/generate_env.py --production
-```
-
-Eso no puede escribir `/etc/webcmp/encryption.env`, que es root con modo 600, y
-el script falla sin escribir nada (falla cerrado, lo cual esta bien). Lo que
-funciona es generarlo **como root** y despues devolverle el `.env` a `webcmp`,
-porque Django corre como ese usuario y tiene que poder leerlo:
+`install.sh` lo hace solo. En el camino manual, `generate_env.py` corre **como
+root** y después devuelve el `.env` a `webcmp`, porque Django corre como ese
+usuario y tiene que poder leerlo:
 
 ```bash
 sudo install -d -m 0755 -o root -g root /etc/webcmp
@@ -1021,6 +1011,9 @@ sudo .venv/bin/python scripts/generate_env.py --production
 sudo chown webcmp:webcmp /srv/webcmp/.env     # Django corre como webcmp
 sudo chmod 600 /srv/webcmp/.env
 ```
+
+Corrido como `webcmp` falla sin escribir nada: no puede crear
+`/etc/webcmp/encryption.env`, que es root con modo 600.
 
 Ahi va el hostname real: el generador escribe `EXTERNAL_HOSTNAME=www.meteocamaguey.cu` por
 default y no tiene flag para cambiarlo, asi que `EXTERNAL_HOSTNAME`,
