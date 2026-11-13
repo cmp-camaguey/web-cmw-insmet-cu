@@ -9,11 +9,12 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
 
-setup: env ## Create .venv, install dev+test deps, and activate the git hooks
+setup: ## Create .venv, install dev+test deps, generate the .env and activate the hooks
 	python3 -m venv $(VENV)
 	$(PY) -m pip install --upgrade pip
 	$(PY) -m pip install -r requirements/dev.txt
 	$(PY) -m pip install -r requirements/test.txt
+	@$(MAKE) --no-print-directory env
 	@if git config --get core.hooksPath >/dev/null 2>&1; then \
 		git config --unset-all core.hooksPath; \
 	fi
