@@ -76,11 +76,17 @@ uno solo, cada consulta falla con `password authentication failed`.
 ```bash
 python manage.py migrate             # las migraciones vienen versionadas
 python manage.py add_stations_data   # provincias, municipios y estaciones
+python manage.py create_observation_groups
 python manage.py createsuperuser
 ```
 
 `add_stations_data` acepta `--tipo municipios|estaciones|todo` y `--provincia`;
 sin argumentos carga todo lo de Camagüey.
+
+`create_observation_groups` crea el grupo `Estacion <número> - <rol>` de cada
+estación (jefe, revisor y observador) con los permisos de observaciones que
+corresponden. Se puede volver a correr tras agregar estaciones: no duplica
+grupos ni quita permisos agregados a mano.
 
 ## 4. Arrancar
 

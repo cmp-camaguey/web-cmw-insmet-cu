@@ -62,15 +62,22 @@ class FileObs:
         os.makedirs(self.TEMP_DIR, exist_ok=True)
         os.makedirs(self.FINAL_DIR, exist_ok=True)
 
-        # Modo local (dev/testing): sirve el archivo desde media/obs sin FTPS.
-        if django_settings.OBS_LOCAL_ONLY:
+        # Modo local (dev/testing) y modo manual del panel: sirve el archivo
+        # desde media/obs sin FTPS. En manual no hay descarga: el telegrama lo
+        # escribe la observación capturada en el dashboard.
+        if django_settings.OBS_LOCAL_ONLY or not getattr(django_settings, 'OBS_AUTOMATIC', True):
             local_path = os.path.normpath(os.path.join(self.FINAL_DIR, filename))
             if os.path.exists(local_path):
                 logger.info('Modo local: sirviendo %s sin FTP', local_path)
                 return local_path
+            if getattr(django_settings, 'OBS_AUTOMATIC', True):
+                raise FileNotFoundError(
+                    f'Archivo local no encontrado en modo OBS_LOCAL_ONLY: {local_path}. '
+                    'Ejecuta `python manage.py generate_obs` para generarlo.'
+                )
             raise FileNotFoundError(
-                f'Archivo local no encontrado en modo OBS_LOCAL_ONLY: {local_path}. '
-                'Ejecuta `python manage.py generate_obs` para generarlo.'
+                f'No hay telegrama para {filename} en {self.FINAL_DIR}. '
+                'La estación no lo ha capturado desde el panel.'
             )
 
         # Configuración robusta de LFTP
