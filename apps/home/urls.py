@@ -10,7 +10,7 @@ from apps.home.views.institucion.institucional.views import AboutView, MissionVi
 from apps.home.views.institucion.publicaciones.views import ScientificPublicationListView
 from apps.home.views.landing.views import LandingView
 from apps.home.views.modelos.views import (
-    DescargarGifView,
+    # DescargarGifView,  # /modelo/desactivado (034-sondeo-api-externa)
     ImageProxyModeloView,
 )
 from apps.home.views.pago.views import PagoView
@@ -102,6 +102,9 @@ urlpatterns = [
     path('aviso/ciclon_tropical/', TropicalCycloneListView.as_view(), name='warnings_tropical'),
     path('aviso/tormenta/', StormListView.as_view(), name='warnings_storm'),
     # Modelos
+    # Desactivadas hasta que la API externa de modelos (modelo.cmw.insmet.cu)
+    # responda. El sondeo ya se sirve desde esa API (034-sondeo-api-externa):
+    # al reactivar, SoundingView y SoundingExportView solo reenvían la petición.
     # path('modelo/mapas/', MapaView.as_view(), name='models_maps'),
     # path('modelo/meteogram/', MeteogramView.as_view(), name='models_meteogram'),
     # path('modelo/sounding/', SoundingView.as_view(), name='models_sounding'),
@@ -142,5 +145,6 @@ urlpatterns = [
     path('institucion/quienes-somos/', AboutView.as_view(), name='institution_about'),
     # Otros
     path('proxy_image_modelo/', ImageProxyModeloView.as_view(), name='proxy_image_modelo'),
-    path('modelo/descargar_gif/', DescargarGifView.as_view(), name='models_download_gif'),
+    # '/modelo/' desactivado entero (034-sondeo-api-externa).
+    # path('modelo/descargar_gif/', DescargarGifView.as_view(), name='models_download_gif'),
 ]
