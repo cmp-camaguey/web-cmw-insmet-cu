@@ -60,6 +60,7 @@ make hooks                             # solo activar el hook
 ```
 
 - `pre-commit install` y `core.hooksPath` son excluyentes: `core.hooksPath` hace que git ignore `.git/hooks`. `pre-commit install --install-hooks` sirve solo para descargar los entornos, no para activar el hook.
+- Los pasos personales de cada máquina (revisores de código, chequeos locales) van en `.githooks/pre-commit.local`: `.githooks/pre-commit` lo ejecuta si existe y el archivo está en `.gitignore`, así el proyecto no depende de que esté instalado.
 - Falso positivo nuevo de `detect-secrets`: regenerar el baseline y commitear `.secrets.baseline`.
 
 ```bash
