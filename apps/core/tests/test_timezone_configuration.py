@@ -167,6 +167,14 @@ class SiteConfigurationTimezoneViewTests(TestCase):
         self.assertContains(response, '12 horas (AM/PM)')
         self.assertEqual(response.context['server_timezone'], settings.TIME_ZONE)
 
+    def test_preview_renders_live_utc_and_local_clocks(self):
+        self.client.force_login(self._user('tz_clocks'))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'id="clock-utc"')
+        self.assertContains(response, 'id="clock-local"')
+        self.assertContains(response, 'Vista previa en tiempo real')
+        self.assertContains(response, f"var serverTz = '{settings.TIME_ZONE}';")
+
     def test_menu_has_no_separate_timezone_entry(self):
         """Una sola entrada de menú: el horario ya no es una página aparte."""
         self.client.force_login(self._user('tz_menu'))
