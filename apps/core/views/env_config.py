@@ -39,7 +39,7 @@ from apps.core.env_config import (
 )
 from apps.core.env_file import is_writable, read_env_file, update_env_file
 from apps.core.forms.env_config import EnvironmentConfigForm
-from apps.core.models import ActivityLog
+from apps.core.models import ActivityLog, SiteConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,8 @@ class EnvironmentConfigView(LoginRequiredMixin, UserPassesTestMixin, TemplateVie
         form = kwargs.get('form') or EnvironmentConfigForm(
             initial=self._initial(file_values, environment['effective']), writable=can_write
         )
+        watcher_available = can_request(settings.ENV_APPLY_REQUEST_FILE)
+        maintenance_mode = self._maintenance_mode()
 
         context.update(
             {
@@ -84,11 +86,26 @@ class EnvironmentConfigView(LoginRequiredMixin, UserPassesTestMixin, TemplateVie
                 # Sin la unidad systemd instalada, la petición no tiene quién la
                 # recoja. Se deshabilita el botón en vez de dejar que el operador
                 # pulse y espere un reinicio que nunca ocurre.
-                'can_apply': can_request(settings.ENV_APPLY_REQUEST_FILE),
+                'watcher_available': watcher_available,
+                # El reinicio deja el sitio sin responder unos segundos: solo se
+                # permite dentro de la ventana de mantenimiento anunciada.
+                'maintenance_mode': maintenance_mode,
+                'can_apply': watcher_available and maintenance_mode,
                 'apply_status': apply_status(settings.ENV_APPLY_STATUS_FILE),
             }
         )
         return context
+
+    def _maintenance_mode(self) -> bool:
+        """Bandera del modo mantenimiento.
+
+        `MaintenanceModeMiddleware` ya leyó la configuración en esta petición, así
+        que se reutiliza en vez de consultar la tabla otra vez.
+        """
+        site_config = getattr(self.request, 'site_config', None)
+        if site_config is None:
+            site_config = SiteConfiguration.get_instance()
+        return site_config.maintenance_mode
 
     def post(self, request, *args, **kwargs):
         env_path = Path(settings.ENV_FILE_PATH)
@@ -99,6 +116,19 @@ class EnvironmentConfigView(LoginRequiredMixin, UserPassesTestMixin, TemplateVie
                 'El proceso web no puede guardar la configuración; queda en solo lectura.',
             )
             return redirect(self.success_url)
+
+        if self.apply_changes and not self._maintenance_mode():
+            # Aplicar reinicia el servicio y tira las conexiones abiertas. Fuera
+            # de la ventana de mantenimiento se rechaza antes de escribir: lo que
+            # el operador escribió se vuelve a pintar para que pueda guardarlo.
+            messages.error(
+                request,
+                'Active el modo mantenimiento en Configuración del sitio antes de '
+                'aplicar: el reinicio deja el sitio sin responder unos segundos.',
+            )
+            return self.render_to_response(
+                self.get_context_data(form=EnvironmentConfigForm(request.POST))
+            )
 
         form = EnvironmentConfigForm(request.POST)
         if not form.is_valid():
