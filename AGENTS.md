@@ -40,18 +40,12 @@ PRODUCTION=true python manage.py runserver    # perfil producción en local
 ./run_huey.sh &                               # worker de correos/PDF
 ```
 
-La base local se prepara una vez: ver "PostgreSQL en desarrollo (obligatorio)" en `README.md`.
+La base local se prepara una vez: ver [`docs/1-instalacion.md`](docs/1-instalacion.md#2-base-de-datos).
 
 ## Dependencias — un archivo por entorno
 
-Cada archivo se instala con un solo `pip install -r`.
-
-| Archivo | Contenido |
-|---|---|
-| `requirements/base.txt` | Runtime. Sin gunicorn ni django-debug-toolbar. |
-| `requirements/prod.txt` | `base.txt` + gunicorn. |
-| `requirements/dev.txt` | `base.txt` + ruff, bandit, pip-audit, djlint, pre-commit, django-debug-toolbar, setuptools, wheel. |
-| `requirements/test.txt` | `base.txt` + django-debug-toolbar. |
+Cada archivo se instala con un solo `pip install -r`. La tabla de qué trae cada uno
+está en [`docs/1-instalacion.md`](docs/1-instalacion.md#dependencias-por-entorno).
 
 `django-debug-toolbar` va en `dev.txt` y en `test.txt`, nunca en `base.txt`: es tooling de desarrollo y `apps/core/tests/test_debug_toolbar.py` exige que esté instalado.
 
