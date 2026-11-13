@@ -18,8 +18,8 @@ depender de un despliegue, y unificar cómo se muestran las horas.
 
 ## 2. Solución
 
-Una nueva sección **Configuración → Horario y región** sobre el singleton
-`SiteConfiguration`:
+Una tarjeta **Horario y región** dentro de la página existente
+**Configuración → Sitio**, sobre el singleton `SiteConfiguration`:
 
 - **Zona horaria**
   - `Automático`: usa la zona configurada en el servidor (`settings.TIME_ZONE`,
@@ -37,7 +37,8 @@ elegido. Así la hora local y el formato cambian en todo el portal y en el panel
 Dentro:
 
 - Campos nuevos en `SiteConfiguration` y su migración.
-- Vista, formulario, URL, plantilla y entrada de menú de la sección.
+- Los tres campos se integran en el formulario, la vista y la plantilla de
+  Configuración → Sitio. No hay URL, plantilla ni entrada de menú propias.
 - Middleware de zona horaria por request.
 - Filtros de plantilla para mostrar fecha/hora con el formato configurado.
 - Pruebas de modelo, formulario, vista, middleware y filtros.
@@ -53,8 +54,8 @@ Fuera:
 
 ## 4. Criterios de aceptación
 
-1. La sección aparece en el menú **Configuración** para quien tenga
-   `core.change_siteconfiguration`.
+1. La card **Horario y región** está en la página Configuración → Sitio, visible
+   para quien tenga `core.change_siteconfiguration`.
 2. Se puede elegir `Automático` o `Manual`; en manual se elige una diferencia
    con UTC entre −12 y +14.
 3. Se puede elegir formato de 24 o 12 horas con AM/PM.

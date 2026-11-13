@@ -40,18 +40,12 @@ PRODUCTION=true python manage.py runserver    # perfil producción en local
 ./run_huey.sh &                               # worker de correos/PDF
 ```
 
-La base local se prepara una vez: ver "PostgreSQL en desarrollo (obligatorio)" en `README.md`.
+La base local se prepara una vez: ver [`docs/1-instalacion.md`](docs/1-instalacion.md#2-base-de-datos).
 
 ## Dependencias — un archivo por entorno
 
-Cada archivo se instala con un solo `pip install -r`.
-
-| Archivo | Contenido |
-|---|---|
-| `requirements/base.txt` | Runtime. Sin gunicorn ni django-debug-toolbar. |
-| `requirements/prod.txt` | `base.txt` + gunicorn. |
-| `requirements/dev.txt` | `base.txt` + ruff, bandit, pip-audit, djlint, pre-commit, django-debug-toolbar, setuptools, wheel. |
-| `requirements/test.txt` | `base.txt` + django-debug-toolbar. |
+Cada archivo se instala con un solo `pip install -r`. La tabla de qué trae cada uno
+está en [`docs/1-instalacion.md`](docs/1-instalacion.md#dependencias-por-entorno).
 
 `django-debug-toolbar` va en `dev.txt` y en `test.txt`, nunca en `base.txt`: es tooling de desarrollo y `apps/core/tests/test_debug_toolbar.py` exige que esté instalado.
 
@@ -66,6 +60,7 @@ make hooks                             # solo activar el hook
 ```
 
 - `pre-commit install` y `core.hooksPath` son excluyentes: `core.hooksPath` hace que git ignore `.git/hooks`. `pre-commit install --install-hooks` sirve solo para descargar los entornos, no para activar el hook.
+- Los pasos personales de cada máquina (revisores de código, chequeos locales) van en `.githooks/pre-commit.local`: `.githooks/pre-commit` lo ejecuta si existe y el archivo está en `.gitignore`, así el proyecto no depende de que esté instalado.
 - Falso positivo nuevo de `detect-secrets`: regenerar el baseline y commitear `.secrets.baseline`.
 
 ```bash
@@ -162,6 +157,23 @@ Los cambios activos viven en `openspec/changes/` como features OpenSpec. No se v
 7. Al cerrar: promover los specs a `openspec/specs/` y archivar el directorio del cambio en `openspec/changes/archive/` (local, fuera de git)
 
 Antes de codificar, define: tipo de cambio, apps afectadas, cambios de base de datos, URLs y permisos, templates y criterios de aceptación.
+
+## Documentación
+
+Los documentos describen el sistema que corre hoy. Cómo se llegó hasta acá lo guardan `git log` y los PRs; no hace falta escribirlo dos veces.
+
+- Escribí para quien tiene que operar o modificar el sistema ahora: qué es, cómo se usa, qué rompe si se cambia.
+- No narres decisiones ni alternativas descartadas. No expliques cómo era el código antes, ni qué bug hubo, ni en qué fecha.
+- Sin referencias a cambios cerrados, a versiones anteriores del propio documento ni a las herramientas con las que se trabajó.
+- Si un párrafo no cambia lo que el lector hace, sobra.
+- Antes de agregar una sección, comprobá que no exista en otro archivo: enlazá en vez de repetir. Un documento que crece sin control deja de leerse.
+- El historial de features cerradas no se versiona: los specs promovidos viven en `openspec/specs/` y el resto se archiva fuera de git.
+
+Al borrar o mover un archivo o un directorio, buscá quién lo menciona antes de cerrar el cambio:
+
+```bash
+grep -rn '<ruta>' --include='*.py' --include='*.md' --include='*.yaml' . | grep -v '^./.venv'
+```
 
 ## Checklist proyecto-específico
 

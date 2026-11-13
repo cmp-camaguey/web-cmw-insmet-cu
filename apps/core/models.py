@@ -542,12 +542,14 @@ class ActivityLog(models.Model):
     ACTIVITY_DELETION = 3
     ACTIVITY_LOGIN = 4
     ACTIVITY_LOGOUT = 5
+    ACTIVITY_MAINTENANCE = 6
     ACTIVITY_FLAG_CHOICES = (
         (ACTIVITY_ADDITION, 'Adición'),
         (ACTIVITY_CHANGE, 'Cambio'),
         (ACTIVITY_DELETION, 'Eliminación'),
         (ACTIVITY_LOGIN, 'Inicio de sesión'),
         (ACTIVITY_LOGOUT, 'Cierre de sesión'),
+        (ACTIVITY_MAINTENANCE, 'Mantenimiento'),
     )
 
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)

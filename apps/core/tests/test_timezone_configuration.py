@@ -7,7 +7,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.core.forms.site_configuration import TimezoneConfigurationForm
+from apps.core.forms.site_configuration import SiteConfigurationForm
 from apps.core.middleware import SiteTimezoneMiddleware
 from apps.core.models import ActivityLog, SiteConfiguration
 from apps.core.timezone_utils import (
@@ -25,6 +25,21 @@ def _permission():
     return Permission.objects.get(
         content_type__app_label='core', codename='change_siteconfiguration'
     )
+
+
+def _site_data(**overrides):
+    """Datos completos del formulario del sitio, con el horario incluido."""
+    data = {
+        'primary_color': '#2b4b9b',
+        'theme_base': 'neutral',
+        'theme_font': 'sans-serif',
+        'theme_radius': '1',
+        'timezone_mode': 'auto',
+        'utc_offset_hours': '-5',
+        'time_format': '24',
+    }
+    data.update(overrides)
+    return data
 
 
 class SiteConfigurationTimezoneModelTests(TestCase):
@@ -55,68 +70,68 @@ class SiteConfigurationTimezoneModelTests(TestCase):
         self.assertEqual(site.get_time_format(), 'h:i A')
 
 
-class TimezoneConfigurationFormTests(TestCase):
+class SiteConfigurationTimezoneFormTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         _disable_maintenance()
         cls.instance = SiteConfiguration.get_instance()
 
     def test_manual_mode_with_offset_is_valid(self):
-        form = TimezoneConfigurationForm(
-            data={
-                'timezone_mode': 'manual',
-                'utc_offset_hours': '-3',
-                'time_format': '12',
-            },
+        form = SiteConfigurationForm(
+            data=_site_data(timezone_mode='manual', utc_offset_hours='-3', time_format='12'),
             instance=self.instance,
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['utc_offset_hours'], -3)
 
     def test_manual_mode_without_offset_is_rejected(self):
-        form = TimezoneConfigurationForm(
-            data={'timezone_mode': 'manual', 'time_format': '24'},
-            instance=self.instance,
-        )
+        data = _site_data(timezone_mode='manual')
+        data.pop('utc_offset_hours')
+        form = SiteConfigurationForm(data=data, instance=self.instance)
         self.assertFalse(form.is_valid())
         self.assertIn('utc_offset_hours', form.errors)
 
     def test_auto_mode_without_offset_keeps_stored_value(self):
         self.instance.utc_offset_hours = -5
         self.instance.save()
-        form = TimezoneConfigurationForm(
-            data={'timezone_mode': 'auto', 'time_format': '24'},
-            instance=self.instance,
-        )
+        data = _site_data(timezone_mode='auto')
+        data.pop('utc_offset_hours')
+        form = SiteConfigurationForm(data=data, instance=self.instance)
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['utc_offset_hours'], -5)
 
     def test_offset_outside_range_is_rejected(self):
-        form = TimezoneConfigurationForm(
-            data={
-                'timezone_mode': 'manual',
-                'utc_offset_hours': '99',
-                'time_format': '24',
-            },
+        form = SiteConfigurationForm(
+            data=_site_data(timezone_mode='manual', utc_offset_hours='99'),
             instance=self.instance,
         )
         self.assertFalse(form.is_valid())
         self.assertIn('utc_offset_hours', form.errors)
 
     def test_invalid_time_format_is_rejected(self):
-        form = TimezoneConfigurationForm(
-            data={'timezone_mode': 'auto', 'time_format': '13'},
+        form = SiteConfigurationForm(
+            data=_site_data(time_format='13'),
             instance=self.instance,
         )
         self.assertFalse(form.is_valid())
         self.assertIn('time_format', form.errors)
 
+    def test_theme_fields_still_validated_on_the_merged_form(self):
+        form = SiteConfigurationForm(
+            data=_site_data(primary_color='red'),
+            instance=self.instance,
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('primary_color', form.errors)
 
-class TimezoneConfigurationViewTests(TestCase):
+
+class SiteConfigurationTimezoneViewTests(TestCase):
+    """El horario vive en la misma página que el resto de la configuración."""
+
     @classmethod
     def setUpTestData(cls):
         _disable_maintenance()
-        cls.url = reverse('core:timezone_configuration')
+        cls.url = reverse('core:site_configuration')
 
     def _user(self, username, permission=True):
         user = User.objects.create_user(
@@ -152,21 +167,18 @@ class TimezoneConfigurationViewTests(TestCase):
         self.assertContains(response, '12 horas (AM/PM)')
         self.assertEqual(response.context['server_timezone'], settings.TIME_ZONE)
 
-    def test_menu_links_to_timezone_section(self):
+    def test_menu_has_no_separate_timezone_entry(self):
+        """Una sola entrada de menú: el horario ya no es una página aparte."""
         self.client.force_login(self._user('tz_menu'))
-        response = self.client.get(reverse('core:site_configuration'))
-        self.assertContains(response, 'Horario y región')
-        self.assertContains(response, self.url)
+        response = self.client.get(self.url)
+        self.assertContains(response, 'Sitio</a>')
+        self.assertNotContains(response, '/config/horario-region/')
 
     def test_post_saves_values_and_redirects(self):
         self.client.force_login(self._user('tz_post'))
         response = self.client.post(
             self.url,
-            {
-                'timezone_mode': 'manual',
-                'utc_offset_hours': '-4',
-                'time_format': '12',
-            },
+            _site_data(timezone_mode='manual', utc_offset_hours='-4', time_format='12'),
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, self.url)
@@ -176,7 +188,7 @@ class TimezoneConfigurationViewTests(TestCase):
         self.assertEqual(site.time_format, '12')
         self.assertTrue(
             ActivityLog.objects.filter(
-                message__icontains='horario y región',
+                message__icontains='Configuración del sitio actualizada',
             ).exists()
         )
 

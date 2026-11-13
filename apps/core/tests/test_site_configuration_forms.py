@@ -10,6 +10,9 @@ def _valid_data():
         'theme_base': 'gray',
         'theme_font': 'sans-serif',
         'theme_radius': '1',
+        'timezone_mode': 'auto',
+        'utc_offset_hours': '-5',
+        'time_format': '24',
     }
 
 

@@ -110,16 +110,17 @@ aparte.
 
 ## 4. Interfaz
 
-- URL `core:timezone_configuration` → `/config/horario-region/`.
-- `TimezoneConfigurationForm` (ModelForm) con los tres campos.
-- `TimezoneConfigurationUpdateView` (LoginRequired + PermissionRequired,
-  `core.change_siteconfiguration`), reutiliza el singleton y registra la acción
-  en `ActivityLog`.
-- Plantilla `pages/core/site/timezone.html` con el layout `form.html`:
-  - Card **Zona horaria**: radios Automático/Manual, selector de offset y texto
-    de ayuda. El selector se deshabilita cuando el modo es automático.
-  - Card **Formato de hora**: radios 24/12 y una vista previa en vivo.
-- Entrada **Horario y región** en el desplegable Configuración del menú.
+- Todo vive en la página existente `core:site_configuration`
+  (`/config/configuracion-sitio/`), sin URL ni entrada de menú propias.
+- Los tres campos se suman a `SiteConfigurationForm` (ModelForm) junto a tema e
+  identidad, con el mismo layout y el mismo botón **Aceptar**.
+- La validación del offset se mantiene: obligatorio en modo manual, opcional en
+  automático conservando el valor guardado.
+- Plantilla `pages/core/site/settings.html`, nueva card **Horario y región**:
+  - Fila 1: modo Automático/Manual y selector de offset (se deshabilita y no se
+    envía en automático).
+  - Fila 2: formato 24/12 y una vista previa en vivo.
+- El modo mantenimiento se mantiene como card aparte, solo para superusuarios.
 
 ## 5. Pruebas
 
@@ -133,4 +134,5 @@ aparte.
   UTC; con automático no cambia respecto de `settings.TIME_ZONE`; al terminar el
   request la zona activa queda desactivada.
 - Filtros: 24 h y 12 h con AM/PM, incluido el cambio de día por el offset.
-- Menú/plantilla: la entrada y los campos existen para el usuario con permiso.
+- Plantilla: la card y los campos existen en la página del sitio para el usuario
+  con permiso, y el menú no tiene una entrada aparte.
