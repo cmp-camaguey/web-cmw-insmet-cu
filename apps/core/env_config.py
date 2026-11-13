@@ -340,6 +340,18 @@ EDITABLE_FIELDS = (
         default='15',
     ),
     EnvField(
+        key='OBS_AUTOMATIC',
+        label='Observaciones automáticas por FTP',
+        kind='bool',
+        group='ftp',
+        width='full',
+        default='True',
+        help_text=(
+            'Activado, el mapa toma las observaciones del FTP. Desactivado, usa '
+            'solo las que se capturan desde la sección Observaciones del panel.'
+        ),
+    ),
+    EnvField(
         key='FTP_OBS_HOST',
         label='Host FTP de observaciones',
         kind='text',

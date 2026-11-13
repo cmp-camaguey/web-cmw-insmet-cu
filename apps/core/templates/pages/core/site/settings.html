@@ -199,7 +199,7 @@
       <div class="card-body">
         <h3 class="subheader text-muted fw-medium mb-3">Horario y región</h3>
         <div class="row">
-          <div class="col-md-6 mb-3">
+          <div class="col-md-4 mb-3">
             <label class="form-label required"
                    for="{{ form.timezone_mode.id_for_label }}">{{ form.timezone_mode.label }}</label>
             {{ form.timezone_mode|with_invalid }}
@@ -212,7 +212,7 @@
               <div class="invalid-feedback d-block">{{ form.timezone_mode.errors.0 }}</div>
             {% endif %}
           </div>
-          <div class="col-md-6 mb-3">
+          <div class="col-md-4 mb-3">
             <label class="form-label"
                    for="{{ form.utc_offset_hours.id_for_label }}">{{ form.utc_offset_hours.label }}</label>
             {{ form.utc_offset_hours|with_invalid }}
@@ -224,7 +224,7 @@
               <div class="invalid-feedback d-block">{{ form.utc_offset_hours.errors.0 }}</div>
             {% endif %}
           </div>
-          <div class="col-md-6 mb-3">
+          <div class="col-md-4 mb-3">
             <label class="form-label required"
                    for="{{ form.time_format.id_for_label }}">{{ form.time_format.label }}</label>
             {{ form.time_format|with_invalid }}
@@ -236,12 +236,23 @@
               <div class="invalid-feedback d-block">{{ form.time_format.errors.0 }}</div>
             {% endif %}
           </div>
-          <div class="col-md-6 mb-3">
-            <label class="form-label">Vista previa</label>
-            <div class="form-control-plaintext">
-              <span class="badge bg-primary-lt fs-4" id="time-format-preview">14:30</span>
+          <div class="col-12 mb-3">
+            <label class="form-label">Vista previa en tiempo real</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div>
+                <div class="text-muted small text-uppercase">UTC</div>
+                <span class="badge bg-primary-lt fs-4 font-monospace py-2" id="clock-utc">--:--:--</span>
+              </div>
+              <div>
+                <div class="text-muted small text-uppercase">Hora local</div>
+                <span class="badge bg-success-lt fs-4 font-monospace py-2" id="clock-local">--:--:--</span>
+              </div>
             </div>
-            <small class="text-muted d-block mt-2">Así se verá una hora del día con el formato elegido.</small>
+            <small class="text-muted d-block mt-2">
+              Relojes en vivo, actualizados cada segundo. La hora local sigue el
+              modo de zona horaria y el formato de hora elegidos (sin guardar);
+              la hora UTC se muestra siempre en formato de 24 horas.
+            </small>
           </div>
         </div>
       </div>
@@ -345,11 +356,31 @@
     // El offset solo tiene sentido en modo manual: se deshabilita (y por lo
     // tanto no se envía) cuando el modo es automático. El formulario conserva
     // el valor guardado en ese caso.
+    //
+    // La vista previa son dos relojes en vivo: uno con la hora UTC y otro con
+    // la hora local resultante. Reaccionan a los selectores al instante, sin
+    // guardar: en automático usan la zona del servidor (con horario de verano),
+    // en manual la diferencia fija con UTC.
     document.addEventListener('DOMContentLoaded', function () {
       var mode = document.getElementById('id_timezone_mode');
       var offset = document.getElementById('id_utc_offset_hours');
       var format = document.getElementById('id_time_format');
-      var preview = document.getElementById('time-format-preview');
+      var utcClock = document.getElementById('clock-utc');
+      var localClock = document.getElementById('clock-local');
+      var serverTz = '{{ server_timezone|escapejs }}';
+
+      // La zona del servidor llega como nombre IANA. Si el navegador no la
+      // reconoce, la hora local cae a UTC en lugar de quedar en blanco.
+      function knownTimeZone(name) {
+        try {
+          new Intl.DateTimeFormat('en-GB', { timeZone: name });
+          return name;
+        } catch (error) {
+          return 'UTC';
+        }
+      }
+
+      var localTimeZone = knownTimeZone(serverTz);
 
       function syncMode() {
         if (!mode || !offset) {
@@ -360,21 +391,68 @@
         offset.classList.toggle('disabled', !manual);
       }
 
-      function syncPreview() {
-        if (!format || !preview) {
+      function clockText(ms, timeZone, hour12) {
+        try {
+          var parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: timeZone,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hourCycle: hour12 ? 'h12' : 'h23',
+          }).formatToParts(new Date(ms));
+          var values = { hour: '', minute: '', second: '', dayPeriod: '' };
+          parts.forEach(function (part) {
+            if (Object.prototype.hasOwnProperty.call(values, part.type)) {
+              values[part.type] = part.value;
+            }
+          });
+          var text = values.hour + ':' + values.minute + ':' + values.second;
+          if (hour12 && values.dayPeriod) {
+            text += ' ' + values.dayPeriod.toUpperCase();
+          }
+          return text;
+        } catch (error) {
+          return '--:--:--';
+        }
+      }
+
+      function renderClocks() {
+        if (!utcClock || !localClock) {
           return;
         }
-        preview.textContent = format.value === '12' ? '02:30 PM' : '14:30';
+        var hour12 = !!format && format.value === '12';
+        var now = Date.now();
+        // UTC siempre en 24 horas: es una referencia técnica, no una hora de
+        // lectura del portal. Solo la hora local sigue el formato elegido.
+        utcClock.textContent = clockText(now, 'UTC', false);
+
+        var manual = !!mode && mode.value === 'manual';
+        var hours = offset ? parseInt(offset.value, 10) : 0;
+        if (isNaN(hours)) {
+          hours = 0;
+        }
+        if (manual) {
+          localClock.textContent = clockText(now + hours * 3600000, 'UTC', hour12);
+        } else {
+          localClock.textContent = clockText(now, localTimeZone, hour12);
+        }
       }
 
       if (mode) {
-        mode.addEventListener('change', syncMode);
+        mode.addEventListener('change', function () {
+          syncMode();
+          renderClocks();
+        });
+      }
+      if (offset) {
+        offset.addEventListener('change', renderClocks);
       }
       if (format) {
-        format.addEventListener('change', syncPreview);
+        format.addEventListener('change', renderClocks);
       }
       syncMode();
-      syncPreview();
+      renderClocks();
+      setInterval(renderClocks, 1000);
     });
   </script>
   <script>

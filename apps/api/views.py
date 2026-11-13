@@ -119,10 +119,12 @@ class StationObservationView(CacheAPIMixin, GenericAPIView):
         # (+1), salvo que la petición llegue en horas UTC anteriores (día actual);
         # el resto de horarios usan el día actual. Generador y validador leen la
         # misma regla → el SYNOP generado pasa la validación y el API devuelve
-        # datos (el mapa de home pinta).
+        # datos (el mapa de home pinta). En modo manual no se inventan datos: lo
+        # que no capturó la estación no existe.
         data = GetData().get_station(hour_str, station_number)
         if (
             getattr(settings, 'OBS_LOCAL_ONLY', False)
+            and getattr(settings, 'OBS_AUTOMATIC', True)
             and data is not None
             and data.get('data') is None
         ):

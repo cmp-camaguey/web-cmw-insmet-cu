@@ -1,0 +1,102 @@
+{% extends 'layouts/form.html' %}
+{% block form %}
+  {% include 'includes/dashboard/form_card.html' with card_title='Identificación' %}
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.station col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.observation_type col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.hour col='col-md-4' %}
+    <div class="col-12">
+      <p class="text-secondary small mb-0">
+        El día del telegrama se calcula automáticamente con la regla SYNOP: las
+        horas 00 y 03 usan el día posterior, el resto el día actual.
+      </p>
+    </div>
+  </div>
+  </div>
+  </div>
+  </div>
+  {% include 'includes/dashboard/form_card.html' with card_title='Cielo y viento' %}
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.cloud_amount col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.cloud_base_height col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.visibility col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.wind_direction col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.wind_speed col='col-md-4' %}
+  </div>
+  </div>
+  </div>
+  </div>
+  {% include 'includes/dashboard/form_card.html' with card_title='Temperatura y presión' %}
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.temperature col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.dew_point col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.station_pressure col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.sea_pressure col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.pressure_tendency col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.pressure_change col='col-md-4' %}
+  </div>
+  </div>
+  </div>
+  </div>
+  {% include 'includes/dashboard/form_card.html' with card_title='Precipitación y tiempo' %}
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.precipitation_3h col='col-md-4' %}
+    {% include 'pages/meteo/observation/_checkbox.html' with field=form.precipitation_3h_trace col='col-md-4' %}
+  </div>
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.present_weather col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.past_weather col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.past_weather_2 col='col-md-4' %}
+  </div>
+  </div>
+  </div>
+  </div>
+  {% include 'includes/dashboard/form_card.html' with card_title='Nubes (tipos)' %}
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.low_cloud_type col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.medium_cloud_type col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.high_cloud_type col='col-md-4' %}
+  </div>
+  </div>
+  </div>
+  </div>
+  {% include 'includes/dashboard/form_card.html' with card_title='Solo observación sinóptica' card_col_id='synoptic-fields' %}
+  <div class="row">
+    {% include 'pages/meteo/observation/_field.html' with field=form.max_temperature col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.min_temperature col='col-md-4' %}
+    {% include 'pages/meteo/observation/_field.html' with field=form.precipitation_24h col='col-md-4' %}
+    {% include 'pages/meteo/observation/_checkbox.html' with field=form.precipitation_24h_trace col='col-md-4' %}
+  </div>
+  </div>
+  </div>
+  </div>
+{% endblock %}
+{% block extrajs %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var type = document.getElementById('id_observation_type');
+      var hour = document.getElementById('id_hour');
+      var synoptic = document.getElementById('synoptic-fields');
+      if (!type || !hour) return;
+
+      function allowedHours(value) {
+        return value === 'synoptic'
+          ? ['00', '06', '12', '18']
+          : ['03', '09', '15', '21'];
+      }
+
+      function sync() {
+        var hours = allowedHours(type.value);
+        if (synoptic) synoptic.classList.toggle('d-none', type.value !== 'synoptic');
+        Array.prototype.forEach.call(hour.options, function (option) {
+          option.hidden = hours.indexOf(option.value) === -1;
+          option.disabled = option.hidden;
+        });
+        if (hours.indexOf(hour.value) === -1) hour.value = hours[0];
+      }
+
+      type.addEventListener('change', sync);
+      sync();
+    });
+  </script>
+{% endblock %}

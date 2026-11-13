@@ -794,6 +794,9 @@ class EnvironmentApplyViewTests(EnvironmentViewTestBase):
 
     def setUp(self):
         super().setUp()
+        # El reinicio baja el sitio unos segundos, así que solo se permite en la
+        # ventana de mantenimiento. Los casos de esta clase parten de ahí.
+        self._set_maintenance(True)
         self.request_path = Path(self.tempdir) / 'apply-request'
         self.status_path = Path(self.tempdir) / 'apply-status.json'
         override = override_settings(
@@ -803,6 +806,11 @@ class EnvironmentApplyViewTests(EnvironmentViewTestBase):
         override.enable()
         self.addCleanup(override.disable)
         self.apply_url = reverse('core:environment_apply')
+
+    def _set_maintenance(self, enabled: bool):
+        site = SiteConfiguration.get_instance()
+        site.maintenance_mode = enabled
+        site.save()
 
     def test_apply_saves_the_changes_and_requests_the_restart(self):
         self.client.force_login(self.superuser)
@@ -876,6 +884,9 @@ class EnvironmentApplyViewTests(EnvironmentViewTestBase):
     def test_staff_without_superuser_cannot_request_the_restart(self):
         self.client.force_login(self.superuser)
         payload = self._payload()
+        # Sin mantenimiento el middleware no tapa la respuesta: el 403 lo da el
+        # control de acceso de la vista, no la página de mantenimiento.
+        self._set_maintenance(False)
         self.client.force_login(self.staff)
 
         response = self.client.post(self.apply_url, payload)
@@ -913,3 +924,39 @@ class EnvironmentApplyViewTests(EnvironmentViewTestBase):
         self.client.force_login(self.superuser)
 
         self.assertContains(self.client.get(self.url), 'Último reinicio completado')
+
+    def test_page_disables_the_button_outside_the_maintenance_window(self):
+        self._set_maintenance(False)
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(self.url)
+
+        self.assertFalse(response.context['can_apply'])
+        self.assertContains(response, 'solo se habilita con el sitio en mantenimiento')
+        self.assertContains(response, f'href="{reverse("core:site_configuration")}"')
+
+    def test_apply_is_refused_outside_the_maintenance_window(self):
+        self._set_maintenance(False)
+        self.client.force_login(self.superuser)
+        before = self.env_path.read_text(encoding='utf-8')
+
+        response = self.client.post(self.apply_url, self._payload(NOTIFICATIONS_MAX_VISIBLE='25'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.env_path.read_text(encoding='utf-8'), before)
+        self.assertFalse(self.request_path.exists())
+        self.assertContains(response, 'Active el modo mantenimiento')
+        self.assertNotIn(
+            'Parámetros actualizados',
+            ActivityLog.objects.values_list('message', flat=True),
+        )
+
+    def test_save_still_works_outside_the_maintenance_window(self):
+        self._set_maintenance(False)
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(self.url, self._payload(NOTIFICATIONS_MAX_VISIBLE='25'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('NOTIFICATIONS_MAX_VISIBLE=25', self.env_path.read_text(encoding='utf-8'))
+        self.assertFalse(self.request_path.exists())

@@ -1,0 +1,30 @@
+{% load my_filters %}
+{% if request.user|has_permission:'meteo.view_observation' or request.user.is_superuser %}
+  <li class="nav-item dropdown
+             {% if 'observacion' in segment %}active{% endif %}">
+    <a class="nav-link dropdown-toggle"
+       href="#navbar-observations"
+       data-bs-toggle="dropdown"
+       data-bs-auto-close="false"
+       role="button"
+       aria-expanded="false">
+      <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="icon ti ti-clipboard-list"></i></span>
+      <span class="nav-link-title">Observaciones</span>
+    </a>
+    <div class="dropdown-menu
+                {% if 'observacion' in segment %}show{% endif %}">
+      <div class="dropdown-menu-columns">
+        <div class="dropdown-menu-column">
+          <a class="dropdown-item
+                    {% if 'observacion' in segment and 'crear' not in request.path %}active{% endif %}"
+             href="{% url 'meteo:observacion_list' %}">Registro</a>
+          {% if request.user|has_permission:'meteo.add_observation' or request.user.is_superuser %}
+            <a class="dropdown-item
+                      {% if 'crear' in request.path %}active{% endif %}"
+               href="{% url 'meteo:observacion_create' %}">Nueva observación</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </li>
+{% endif %}

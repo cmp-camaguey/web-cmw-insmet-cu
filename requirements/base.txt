@@ -12,8 +12,6 @@ huey==3.5.4
 ldap3==2.9.1
 django-cors-headers==4.9.0
 django-csp==4.0
-MetPy==1.7.1
-matplotlib==3.11.2
 numpy==2.5.4
 pandas==3.1.1
 python-calamine

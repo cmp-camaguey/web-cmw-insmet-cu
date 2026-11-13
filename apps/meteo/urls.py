@@ -2,6 +2,7 @@ from django.urls import path
 
 from apps.meteo.views import (
     forecast,
+    observation,
     province,
     station,
     town,
@@ -262,5 +263,29 @@ urlpatterns = [
         'estaciones/<uuid:uuid>/eliminar/',
         station.StationDeleteView.as_view(),
         name='estacion_delete',
+    ),
+    # ──────────────────────────────────────────────
+    # Observations (manual SYNOP capture)
+    # ──────────────────────────────────────────────
+    path('observaciones/', observation.ObservationListView.as_view(), name='observacion_list'),
+    path(
+        'observaciones/crear/',
+        observation.ObservationCreateView.as_view(),
+        name='observacion_create',
+    ),
+    path(
+        'observaciones/<uuid:uuid>/',
+        observation.ObservationDetailView.as_view(),
+        name='observacion_detail',
+    ),
+    path(
+        'observaciones/<uuid:uuid>/editar/',
+        observation.ObservationUpdateView.as_view(),
+        name='observacion_update',
+    ),
+    path(
+        'observaciones/<uuid:uuid>/eliminar/',
+        observation.ObservationDeleteView.as_view(),
+        name='observacion_delete',
     ),
 ]

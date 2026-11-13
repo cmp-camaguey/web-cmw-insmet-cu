@@ -164,6 +164,9 @@ guarda el formulario y pide el reinicio de los servicios en una sola acción.
 - Un formulario inválido o un archivo no escribible NO DEBEN dejar petición.
 - El botón DEBE quedar deshabilitado, con un aviso, cuando el proceso web no
   puede dejar la petición.
+- El botón SOLO DEBE habilitarse con el modo mantenimiento activo
+  (`SiteConfiguration.maintenance_mode`), y el POST de aplicar DEBE rechazarse
+  fuera de esa ventana sin escribir el archivo ni dejar petición.
 - La página DEBE mostrar el estado del último reinicio: en curso, completado,
   fallido o sin confirmar. Un estado ilegible NO DEBE presentarse como
   resultado.

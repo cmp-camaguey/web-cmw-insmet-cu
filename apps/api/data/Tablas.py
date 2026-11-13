@@ -207,9 +207,141 @@ class Tablas:
             '99': None,
         }
 
+        # Código 4677 de la OMS: tiempo presente (ww), el grupo 7wwW1W2 del
+        # SYNOP. El formulario del panel lo ofrece como lista para no escribir
+        # los códigos a mano.
+        self.__ww = {
+            '00': 'Nubes no observadas o no observables',
+            '01': 'Nubes disipándose o menos desarrolladas',
+            '02': 'Cielo sin cambios en conjunto',
+            '03': 'Nubes formándose o desarrollándose',
+            '04': 'Visibilidad reducida por humo (incendios, industria o ceniza volcánica)',
+            '05': 'Calima',
+            '06': 'Polvo extendido en suspensión, no levantado por el viento',
+            '07': 'Polvo o arena levantados por el viento, sin tolvaneras ni tempestad',
+            '08': 'Tolvaneras o remolinos de arena bien desarrollados, sin tempestad',
+            '09': 'Tempestad de polvo o arena a la vista o en la estación en la hora precedente',
+            '10': 'Neblina',
+            '11': 'Bancos de niebla o niebla helada poco profunda',
+            '12': 'Niebla o niebla helada poco profunda, más o menos continua',
+            '13': 'Relámpagos visibles, sin trueno',
+            '14': 'Precipitación a la vista que no llega al suelo',
+            '15': 'Precipitación a la vista, a más de 5 km de la estación',
+            '16': 'Precipitación a la vista, cerca pero no en la estación',
+            '17': 'Tormenta sin precipitación en el momento de la observación',
+            '18': 'Turbonadas en la estación o a la vista',
+            '19': 'Nubes de embudo (tornado o manga marina)',
+            '20': 'Llovizna o cinarra en la hora precedente, no en la observación',
+            '21': 'Lluvia en la hora precedente, no en la observación',
+            '22': 'Nieve en la hora precedente, no en la observación',
+            '23': 'Lluvia y nieve, o gránulos de hielo, en la hora precedente',
+            '24': 'Llovizna o lluvia engelante en la hora precedente',
+            '25': 'Chubascos de lluvia en la hora precedente',
+            '26': 'Chubascos de nieve, o de lluvia y nieve, en la hora precedente',
+            '27': 'Chubascos de granizo o de lluvia y granizo en la hora precedente',
+            '28': 'Niebla o niebla helada en la hora precedente',
+            '29': 'Tormenta en la hora precedente',
+            '30': 'Tempestad de polvo o arena ligera o moderada, en disminución',
+            '31': 'Tempestad de polvo o arena ligera o moderada, sin cambio apreciable',
+            '32': 'Tempestad de polvo o arena ligera o moderada, iniciada o en aumento',
+            '33': 'Tempestad de polvo o arena severa, en disminución',
+            '34': 'Tempestad de polvo o arena severa, sin cambio apreciable',
+            '35': 'Tempestad de polvo o arena severa, iniciada o en aumento',
+            '36': 'Nieve levantada por el viento, ligera o moderada, baja',
+            '37': 'Nieve arrastrada por el viento, fuerte y baja',
+            '38': 'Nieve levantada por el viento, ligera o moderada, alta',
+            '39': 'Nieve arrastrada por el viento, fuerte y alta',
+            '40': 'Niebla o niebla helada a la distancia, no en la estación',
+            '41': 'Niebla o niebla helada en bancos',
+            '42': 'Niebla, cielo visible, más delgada que en la hora precedente',
+            '43': 'Niebla, cielo invisible, más delgada que en la hora precedente',
+            '44': 'Niebla, cielo visible, sin cambio apreciable',
+            '45': 'Niebla, cielo invisible, sin cambio apreciable',
+            '46': 'Niebla, cielo visible, iniciada o más densa',
+            '47': 'Niebla, cielo invisible, iniciada o más densa',
+            '48': 'Niebla con escarcha, cielo visible',
+            '49': 'Niebla con escarcha, cielo invisible',
+            '50': 'Llovizna intermitente, ligera',
+            '51': 'Llovizna continua, ligera',
+            '52': 'Llovizna intermitente, moderada',
+            '53': 'Llovizna continua, moderada',
+            '54': 'Llovizna intermitente, fuerte',
+            '55': 'Llovizna continua, fuerte',
+            '56': 'Llovizna engelante, ligera',
+            '57': 'Llovizna engelante, moderada o fuerte',
+            '58': 'Llovizna y lluvia, ligera',
+            '59': 'Llovizna y lluvia, moderada o fuerte',
+            '60': 'Lluvia intermitente, ligera',
+            '61': 'Lluvia continua, ligera',
+            '62': 'Lluvia intermitente, moderada',
+            '63': 'Lluvia continua, moderada',
+            '64': 'Lluvia intermitente, fuerte',
+            '65': 'Lluvia continua, fuerte',
+            '66': 'Lluvia engelante, ligera',
+            '67': 'Lluvia engelante, moderada o fuerte',
+            '68': 'Lluvia o llovizna y nieve, ligera',
+            '69': 'Lluvia o llovizna y nieve, moderada o fuerte',
+            '70': 'Caída intermitente de copos de nieve, ligera',
+            '71': 'Caída continua de copos de nieve, ligera',
+            '72': 'Caída intermitente de copos de nieve, moderada',
+            '73': 'Caída continua de copos de nieve, moderada',
+            '74': 'Caída intermitente de copos de nieve, fuerte',
+            '75': 'Caída continua de copos de nieve, fuerte',
+            '76': 'Polvo de diamante (con o sin niebla)',
+            '77': 'Cinarra (con o sin niebla)',
+            '78': 'Cristales de nieve estrellados aislados (con o sin niebla)',
+            '79': 'Gránulos de hielo',
+            '80': 'Chubascos de lluvia, ligeros',
+            '81': 'Chubascos de lluvia, moderados o fuertes',
+            '82': 'Chubascos de lluvia, violentos',
+            '83': 'Chubascos de lluvia y nieve mezcladas, ligeros',
+            '84': 'Chubascos de lluvia y nieve mezcladas, moderados o fuertes',
+            '85': 'Chubascos de nieve, ligeros',
+            '86': 'Chubascos de nieve, moderados o fuertes',
+            '87': 'Chubascos de cinarra o granizo menudo, ligeros',
+            '88': 'Chubascos de cinarra o granizo menudo, moderados o fuertes',
+            '89': 'Chubascos de granizo, ligeros, sin tormenta',
+            '90': 'Chubascos de granizo, moderados o fuertes, sin tormenta',
+            '91': 'Lluvia ligera; tormenta en la hora precedente, no en la observación',
+            '92': 'Lluvia moderada o fuerte; tormenta en la hora precedente',
+            '93': 'Nieve ligera, o lluvia y nieve, o granizo, en la observación',
+            '94': 'Nieve moderada o fuerte, o lluvia y nieve, o granizo, en la observación',
+            '95': 'Tormenta ligera o moderada con lluvia o nieve, sin granizo',
+            '96': 'Tormenta ligera o moderada con granizo',
+            '97': 'Tormenta fuerte con lluvia o nieve, sin granizo',
+            '98': 'Tormenta con tempestad de polvo o arena',
+            '99': 'Tormenta fuerte con granizo',
+        }
+
+        # Código 4561 de la OMS: tiempo pasado (W1 y W2).
+        self.__W = {
+            '0': 'Nubes cubriendo la mitad o menos del cielo',
+            '1': 'Nubes cubriendo más de la mitad, pero no todo el cielo',
+            '2': 'Cielo cubierto durante una parte del período',
+            '3': 'Tempestad de arena o de polvo',
+            '4': 'Niebla o niebla helada',
+            '5': 'Llovizna',
+            '6': 'Lluvia',
+            '7': 'Nieve, o lluvia y nieve mezcladas',
+            '8': 'Chubascos',
+            '9': 'Tormenta con precipitación',
+        }
+
     @property
     def dd(self):
         return self.__dd
+
+    @property
+    def ww(self):
+        return self.__ww
+
+    @property
+    def W(self):
+        return self.__W
+
+    @property
+    def VV(self):
+        return self.__VV
 
     @property
     def dd2(self):

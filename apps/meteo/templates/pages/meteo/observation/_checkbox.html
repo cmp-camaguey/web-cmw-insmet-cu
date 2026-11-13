@@ -1,0 +1,9 @@
+{% load my_filters %}
+<div class="{{ col|default:'col-md-4' }} mb-3">
+  <div class="form-check form-switch mt-4">
+    {{ field|with_invalid }}
+    <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+  </div>
+  {% if field.help_text %}<small class="form-hint">{{ field.help_text }}</small>{% endif %}
+  {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+</div>

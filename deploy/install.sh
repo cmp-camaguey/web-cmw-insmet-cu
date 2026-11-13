@@ -12,7 +12,7 @@
 #   4. rol y base de datos, con las credenciales que se preguntaron
 #   5. venv + requirements/prod.txt
 #   6. .env con scripts/generate_env.py y los valores preguntados, sin CHANGE_ME
-#   7. gate de migraciones, migrate, collectstatic, check --deploy
+#   7. gate de migraciones, migrate, grupos de rol, collectstatic, check --deploy
 #   8. unidades systemd renderizadas a APP_DIR/SERVICE_USER reales
 #   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
 #      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
@@ -2527,10 +2527,10 @@ if [ "$HAS_BLOCKING_CRITICAL" -eq 1 ]; then
 else
     # LIVE_MANAGE=1 hace que manage() muestre el log en vivo (ver manage()).
     #
-    # Los cinco `run manage ...` llevan `|| die`. No es ceremonia: `run` es un
+    # Los seis `run manage ...` llevan `|| die`. No es ceremonia: `run` es un
     # wrapper comun y corriente, y SIN el `|| die` el fallo salia del script
     # por `set -e` en el punto exacto del comando, sin ERROR, sin decir cual
-    # de los cinco era y volviendo al prompt del operador. Con el `|| die`,
+    # de los seis era y volviendo al prompt del operador. Con el `|| die`,
     # ademas, `set -e` se suspende durante toda la cadena (run -> manage ->
     # run_live), que es lo que permite que run_live capture el exit code en
     # vez de morir a mitad del pipe.
@@ -2542,6 +2542,13 @@ else
         || die "migrate --noinput fallo. El log de arriba dice por que; la base queda sin aplicar."
     run manage migrate --check \
         || die "migrate --check fallo: quedaron migraciones sin aplicar en la base."
+    # Grupos de rol: los permisos existen recien despues de migrate, y sin estos
+    # grupos un usuario no-superusuario entra al dashboard sin ver nada. El
+    # comando es idempotente (usa `add`, no `set`): no pisa permisos cargados a
+    # mano desde la pantalla de Grupos.
+    LIVE_MANAGE=1
+    run manage create_role_groups \
+        || die "create_role_groups fallo: los grupos de rol no se crearon. El log de arriba dice que permiso falta; sin ellos ningun usuario no-superusuario puede operar el dashboard."
     LIVE_MANAGE=0
 fi
 # collectstatic tambien va en vivo: con DEBUG=False no imprime una linea hasta
