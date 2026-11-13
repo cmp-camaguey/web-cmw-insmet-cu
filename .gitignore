@@ -265,6 +265,9 @@ tmp/
 openspec/changes/archive/
 
 ### Estado local de herramientas ###
+# Hook personal por máquina, encadenado desde `.githooks/pre-commit`. Nunca se
+# versiona: el proyecto no depende del revisor que corre en tu equipo.
+.githooks/pre-commit.local
 .codegraph/
 squashfs-root/
 .gentle-ai-instance
