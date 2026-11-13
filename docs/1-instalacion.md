@@ -77,6 +77,7 @@ uno solo, cada consulta falla con `password authentication failed`.
 python manage.py migrate             # las migraciones vienen versionadas
 python manage.py add_stations_data   # provincias, municipios y estaciones
 python manage.py create_observation_groups
+python manage.py create_role_groups
 python manage.py createsuperuser
 ```
 
@@ -87,6 +88,13 @@ sin argumentos carga todo lo de Camagüey.
 estación (jefe, revisor y observador) con los permisos de observaciones que
 corresponden. Se puede volver a correr tras agregar estaciones: no duplica
 grupos ni quita permisos agregados a mano.
+
+`create_role_groups` crea los 18 grupos `<Módulo> - <Ver|Editar|Gestionar>` de
+todos los modelos, con la jerarquía acumulativa dentro de cada módulo: `Ver` es
+solo lectura, `Editar` agrega alta y corrección, `Gestionar` agrega eliminación.
+Un módulo no hereda permisos de otro, así que un usuario que necesita dos áreas
+va en dos grupos. El instalador y cada deploy ya lo corren; a mano sirve para
+reparar una base restaurada. También es idempotente y acepta `--dry-run`.
 
 ## 4. Arrancar
 

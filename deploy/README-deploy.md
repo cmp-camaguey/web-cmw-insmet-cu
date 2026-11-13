@@ -22,7 +22,7 @@ El orden importa:
 | 5 | `makemigrations --check --dry-run` | Falla si un cambio de modelo no trae su migracion. Ver la nota de abajo |
 | 6 | Gate: `check --deploy` con la config real | Ver la nota de abajo |
 | 7 | `pg_dump` **si hay migraciones pendientes** | Es la unica vuelta atras de un esquema destructivo. Falla cerrado. Ver **Respaldo antes de migrar** |
-| 8 | `migrate` y `migrate --check` | Antes de que el codigo nuevo atienda un request. El `--check` confirma que no queda nada sin aplicar |
+| 8 | `migrate`, `migrate --check` y `create_role_groups` | Antes de que el codigo nuevo atienda un request. El `--check` confirma que no queda nada sin aplicar; los grupos de rol necesitan los permisos que `migrate` acaba de crear |
 | 9 | `collectstatic` | Antes de que el codigo nuevo emita HTML que los referencia |
 | 10 | `systemctl restart` de ambos units | `reload` NO alcanza, ver la nota de abajo |
 | 11 | Health check contra Nginx local | Atraviesa Nginx, TLS y el socket: el camino completo |
@@ -466,6 +466,22 @@ sudo systemd-run --pipe --wait --uid=webcmp \
 
 Toma `--provincia` (default `Camagüey`) y `--tipo` (`municipios`, `estaciones` o
 `todo`, que es el default).
+
+Los grupos de rol los deja armados el propio `deploy.sh` en cada despliegue y el
+instalador en el paso de migraciones: `create_role_groups` crea los grupos
+`<Módulo> - <Ver|Editar|Gestionar>` de todos los modelos. Es idempotente y usa
+`add` en vez de `set`, así que no pisa permisos cargados a mano. Para recrearlos
+a mano:
+
+```bash
+sudo systemd-run --pipe --wait --uid=webcmp \
+  -p EnvironmentFile=/etc/webcmp/encryption.env \
+  -p Environment=PRODUCTION=1 --working-directory=/srv/webcmp \
+  /srv/webcmp/.venv/bin/python manage.py create_role_groups
+```
+
+Sin esos grupos, un usuario no-superusuario entra al dashboard sin ver ninguna
+sección: el menú y cada vista se resuelven por permiso.
 
 El usuario administrador se crea con `createsuperuser`. Dos formas:
 

@@ -19,7 +19,8 @@
 #   6. respaldo de la base SI hay migraciones pendientes (pg_dump --format=custom).
 #      Si el respaldo falla, el deploy aborta: una migracion destructiva sin dump
 #      no tiene vuelta atras.
-#   7. migrate  (antes de que el codigo nuevo atienda requests)
+#   7. migrate  (antes de que el codigo nuevo atienda requests), y los grupos de
+#      rol que dependen de los permisos recien creados
 #   8. collectstatic (antes de que el codigo nuevo sirva HTML que los referencia)
 #   9. restart de webcmp y webcmp-huey (reload NO sirve: ver nota de Gunicorn)
 #  10. health check contra el reverse proxy que corresponda (ver HEALTHCHECK_*)
@@ -1089,6 +1090,12 @@ migrated=1
 # confirmar que el esquema quedo donde tiene que estar y no "migrate no dijo
 # nada", que es lo mismo que no haber corrido nada.
 manage migrate --check
+
+# Grupos de rol: cada deploy los vuelve a dejar completos. Los permisos de un
+# modelo nuevo existen recien despues de migrate, y el comando es idempotente
+# (usa `add`, no `set`): no duplica grupos ni pisa permisos cargados a mano.
+log "Creando grupos de rol"
+manage create_role_groups
 
 # 7. Estaticos: antes de que el codigo nuevo emita HTML que los referencia
 progress static
