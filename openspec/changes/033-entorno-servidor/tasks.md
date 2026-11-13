@@ -49,6 +49,8 @@
 - [x] `deploy/systemd/webcmp-apply.path` y `.service`, con `Environment="UNITS=..."` renderizado.
 - [x] `setup_apply()` en `deploy/install.sh`.
 - [x] `deploy/tests/test_apply_env_sh.sh` (23 casos) y `README-deploy.md`.
+- [x] **Aplicar cambios** exige el modo mantenimiento: botón deshabilitado con
+      aviso y POST rechazado sin escribir el `.env` ni dejar petición.
 
 ## Fase 4 — Verificación
 

@@ -858,6 +858,13 @@ que se aplicara en la ventana de mantenimiento. **Aplicar cambios** es para
 cuando el cambio se quiere en el sitio ahora. Un boton que solo reiniciara
 descartaria en silencio lo que el operador acaba de escribir, asi que no existe.
 
+**Aplicar cambios** solo se habilita con el sitio en **modo mantenimiento**
+(Configuracion -> Configuracion del sitio). El reinicio corta las conexiones
+abiertas, asi que el panel no lo dispara con el portal atendiendo publico: fuera
+de esa ventana la pagina lo explica, el POST de aplicar se rechaza sin tocar el
+`.env` y **Guardar** sigue disponible para dejar los valores listos hasta el
+proximo reinicio. La comprobacion se hace en el servidor, no solo en el boton.
+
 El mecanismo es el mismo del boton "Actualizar", con un privilegio distinto:
 
 ```

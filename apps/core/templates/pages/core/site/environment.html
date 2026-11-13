@@ -35,7 +35,23 @@
       </div>
     </div>
   {% endif %}
-  {% if can_write and not can_apply %}
+  {% if can_write and not maintenance_mode %}
+    <div class="alert alert-warning mb-3" role="alert">
+      <div class="d-flex">
+        <div class="me-2">
+          <i class="icon ti ti-tool"></i>
+        </div>
+        <div>
+          <strong>Aplicar cambios</strong> reinicia el servicio y deja el sitio sin responder
+          unos segundos, así que solo se habilita con el sitio en mantenimiento. Active el modo
+          mantenimiento en <a href="{% url 'core:site_configuration' %}">Configuración del sitio</a>
+          y vuelva a esta página. Mientras tanto, <strong>Guardar</strong> deja los valores
+          listos para el próximo reinicio.
+        </div>
+      </div>
+    </div>
+  {% endif %}
+  {% if can_write and not watcher_available %}
     <div class="alert alert-warning mb-3" role="alert">
       <div class="d-flex">
         <div class="me-2">
