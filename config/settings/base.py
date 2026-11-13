@@ -476,6 +476,12 @@ def resolve_obs_local_only(default):
     )
 
 
+# Modo de las observaciones: automático (descarga FTP) o manual (capturadas en
+# el panel). El panel de Entorno del servidor lo escribe en el archivo de
+# entorno; Django lo lee al arrancar, como el resto de la configuración.
+OBS_AUTOMATIC = os.getenv('OBS_AUTOMATIC', '1') in ('1', 'true', 'True', 'yes')
+
+
 SPECTACULAR_SETTINGS = {
     'TITLE': 'API Centro Meteorológico Camagüey',
     'DESCRIPTION': 'Documentación de la API',

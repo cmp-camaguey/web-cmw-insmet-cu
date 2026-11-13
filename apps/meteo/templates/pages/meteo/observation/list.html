@@ -1,0 +1,106 @@
+{% extends 'layouts/list.html' %}
+{% load static my_filters %}
+{% block title_actions %}
+  {% if can_create %}
+    <div class="col-auto ms-auto d-print-none">
+      <a href="{{ url_create }}" class="btn btn-primary">
+        <i class="icon ti ti-plus"></i> {{ btn }}
+      </a>
+    </div>
+  {% endif %}
+{% endblock %}
+{% block content %}
+  {% if automatic_mode %}
+    <div class="alert alert-info" role="alert">
+      <div class="d-flex">
+        <div>
+          <i class="icon ti ti-info-circle me-2"></i>
+        </div>
+        <div>
+          <h4 class="alert-title">Las observaciones se reciben automáticamente por FTP</h4>
+          <div class="text-secondary">
+            El registro es de consulta. Para capturar observaciones desde el panel,
+            desactive «Observaciones automáticas por FTP» en
+            Configuración → Entorno del servidor.
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
+{% block columns %}
+  <th>Estación</th>
+  <th>Tipo</th>
+  <th>Día</th>
+  <th>Hora UTC</th>
+  <th>Temperatura</th>
+  <th>Precipitación 3 h</th>
+  <th>Observador</th>
+  <th>Actualizada</th>
+  <th class="text-end">Acciones</th>
+{% endblock %}
+{% block row %}
+  <td>
+    <span class="fw-medium">{{ object.station.name }}</span>
+    <span class="badge bg-blue-lt ms-1">{{ object.station.number }}</span>
+  </td>
+  <td>
+    <span class="badge
+                 {% if object.is_synoptic %}bg-green-lt{% else %}bg-yellow-lt{% endif %}">
+      {{ object.get_observation_type_display }}
+    </span>
+  </td>
+  <td>{{ object.obs_date|date:'d/m/Y' }}</td>
+  <td>{{ object.hour }}:00</td>
+  <td>{{ object.temperature|floatformat:1 }} °C</td>
+  <td>
+    {% if object.precipitation_3h_trace %}
+      Traza
+    {% else %}
+      {{ object.precipitation_3h|floatformat:1 }} mm
+    {% endif %}
+  </td>
+  <td>{{ object.user.username|default:'—' }}</td>
+  <td class="text-muted small">{{ object.updated_at|date:'d/m/Y H:i' }}</td>
+  <td class="text-end">
+    <a href="{% url 'meteo:observacion_detail' object.uuid %}"
+       type="button"
+       class="btn btn-icon btn-outline-info btn-sm"
+       data-bs-toggle="tooltip"
+       data-bs-placement="bottom"
+       aria-label="Ver detalle"
+       data-bs-original-title="Ver detalle">
+      <i class="icon ti ti-eye"></i>
+    </a>
+    {% if not automatic_mode and request.user|has_permission:'meteo.change_observation' %}
+      <a href="{% url 'meteo:observacion_update' object.uuid %}"
+         type="button"
+         class="btn btn-icon btn-outline-warning btn-sm"
+         data-bs-toggle="tooltip"
+         data-bs-placement="bottom"
+         aria-label="Editar"
+         data-bs-original-title="Editar">
+        <i class="icon ti ti-edit"></i>
+      </a>
+    {% endif %}
+    {% if not automatic_mode and request.user|has_permission:'meteo.delete_observation' %}
+      <button type="button"
+              class="btn btn-icon btn-outline-danger btn-sm action-btn"
+              data-uuid="{{ object.uuid }}"
+              data-bs-toggle="tooltip"
+              data-bs-placement="bottom"
+              aria-label="Eliminar"
+              data-bs-original-title="Eliminar">
+        <i class="icon ti ti-trash"></i>
+      </button>
+    {% endif %}
+  </td>
+{% endblock %}
+{% block modal %}
+  {% include 'includes/dashboard/modal_delete.html' %}
+{% endblock %}
+{% block extrajs %}
+  {{ block.super }}
+  {% include 'includes/dashboard/modal_delete_js.html' with delete_url_name='meteo:observacion_delete' %}
+{% endblock %}

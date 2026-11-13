@@ -1,0 +1,153 @@
+{% extends 'layouts/dashboard.html' %}
+{% block title_actions %}
+  <div class="col-auto ms-auto d-print-none">
+    <a href="{{ url_list }}" class="btn btn-secondary">
+      <i class="icon ti ti-arrow-left"></i> Volver al registro
+    </a>
+  </div>
+{% endblock %}
+{% block content %}
+  <div class="row row-cards">
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">
+            {{ observation.station.name }}
+            <span class="badge bg-blue-lt ms-2">{{ observation.station.number }}</span>
+            <span class="badge
+                         {% if observation.is_synoptic %}bg-green-lt{% else %}bg-yellow-lt{% endif %}
+                         ms-1">{{ observation.get_observation_type_display }}</span>
+          </h3>
+          <div class="card-actions text-secondary">
+            {{ observation.obs_date|date:'d/m/Y' }} · {{ observation.hour }}:00 UTC
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <tbody>
+              <tr>
+                <td class="text-secondary">Archivo del mapa</td>
+                <td><code>{{ observation.filename }}</code></td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Nubosidad total (N)</td>
+                <td>{{ observation.cloud_amount }} octas</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Altura de la base de nubes (h)</td>
+                <td>Código {{ observation.cloud_base_height }}</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Visibilidad (VV)</td>
+                <td>{{ observation.visibility }} — {{ observation.visibility_label }} km</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Dirección del viento (dd)</td>
+                <td>{{ observation.wind_direction }} — {{ observation.wind_direction_label }}</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Velocidad del viento</td>
+                <td>{{ observation.wind_speed }} m/s</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Temperatura</td>
+                <td>{{ observation.temperature|floatformat:1 }} °C</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Punto de rocío</td>
+                <td>{{ observation.dew_point|floatformat:1 }} °C</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Presión de la estación</td>
+                <td>{{ observation.station_pressure|floatformat:1 }} hPa</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Presión a nivel del mar</td>
+                <td>{{ observation.sea_pressure|floatformat:1 }} hPa</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Tendencia barométrica (a)</td>
+                <td>{{ observation.pressure_tendency }} — {{ observation.get_pressure_tendency_display }}</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Cambio de presión en 3 h</td>
+                <td>{{ observation.pressure_change|floatformat:1 }} hPa</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Precipitación en 3 h</td>
+                <td>
+                  {% if observation.precipitation_3h_trace %}
+                    Traza
+                  {% else %}
+                    {{ observation.precipitation_3h|floatformat:1 }} mm
+                  {% endif %}
+                </td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Tiempo presente (ww)</td>
+                <td>{{ observation.present_weather }}</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Tiempo pasado (W1 / W2)</td>
+                <td>{{ observation.past_weather }} / {{ observation.past_weather_2 }}</td>
+              </tr>
+              <tr>
+                <td class="text-secondary">Nubes bajas, medias y altas (CL / CM / CH)</td>
+                <td>{{ observation.low_cloud_type }} / {{ observation.medium_cloud_type }} / {{ observation.high_cloud_type }}</td>
+              </tr>
+              {% if observation.is_synoptic %}
+                <tr>
+                  <td class="text-secondary">Temperatura máxima</td>
+                  <td>{{ observation.max_temperature|default_if_none:'—' }} °C</td>
+                </tr>
+                <tr>
+                  <td class="text-secondary">Temperatura mínima</td>
+                  <td>{{ observation.min_temperature|default_if_none:'—' }} °C</td>
+                </tr>
+                <tr>
+                  <td class="text-secondary">Precipitación en 24 h</td>
+                  <td>
+                    {% if observation.precipitation_24h_trace %}
+                      Traza
+                    {% else %}
+                      {{ observation.precipitation_24h|default_if_none:'—' }} mm
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card mb-3">
+        <div class="card-header">
+          <h3 class="card-title">Registro</h3>
+        </div>
+        <div class="card-body">
+          <div class="mb-2">
+            <span class="text-secondary">Realizada por</span>
+            <div class="fw-medium">{{ observation.user.username|default:'—' }}</div>
+          </div>
+          <div class="mb-2">
+            <span class="text-secondary">Creada</span>
+            <div class="fw-medium">{{ observation.created_at|date:'d/m/Y H:i' }}</div>
+          </div>
+          <div>
+            <span class="text-secondary">Última actualización</span>
+            <div class="fw-medium">{{ observation.updated_at|date:'d/m/Y H:i' }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Telegrama SYNOP</h3>
+        </div>
+        <div class="card-body">
+          <pre class="mb-0" style="white-space: pre-wrap">{{ observation.telegram }}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
