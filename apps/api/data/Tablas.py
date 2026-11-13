@@ -212,6 +212,10 @@ class Tablas:
         return self.__dd
 
     @property
+    def VV(self):
+        return self.__VV
+
+    @property
     def dd2(self):
         return self.__dd2
 

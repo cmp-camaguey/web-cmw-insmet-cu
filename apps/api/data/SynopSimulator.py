@@ -19,6 +19,8 @@ import random
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from apps.api.data.SynopTelegram import telegram_filename
+
 # Constants of the atmosphere used by the Magnus dew-point inversion (D3),
 # matching the formula in ``Descodificador.get_rh``.
 _MAGNUS_A = 17.67
@@ -116,9 +118,12 @@ class SynopSimulator:
 
     @classmethod
     def filename_for(cls, station: int, hour: str) -> str:
-        """Return the conventional file name for a station/hour pair."""
-        prefix = 'SM' if cls._is_sm(hour) else 'SI'
-        return f'{prefix}{str(station)[2:]}.{hour}'
+        """Return the conventional file name for a station/hour pair.
+
+        La regla vive en ``SynopTelegram`` porque el alta manual de observaciones
+        escribe el mismo archivo que lee el mapa.
+        """
+        return telegram_filename(station, hour)
 
     @classmethod
     def _is_sm(cls, hour: str) -> bool:

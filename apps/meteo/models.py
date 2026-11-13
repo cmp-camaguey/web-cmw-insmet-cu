@@ -427,3 +427,182 @@ class Station(models.Model):
 
 # Regiones con litoral (tienen estado de mar); el interior no.
 REGION_HAS_SEA = {'north': True, 'interior': False, 'south': True}
+
+
+class Observation(models.Model):
+    """Observación meteorológica capturada desde el panel.
+
+    Guarda los valores ya decodificados (unidades físicas y códigos de clave)
+    más el telegrama que se escribe en ``media/obs`` y consume el mapa. Una fila
+    por estación, día y hora: el índice único impide dos telegramas para el
+    mismo ciclo.
+    """
+
+    class Type(models.TextChoices):
+        SYNOPTIC = 'synoptic', 'Sinóptica'
+        INTERMEDIATE = 'intermediate', 'Intermedia'
+
+    TENDENCY_CHOICES = [
+        (0, 'Aumenta y luego disminuye'),
+        (1, 'Aumenta y luego se mantiene'),
+        (2, 'Aumenta de forma sostenida'),
+        (3, 'Disminuye o se mantiene y luego aumenta'),
+        (4, 'Se mantiene'),
+        (5, 'Disminuye y luego aumenta'),
+        (6, 'Disminuye y luego se mantiene'),
+        (7, 'Disminuye de forma sostenida'),
+        (8, 'Se mantiene o aumenta y luego disminuye'),
+    ]
+
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    station = models.ForeignKey(
+        Station,
+        on_delete=models.CASCADE,
+        related_name='observations',
+        verbose_name='Estación',
+    )
+    observation_type = models.CharField(
+        max_length=12, choices=Type.choices, verbose_name='Tipo de observación'
+    )
+    hour = models.CharField(max_length=2, verbose_name='Hora UTC')
+    obs_date = models.DateField(verbose_name='Día de la observación')
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='meteo_observations',
+        verbose_name='Observador',
+    )
+
+    # Grupo iR iX h VV. iR = iX = 1: estación con personal y precipitación en
+    # la sección 1, que es lo que espera el decodificador.
+    cloud_base_height = models.PositiveSmallIntegerField(
+        verbose_name='Altura de la base de nubes (código h)',
+        validators=[MaxValueValidator(9)],
+    )
+    visibility = models.CharField(max_length=2, verbose_name='Visibilidad (código VV)')
+
+    # Grupo Nddff
+    cloud_amount = models.PositiveSmallIntegerField(
+        verbose_name='Nubosidad total (octas)',
+        validators=[MaxValueValidator(8)],
+    )
+    wind_direction = models.CharField(max_length=2, verbose_name='Dirección del viento (código dd)')
+    wind_speed = models.PositiveSmallIntegerField(
+        verbose_name='Velocidad del viento (m/s)',
+        validators=[MaxValueValidator(99)],
+    )
+
+    # Temperaturas y presión
+    temperature = models.DecimalField(
+        max_digits=4, decimal_places=1, verbose_name='Temperatura (°C)'
+    )
+    dew_point = models.DecimalField(
+        max_digits=4, decimal_places=1, verbose_name='Punto de rocío (°C)'
+    )
+    station_pressure = models.DecimalField(
+        max_digits=5, decimal_places=1, verbose_name='Presión de la estación (hPa)'
+    )
+    sea_pressure = models.DecimalField(
+        max_digits=5, decimal_places=1, verbose_name='Presión a nivel del mar (hPa)'
+    )
+    pressure_tendency = models.PositiveSmallIntegerField(
+        choices=TENDENCY_CHOICES,
+        verbose_name='Tendencia barométrica (código a)',
+        validators=[MaxValueValidator(8)],
+    )
+    pressure_change = models.DecimalField(
+        max_digits=4, decimal_places=1, verbose_name='Cambio de presión en 3 h (hPa)'
+    )
+
+    # Precipitación y tiempo
+    precipitation_3h = models.DecimalField(
+        max_digits=4, decimal_places=1, default=0, verbose_name='Precipitación en 3 h (mm)'
+    )
+    precipitation_3h_trace = models.BooleanField(
+        default=False, verbose_name='Precipitación de 3 h: traza'
+    )
+    present_weather = models.CharField(max_length=2, verbose_name='Tiempo presente (código ww)')
+    past_weather = models.CharField(max_length=1, verbose_name='Tiempo pasado (W1)')
+    past_weather_2 = models.CharField(max_length=1, verbose_name='Tiempo pasado (W2)')
+
+    # Nubes CL / CM / CH
+    low_cloud_type = models.CharField(max_length=1, verbose_name='Nubes bajas (CL)')
+    medium_cloud_type = models.CharField(max_length=1, verbose_name='Nubes medias (CM)')
+    high_cloud_type = models.CharField(max_length=1, verbose_name='Nubes altas (CH)')
+
+    # Solo observación sinóptica (sección 2 con Tx/Tn y 24 h)
+    max_temperature = models.DecimalField(
+        max_digits=4,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        verbose_name='Temperatura máxima (°C)',
+    )
+    min_temperature = models.DecimalField(
+        max_digits=4,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        verbose_name='Temperatura mínima (°C)',
+    )
+    precipitation_24h = models.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        verbose_name='Precipitación en 24 h (mm)',
+    )
+    precipitation_24h_trace = models.BooleanField(
+        default=False, verbose_name='Precipitación de 24 h: traza'
+    )
+
+    telegram = models.TextField(verbose_name='Telegrama SYNOP')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='Creada')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Actualizada')
+
+    class Meta:
+        verbose_name = 'Observación'
+        verbose_name_plural = 'Observaciones'
+        ordering = ('-obs_date', '-hour')
+        default_permissions = ()
+        permissions = (
+            ('view_observation', 'Ver'),
+            ('add_observation', 'Añadir'),
+            ('change_observation', 'Editar'),
+            ('delete_observation', 'Eliminar'),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=('station', 'obs_date', 'hour'),
+                name='meteo_unique_observation_slot',
+            ),
+        )
+
+    def __str__(self):
+        return (
+            f'{self.station.name} {self.get_observation_type_display()} '
+            f'{_dia_local(self.obs_date)} {self.hour}:00 UTC'
+        )
+
+    @property
+    def is_synoptic(self):
+        return self.observation_type == self.Type.SYNOPTIC
+
+    @property
+    def filename(self):
+        from apps.api.data.SynopTelegram import telegram_filename
+
+        return telegram_filename(self.station.number, self.hour)
+
+    @property
+    def visibility_label(self):
+        from apps.api.data.Tablas import Tablas
+
+        return Tablas().VV.get(self.visibility, self.visibility)
+
+    @property
+    def wind_direction_label(self):
+        from apps.api.data.Tablas import Tablas
+
+        return Tablas().dd.get(self.wind_direction, self.wind_direction)
