@@ -109,11 +109,12 @@ def _session2(values, hour: str) -> str:
         '30///',
         '56909',
         '58012',
-        '81826=',
     ]
     rain_24h = _rain_24h(values.get('precipitation_24h'), values.get('precipitation_24h_trace'))
     if rain_24h is not None:
         groups.append(f'7{rain_24h}')
+    # El terminador de sección cierra la línea: ningún grupo va después del '='.
+    groups.append('81826=')
     return ' '.join(groups)
 
 

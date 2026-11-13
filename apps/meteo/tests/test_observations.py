@@ -146,6 +146,14 @@ class SynopTelegramTests(SimpleTestCase):
         self.assertIn(' 69901 ', session1)
         self.assertIn(' 79999', text)
 
+    def test_section_terminator_closes_the_synoptic_line(self):
+        values = {**VALUES, 'precipitation_24h': 5.4}
+        text = build_telegram(values, 78355, '12', date(2026, 11, 13))
+        groups = text.splitlines()[2].split()
+
+        self.assertEqual(groups[-1], '81826=')
+        self.assertIn('70054', groups[:-1])
+
     def test_filename_follows_the_sm_si_convention(self):
         self.assertEqual(telegram_filename(78355, '00'), 'SM355.00')
         self.assertEqual(telegram_filename(78355, '12'), 'SM355.12')
