@@ -266,6 +266,29 @@ class ObservationFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('precipitation_3h', form.errors)
 
+    def test_weather_codes_come_from_the_wmo_tables(self):
+        form = ObservationForm(user=self.observer)
+        self.assertEqual(
+            [code for code, _ in form.fields['present_weather'].choices],
+            list(Tablas().ww),
+        )
+        self.assertEqual(
+            [code for code, _ in form.fields['past_weather'].choices],
+            list(Tablas().W),
+        )
+        self.assertEqual(
+            [code for code, _ in form.fields['past_weather_2'].choices],
+            list(Tablas().W),
+        )
+
+        unknown_ww = ObservationForm(data=self._payload(present_weather='100'), user=self.observer)
+        self.assertFalse(unknown_ww.is_valid())
+        self.assertIn('present_weather', unknown_ww.errors)
+
+        unknown_w = ObservationForm(data=self._payload(past_weather='10'), user=self.observer)
+        self.assertFalse(unknown_w.is_valid())
+        self.assertIn('past_weather', unknown_w.errors)
+
     def test_station_choices_are_limited_to_the_user_membership(self):
         form = ObservationForm(user=self.observer)
         self.assertEqual(list(form.fields['station'].queryset), [self.station_a])

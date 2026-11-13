@@ -32,17 +32,55 @@ OCTAS_CHOICES = [
     (8, '8 — Cubierto'),
 ]
 
-CLOUD_TYPE_CHOICES = [(str(value), f'Tipo {value}') for value in range(10)]
+# Tipos de nubes bajas, medias y altas: tablas 15, 16 y 17 del FM12 (OMM).
+CLOUD_TYPE_CHOICES = {
+    'low_cloud_type': [
+        ('0', '0 — No hay nubes bajas'),
+        ('1', '1 — Cumulus humilis o fractus'),
+        ('2', '2 — Cumulus mediocris o congestus'),
+        ('3', '3 — Cumulonimbus calvus'),
+        ('4', '4 — Stratocumulus cumulogenitus'),
+        ('5', '5 — Stratocumulus no cumulogenitus'),
+        ('6', '6 — Stratus nebulosus o fractus de buen tiempo'),
+        ('7', '7 — Stratus fractus o Cumulus fractus de mal tiempo (pannus)'),
+        ('8', '8 — Cumulus y Stratocumulus con bases a distinto nivel'),
+        ('9', '9 — Cumulonimbus capillatus, a menudo con yunque'),
+    ],
+    'medium_cloud_type': [
+        ('0', '0 — No hay nubes medias'),
+        ('1', '1 — Altostratus translúcidos'),
+        ('2', '2 — Altostratus opacos o Nimbostratus'),
+        ('3', '3 — Altocumulus translúcidos a un solo nivel'),
+        ('4', '4 — Bancos de Altocumulus translúcidos cambiando a varios niveles'),
+        ('5', '5 — Altocumulus en bandas o capas invadiendo el cielo'),
+        ('6', '6 — Altocumulus cumulogenitus'),
+        ('7', '7 — Altocumulus en dos o más capas, con Altostratus o Nimbostratus'),
+        ('8', '8 — Altocumulus castellanus o floccus'),
+        ('9', '9 — Altocumulus de cielo caótico a varios niveles'),
+    ],
+    'high_cloud_type': [
+        ('0', '0 — No hay nubes altas'),
+        ('1', '1 — Cirrus fibratus o uncinus sin invadir el cielo'),
+        ('2', '2 — Cirrus spissatus, castellanus o floccus'),
+        ('3', '3 — Cirrus spissatus cumulonimbogenitus'),
+        ('4', '4 — Cirrus uncinus o fibratus invadiendo el cielo'),
+        ('5', '5 — Cirrus y Cirrostratus, velo continuo bajo los 45°'),
+        ('6', '6 — Cirrus y Cirrostratus, velo continuo sobre los 45°'),
+        ('7', '7 — Cirrostratus cubriendo todo el cielo'),
+        ('8', '8 — Cirrostratus sin invadir el cielo ni cubrirlo por completo'),
+        ('9', '9 — Cirrocumulus predominando entre las nubes altas'),
+    ],
+}
 
 HOUR_CHOICES = [
-    ('00', '00 UTC — Sinóptica'),
-    ('03', '03 UTC — Intermedia'),
-    ('06', '06 UTC — Sinóptica'),
-    ('09', '09 UTC — Intermedia'),
-    ('12', '12 UTC — Sinóptica'),
-    ('15', '15 UTC — Intermedia'),
-    ('18', '18 UTC — Sinóptica'),
-    ('21', '21 UTC — Intermedia'),
+    ('00', '00 UTC'),
+    ('03', '03 UTC'),
+    ('06', '06 UTC'),
+    ('09', '09 UTC'),
+    ('12', '12 UTC'),
+    ('15', '15 UTC'),
+    ('18', '18 UTC'),
+    ('21', '21 UTC'),
 ]
 
 
@@ -75,14 +113,18 @@ def _select():
     return forms.Select(attrs={'class': 'form-select'})
 
 
-def _number(**attrs):
-    base = {'class': 'form-control', 'step': '0.1', 'inputmode': 'decimal'}
-    base.update(attrs)
-    return forms.TextInput(attrs=base)
+def _number(placeholder=None):
+    attrs = {'class': 'form-control', 'step': '0.1', 'inputmode': 'decimal'}
+    if placeholder:
+        attrs['placeholder'] = placeholder
+    return forms.TextInput(attrs=attrs)
 
 
-def _integer():
-    return forms.TextInput(attrs={'class': 'form-control', 'inputmode': 'numeric'})
+def _integer(placeholder=None):
+    attrs = {'class': 'form-control', 'inputmode': 'numeric'}
+    if placeholder:
+        attrs['placeholder'] = placeholder
+    return forms.TextInput(attrs=attrs)
 
 
 class ObservationForm(forms.ModelForm):
@@ -108,32 +150,34 @@ class ObservationForm(forms.ModelForm):
         coerce=int,
         widget=_select(),
     )
-    present_weather = forms.CharField(
+    present_weather = forms.ChoiceField(
         label='Tiempo presente (ww)',
-        max_length=2,
-        widget=_integer(),
+        choices=_code_choices(Tablas().ww),
+        widget=_select(),
         help_text='Código ww de 00 a 99.',
     )
-    past_weather = forms.CharField(
+    past_weather = forms.ChoiceField(
         label='Tiempo pasado (W1)',
-        max_length=1,
-        widget=_integer(),
+        choices=_code_choices(Tablas().W),
+        widget=_select(),
         help_text='Código W1 de 0 a 9.',
     )
-    past_weather_2 = forms.CharField(
+    past_weather_2 = forms.ChoiceField(
         label='Tiempo pasado (W2)',
-        max_length=1,
-        widget=_integer(),
+        choices=_code_choices(Tablas().W),
+        widget=_select(),
         help_text='Código W2 de 0 a 9.',
     )
     low_cloud_type = forms.ChoiceField(
-        label='Nubes bajas (CL)', choices=CLOUD_TYPE_CHOICES, widget=_select()
+        label='Nubes bajas (CL)', choices=CLOUD_TYPE_CHOICES['low_cloud_type'], widget=_select()
     )
     medium_cloud_type = forms.ChoiceField(
-        label='Nubes medias (CM)', choices=CLOUD_TYPE_CHOICES, widget=_select()
+        label='Nubes medias (CM)',
+        choices=CLOUD_TYPE_CHOICES['medium_cloud_type'],
+        widget=_select(),
     )
     high_cloud_type = forms.ChoiceField(
-        label='Nubes altas (CH)', choices=CLOUD_TYPE_CHOICES, widget=_select()
+        label='Nubes altas (CH)', choices=CLOUD_TYPE_CHOICES['high_cloud_type'], widget=_select()
     )
 
     class Meta:
@@ -169,17 +213,17 @@ class ObservationForm(forms.ModelForm):
         widgets = {
             'station': _select(),
             'observation_type': _select(),
-            'wind_speed': _integer(),
-            'temperature': _number(),
-            'dew_point': _number(),
-            'station_pressure': _number(),
-            'sea_pressure': _number(),
-            'pressure_change': _number(),
-            'precipitation_3h': _number(),
+            'wind_speed': _integer('ej. 12'),
+            'temperature': _number('ej. 28.4'),
+            'dew_point': _number('ej. 21.0'),
+            'station_pressure': _number('ej. 1013.2'),
+            'sea_pressure': _number('ej. 1013.5'),
+            'pressure_change': _number('ej. 0.8'),
+            'precipitation_3h': _number('ej. 0.0'),
             'precipitation_3h_trace': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-            'max_temperature': _number(),
-            'min_temperature': _number(),
-            'precipitation_24h': _number(),
+            'max_temperature': _number('ej. 31.5'),
+            'min_temperature': _number('ej. 22.1'),
+            'precipitation_24h': _number('ej. 5.4'),
             'precipitation_24h_trace': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         }
 
@@ -228,24 +272,6 @@ class ObservationForm(forms.ModelForm):
         value = self.cleaned_data.get('precipitation_24h')
         if value is not None and value < 0:
             raise forms.ValidationError('La precipitación no puede ser negativa.')
-        return value
-
-    def clean_present_weather(self):
-        value = (self.cleaned_data.get('present_weather') or '').strip()
-        if not value.isdigit() or not 0 <= int(value) <= 99:
-            raise forms.ValidationError('El tiempo presente es un código de 00 a 99.')
-        return f'{int(value):02d}'
-
-    def clean_past_weather(self):
-        return self._clean_weather_digit('past_weather', 'El tiempo pasado W1')
-
-    def clean_past_weather_2(self):
-        return self._clean_weather_digit('past_weather_2', 'El tiempo pasado W2')
-
-    def _clean_weather_digit(self, field, label):
-        value = (self.cleaned_data.get(field) or '').strip()
-        if not value.isdigit() or int(value) > 9:
-            raise forms.ValidationError(f'{label} es un código de 0 a 9.')
         return value
 
     def clean(self):
