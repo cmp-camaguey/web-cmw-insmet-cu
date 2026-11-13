@@ -1,3 +1,4 @@
+import base64
 import io
 import ipaddress
 import json
@@ -16,12 +17,82 @@ from django.views.generic import TemplateView
 from PIL import Image
 
 from apps.core.utils import rate_limit_ip
-from apps.home.data.plot_generators import generate_skewt, generate_skewt_file
 from apps.home.forms import GifDownloadForm, MeteoDataForm, MeteogramForm, SoundingForm
 from apps.meteo.models import Town
 
 # Configurar logger
 logger = logging.getLogger(__name__)
+
+# API externa de modelos: entrega el Skew-T + hodógrafo ya dibujado.
+SOUNDING_API_URL = 'https://modelo.cmw.insmet.cu/api/sounding/'
+
+SOUNDING_EXPORT_CONTENT_TYPES = {
+    'png': 'image/png',
+    'pdf': 'application/pdf',
+    'svg': 'image/svg+xml',
+}
+
+
+class SoundingAPIError(Exception):
+    """Fallo al obtener el gráfico de sondeo de la API externa de modelos."""
+
+    def __init__(self, message, status=502):
+        super().__init__(message)
+        self.status = status
+
+
+def _decode_sounding_json(data):
+    """Extraer ``(plot_bytes, datetime)`` del sobre JSON de la API de sondeo."""
+    if not isinstance(data, dict) or data.get('status') == 'error':
+        raise SoundingAPIError('La API de sondeo no respondió correctamente.')
+
+    raw_plot = data.get('plot_image') or data.get('image')
+    if not isinstance(raw_plot, str) or not raw_plot:
+        raise SoundingAPIError('La API de sondeo no devolvió ningún gráfico.')
+
+    # La API puede entregar un data URI (`data:image/png;base64,...`) o solo el base64.
+    payload = raw_plot.split(',', 1)[1] if raw_plot.startswith('data:') else raw_plot
+    try:
+        return base64.b64decode(payload), data.get('datetime')
+    except ValueError:
+        raise SoundingAPIError('La imagen devuelta por la API de sondeo no es válida.') from None
+
+
+def fetch_sounding_plot(params):
+    """Pedir a la API externa el Skew-T + hodógrafo y devolver ``(bytes, datetime)``.
+
+    La API puede responder el gráfico en crudo (``image/*``) o un sobre JSON con el
+    gráfico en base64 (``plot_image`` / ``image``). Los errores de upstream se
+    traducen a ``SoundingAPIError`` con el status HTTP que corresponde al usuario.
+    """
+    try:
+        response = requests.get(
+            f'{SOUNDING_API_URL}?{urlencode(params)}',
+            timeout=30,
+            verify=False,  # nosec B501
+        )
+    except requests.RequestException as error:
+        raise SoundingAPIError(
+            'No se pudo conectar con la API de sondeo en este momento.'
+        ) from error
+
+    if response.status_code == 404:
+        raise SoundingAPIError(
+            'No hay datos de sondeo disponibles para los parámetros seleccionados.',
+            status=404,
+        )
+
+    try:
+        response.raise_for_status()
+    except requests.RequestException as error:
+        raise SoundingAPIError('La API de sondeo no respondió correctamente.') from error
+
+    if 'json' not in response.headers.get('Content-Type', '').lower():
+        if not response.content:
+            raise SoundingAPIError('La API de sondeo no devolvió ningún gráfico.')
+        return response.content, None
+
+    return _decode_sounding_json(response.json())
 
 
 class MapaView(TemplateView):
@@ -302,65 +373,49 @@ class SoundingView(TemplateView):
                 {'status': 'error', 'errors': form.errors.get_json_data()}, status=400
             )
 
+        # Construir la petición con las coordenadas del municipio; el gráfico lo
+        # dibuja la API externa, el portal solo la reenvía.
+        town = form.cleaned_data['town']
+        params = {
+            'datetime_init': form.cleaned_data['datetime_init'],
+            'lat': town.latitude,
+            'long': town.longitude,
+            't_index': form.cleaned_data['t_index'] - 1,
+        }
+
         try:
-            # Obtener el municipio seleccionado
-            town = form.cleaned_data['town']
-
-            # Construir URL para la API de sondeo usando las coordenadas del municipio
-            params = {
-                'datetime_init': form.cleaned_data['datetime_init'],
-                'lat': town.latitude,  # Usar latitud del municipio
-                'long': town.longitude,  # Usar longitud del municipio
-                't_index': form.cleaned_data['t_index'] - 1,
-            }
-            api_url = f'https://modelo.cmw.insmet.cu/api/sounding/?{urlencode(params)}'
-
-            # Obtener datos del sondeo
-            response = requests.get(api_url, timeout=10, verify=False)  # nosec B501
-            response.raise_for_status()
-            sounding_data = response.json()
-
-            # Generar el gráfico Skew-T
-            img_base64 = generate_skewt(sounding_data)
-
-            return JsonResponse(
-                {
-                    'status': 'success',
-                    'plot_image': img_base64,
-                    'datetime': sounding_data.get('datetime'),
-                    'params': params,
-                },
-                content_type='application/json',
-            )
-
-        except requests.exceptions.RequestException:
-            logger.error('Error al conectar con la API de sondeo', exc_info=True)
-            return JsonResponse(
-                {'status': 'error', 'message': 'Error al conectar con la API de sondeo.'},
-                status=500,
-            )
+            plot_bytes, sounding_datetime = fetch_sounding_plot(params)
+        except SoundingAPIError as error:
+            logger.warning('Sondeo no disponible: %s', error)
+            return JsonResponse({'status': 'error', 'message': str(error)}, status=error.status)
         except Exception:
-            logger.error('Error al generar el gráfico', exc_info=True)
+            logger.exception('Error interno del servidor en SoundingView:')
             return JsonResponse(
-                {'status': 'error', 'message': 'Error al generar el gráfico.'}, status=500
+                {'status': 'error', 'message': 'Error interno del servidor'}, status=500
             )
+
+        return JsonResponse(
+            {
+                'status': 'success',
+                'plot_image': base64.b64encode(plot_bytes).decode('ascii'),
+                'datetime': sounding_datetime,
+                'params': params,
+            },
+            content_type='application/json',
+        )
 
 
 class SoundingExportView(View):
     """
-    Vista para exportar el gráfico Skew-T + hodógrafo en PNG / PDF / SVG.
+    Vista para exportar el Skew-T + hodógrafo en PNG / PDF / SVG.
 
-    Reutiliza el flujo de obtención de datos y generación de sondeos de
-    ``SoundingView.post`` y lo devuelve como un archivo descargable.
+    El gráfico lo genera la API externa de modelos: aquí solo se reenvía el
+    formato pedido y se sirve el archivo resultante como descarga.
     """
 
     ALLOWED_FMT = {'png', 'pdf', 'svg'}
 
-    CONTENT_TYPES = {
-        'png': 'image/png',
-        'pdf': 'application/pdf',
-        'svg': 'image/svg+xml',
-    }
+    CONTENT_TYPES = SOUNDING_EXPORT_CONTENT_TYPES
 
     def get(self, request, *args, **kwargs):
         fmt = kwargs.get('fmt', '')
@@ -369,37 +424,32 @@ class SoundingExportView(View):
         if fmt not in self.ALLOWED_FMT:
             return HttpResponse('Formato de exportación no soportado', status=400)
 
+        town = Town.objects.filter(latitude=21.3786, longitude=-77.9186).first()
+        if not town:
+            return HttpResponse('No se pudo determinar la ubicación', status=500)
+
+        params = {
+            'datetime_init': f'{datetime.now().strftime("%Y%m%d")}00',
+            'lat': town.latitude,
+            'long': town.longitude,
+            't_index': 0,
+            'fmt': fmt,
+        }
+
         try:
-            town = Town.objects.filter(latitude=21.3786, longitude=-77.9186).first()
-            if not town:
-                return HttpResponse('No se pudo determinar la ubicación', status=500)
-
-            params = {
-                'datetime_init': f'{datetime.now().strftime("%Y%m%d")}00',
-                'lat': town.latitude,
-                'long': town.longitude,
-                't_index': 0,
-            }
-            api_url = f'https://modelo.cmw.insmet.cu/api/sounding/?{urlencode(params)}'
-
-            response = requests.get(api_url, timeout=10, verify=False)  # nosec B501
-            response.raise_for_status()
-            sounding_data = response.json()
-
-            file_bytes = generate_skewt_file(sounding_data, fmt)
-
-            stamp = datetime.now().strftime('%Y%m%d%H%M%S')
-            filename = f'sounding_{stamp}.{fmt}'
-            http_response = HttpResponse(file_bytes, content_type=self.CONTENT_TYPES[fmt])
-            http_response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            return http_response
-
-        except requests.exceptions.RequestException:
-            logger.error('Error al conectar con la API de sondeo', exc_info=True)
-            return HttpResponse('Error al conectar con la API de sondeo.', status=502)
+            file_bytes, _ = fetch_sounding_plot(params)
+        except SoundingAPIError as error:
+            logger.warning('Exportación de sondeo no disponible: %s', error)
+            return HttpResponse(str(error), status=error.status)
         except Exception:
-            logger.error('Error al generar el gráfico de exportación', exc_info=True)
+            logger.exception('Error interno al exportar el sondeo')
             return HttpResponse('Error al generar el gráfico.', status=500)
+
+        stamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        filename = f'sounding_{stamp}.{fmt}'
+        http_response = HttpResponse(file_bytes, content_type=self.CONTENT_TYPES[fmt])
+        http_response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return http_response
 
 
 @method_decorator(rate_limit_ip(limit=300, window=3600, key_prefix='rl_proxy'), name='dispatch')
