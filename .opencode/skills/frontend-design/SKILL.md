@@ -52,7 +52,7 @@ Las palabras aparecen por una razón: hacer más fácil de entender y usar. Son 
 | Necesidad | Recurso |
 |---|---|
 | Icono/componente Tabler | Buscar en la documentación Tabler antes de inventar |
-| Gráfico meteorológico | Generadores en `apps/home/data/plot_generators.py` |
+| Gráfico meteorológico | Lo entrega la API externa de modelos; `SoundingView` y `SoundingExportView` solo reenvían |
 | Página pública | Plantillas en `templates/` con `layouts/` e `includes/` |
 
 ## Execution Steps
