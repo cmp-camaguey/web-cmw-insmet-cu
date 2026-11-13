@@ -1,4 +1,5 @@
 {% extends 'layouts/dashboard.html' %}
+{% load my_filters %}
 {% block title_actions %}
   <div class="col-auto ms-auto d-print-none">
     <a href="{{ url_list }}" class="btn btn-secondary">
@@ -132,11 +133,11 @@
           </div>
           <div class="mb-2">
             <span class="text-secondary">Creada</span>
-            <div class="fw-medium">{{ observation.created_at|date:'d/m/Y H:i' }}</div>
+            <div class="fw-medium">{{ observation.created_at|local_datetime:'d/m/Y' }}</div>
           </div>
           <div>
             <span class="text-secondary">Última actualización</span>
-            <div class="fw-medium">{{ observation.updated_at|date:'d/m/Y H:i' }}</div>
+            <div class="fw-medium">{{ observation.updated_at|local_datetime:'d/m/Y' }}</div>
           </div>
         </div>
       </div>

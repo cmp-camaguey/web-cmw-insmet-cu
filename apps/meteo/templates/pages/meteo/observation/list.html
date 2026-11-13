@@ -62,7 +62,7 @@
     {% endif %}
   </td>
   <td>{{ object.user.username|default:'—' }}</td>
-  <td class="text-muted small">{{ object.updated_at|date:'d/m/Y H:i' }}</td>
+  <td class="text-muted small">{{ object.updated_at|local_datetime:'d/m/Y' }}</td>
   <td class="text-end">
     <a href="{% url 'meteo:observacion_detail' object.uuid %}"
        type="button"

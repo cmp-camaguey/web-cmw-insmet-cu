@@ -7,10 +7,11 @@ Regla de dominio (INSMET / protocolo AAXX):
   embebe el **día actual**.
 - Los **restantes horarios** (``06/09/12/15/18/21``): **día actual**.
 
-El "día actual" se toma en la **zona horaria local (America/Havana)**, no en
-UTC: las observaciones 06-21 del día en curso se sirven con ese día, y las
-SYNOP 00/03 de la madrugada siguiente se catalogan con el día +1 (el mismo
-que embeben por protocolo).
+El "día actual" se toma en la **zona horaria configurada en el sitio**
+(``SiteConfiguration``), no en UTC: las observaciones 06-21 del día en curso se
+sirven con ese día, y las SYNOP 00/03 de la madrugada siguiente se catalogan con
+el día +1 (el mismo que embeben por protocolo).  Si el sitio cambia de zona,
+el día del telegrama acompaña ese cambio.
 
 Esta es la ÚNICA fuente de verdad. Tanto el generador (``views.py``, que
 calcula ``obs_date``) como la validación (``GetData.get_station``, que acepta
@@ -19,11 +20,25 @@ comportan SIEMPRE de la misma manera y es imposible que diverjan.
 """
 
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 POSTERIOR_HOURS = frozenset({'00', '03'})
 
-CUBA_TZ = ZoneInfo('America/Havana')
+
+def observation_timezone():
+    """Zona horaria con la que se cuenta el día de la observación.
+
+    Es la misma que ve el usuario en pantalla: la de ``SiteConfiguration``.  Si
+    el registro aún no existe (instalación recién migrada) cae a la zona del
+    servidor, que es el valor por defecto de esa configuración.
+    """
+    from django.utils import timezone as django_timezone
+
+    from apps.core.models import SiteConfiguration
+
+    config = SiteConfiguration.objects.first()
+    if config is None:
+        return django_timezone.get_default_timezone()
+    return config.get_timezone()
 
 
 def synop_expected_obs_date(hour: str, now: datetime | None = None) -> date:
@@ -31,16 +46,17 @@ def synop_expected_obs_date(hour: str, now: datetime | None = None) -> date:
 
     ``hour`` debe ser uno de los horarios SYNOP (``00``...``21``, formato HH).
     ``now`` es el instante de referencia en cualquier zona; por defecto es la
-    hora actual en ``America/Havana`` (la zona de observación).  Si ``now`` es
-    *naive* se interpreta ya en hora local de Cuba.
+    hora actual en la zona del sitio.  Si ``now`` es *naive* se interpreta ya en
+    hora local del sitio.
 
     Devuelve el día que la SYNOP de ``hour`` debe llevar en su grupo ``YY``
     (cabecera ``AAXX YY GG``).
     """
+    local_tz = observation_timezone()
     if now is None:
-        now = datetime.now(CUBA_TZ)
+        now = datetime.now(local_tz)
     elif now.tzinfo is not None:
-        now = now.astimezone(CUBA_TZ)
+        now = now.astimezone(local_tz)
     if hour in POSTERIOR_HOURS:
         if now.hour < int(hour):
             return now.date()  # petición en horas anteriores → día actual

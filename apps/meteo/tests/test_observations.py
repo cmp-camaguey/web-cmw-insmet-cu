@@ -7,7 +7,7 @@ el modo automático en consulta y el interruptor del panel de entorno.
 """
 
 import tempfile
-from datetime import date
+from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -109,6 +109,35 @@ def _add_role(user, station_number, role):
     group, _ = Group.objects.get_or_create(name=group_name(station_number, role))
     group.permissions.add(*_permissions(ROLE_PERMISSION_CODES[role]))
     user.groups.add(group)
+
+
+def _site_config(**fields):
+    """Singleton del sitio con los campos indicados."""
+    config, _ = SiteConfiguration.objects.get_or_create(defaults={'maintenance_mode': False})
+    for name, value in fields.items():
+        setattr(config, name, value)
+    config.save()
+    return config
+
+
+class SynopDayTests(TestCase):
+    def test_observation_day_follows_the_site_timezone(self):
+        _site_config(
+            timezone_mode=SiteConfiguration.TimeZoneMode.MANUAL,
+            utc_offset_hours=12,
+        )
+        # 20:00 UTC son las 08:00 del día 14 en un sitio a +12, pero las 15:00
+        # del día 13 en la zona del servidor (-5).
+        now = datetime(2026, 11, 13, 20, 0, tzinfo=UTC)
+
+        self.assertEqual(synop_expected_obs_date('12', now), date(2026, 11, 14))
+
+    def test_observation_day_falls_back_to_the_server_timezone_without_config(self):
+        SiteConfiguration.objects.all().delete()
+        # 03:00 UTC son las 22:00 del día 12 en la zona del servidor.
+        now = datetime(2026, 11, 13, 3, 0, tzinfo=UTC)
+
+        self.assertEqual(synop_expected_obs_date('12', now), date(2026, 11, 12))
 
 
 class SynopTelegramTests(SimpleTestCase):
@@ -361,6 +390,28 @@ class ObservationScopeTests(TestCase):
         self.assertContains(response, '78355')
         self.assertNotContains(response, '78350')
         self.assertContains(response, 'observador-a')
+
+    def test_timestamps_follow_the_site_time_format(self):
+        _site_config(
+            timezone_mode=SiteConfiguration.TimeZoneMode.MANUAL,
+            utc_offset_hours=-5,
+            time_format=SiteConfiguration.TimeFormat.H12,
+        )
+        # 21:05 UTC son las 16:05 en el sitio (-5), que en formato 12 h es 04:05 PM.
+        Observation.objects.filter(pk=self.observation_a.pk).update(
+            updated_at=datetime(2026, 11, 13, 21, 5, tzinfo=UTC)
+        )
+
+        self.client.force_login(self.observer_a)
+        detail = self.client.get(
+            reverse('meteo:observacion_detail', args=[self.observation_a.uuid])
+        )
+        listing = self.client.get(reverse('meteo:observacion_list'))
+
+        self.assertContains(detail, '04:05 PM')
+        self.assertNotContains(detail, '16:05')
+        self.assertContains(listing, '04:05 PM')
+        self.assertNotContains(listing, '16:05')
 
     def test_user_without_permission_gets_403(self):
         self.client.force_login(self.stranger)
