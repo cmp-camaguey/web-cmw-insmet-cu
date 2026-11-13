@@ -218,8 +218,7 @@ def build_env(*, production: bool, encrypted_secret_key: str, encryption_key: st
     else:
         parts.append(
             '# PostgreSQL local. El rol necesita CREATEDB porque la suite crea su propia base\n'
-            '# de tests. Los pasos para crearlo están en el README, sección\n'
-            '# "PostgreSQL en desarrollo".\n'
+            '# de tests. Los pasos para crearlo están en docs/1-instalacion.md.\n'
         )
         parts.append('DB_ENGINE=postgresql\n')
         parts.append('DB_NAME=webcmp_dev\n')
@@ -277,7 +276,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description='Genera el .env del proyecto. No interactivo: el modo se declara explícito.',
     )
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--development', action='store_true', help='Perfil de desarrollo (SQLite)')
+    mode.add_argument(
+        '--development', action='store_true', help='Perfil de desarrollo (PostgreSQL local)'
+    )
     mode.add_argument('--production', action='store_true', help='Perfil de producción (PostgreSQL)')
     parser.add_argument(
         '--rotate-keys',
