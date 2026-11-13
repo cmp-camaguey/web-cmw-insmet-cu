@@ -343,39 +343,41 @@ class ObservationScopeTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def _payload(self, **overrides):
+        data = {
+            'station': self.station_a.pk,
+            'observation_type': 'synoptic',
+            'hour': '12',
+            'cloud_amount': 5,
+            'cloud_base_height': 8,
+            'visibility': '20',
+            'wind_direction': '07',
+            'wind_speed': 4,
+            'temperature': '28.5',
+            'dew_point': '24.1',
+            'station_pressure': '1013.2',
+            'sea_pressure': '1015.8',
+            'pressure_tendency': 4,
+            'pressure_change': '1.2',
+            'precipitation_3h': '12.3',
+            'present_weather': '61',
+            'past_weather': '7',
+            'past_weather_2': '7',
+            'low_cloud_type': '1',
+            'medium_cloud_type': '2',
+            'high_cloud_type': '1',
+            'max_temperature': '31.2',
+            'min_temperature': '22.4',
+        }
+        data.update(overrides)
+        return data
+
     def test_observer_creates_an_observation_and_its_file(self):
         self.client.force_login(self.observer_a)
         today = synop_expected_obs_date('12')
         Observation.objects.filter(station=self.station_a, hour='12', obs_date=today).delete()
 
-        response = self.client.post(
-            reverse('meteo:observacion_create'),
-            {
-                'station': self.station_a.pk,
-                'observation_type': 'synoptic',
-                'hour': '12',
-                'cloud_amount': 5,
-                'cloud_base_height': 8,
-                'visibility': '20',
-                'wind_direction': '07',
-                'wind_speed': 4,
-                'temperature': '28.5',
-                'dew_point': '24.1',
-                'station_pressure': '1013.2',
-                'sea_pressure': '1015.8',
-                'pressure_tendency': 4,
-                'pressure_change': '1.2',
-                'precipitation_3h': '12.3',
-                'present_weather': '61',
-                'past_weather': '7',
-                'past_weather_2': '7',
-                'low_cloud_type': '1',
-                'medium_cloud_type': '2',
-                'high_cloud_type': '1',
-                'max_temperature': '31.2',
-                'min_temperature': '22.4',
-            },
-        )
+        response = self.client.post(reverse('meteo:observacion_create'), self._payload())
 
         self.assertEqual(response.status_code, 302)
         observation = Observation.objects.get(station=self.station_a, hour='12', obs_date=today)
@@ -384,6 +386,35 @@ class ObservationScopeTests(TestCase):
         self.assertTrue(
             ActivityLog.objects.filter(user=self.observer_a, object_id=str(observation.pk)).exists()
         )
+
+    def test_update_and_delete_of_another_station_are_not_found(self):
+        self.client.force_login(self.chief_a)
+        observation_b = Observation.objects.get(pk=self.observation_b.pk)
+
+        update_url = reverse('meteo:observacion_update', args=[observation_b.uuid])
+        self.assertEqual(self.client.get(update_url).status_code, 404)
+        self.assertEqual(self.client.post(update_url, self._payload()).status_code, 404)
+
+        delete_url = reverse('meteo:observacion_delete', args=[observation_b.uuid])
+        self.assertEqual(self.client.post(delete_url).status_code, 404)
+        self.assertTrue(Observation.objects.filter(pk=observation_b.pk).exists())
+
+    def test_rejected_submission_creates_neither_record_nor_file(self):
+        self.client.force_login(self.observer_a)
+        today = synop_expected_obs_date('12')
+        Observation.objects.filter(station=self.station_a, hour='12', obs_date=today).delete()
+
+        response = self.client.post(
+            reverse('meteo:observacion_create'),
+            self._payload(hour='09', observation_type='synoptic'),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            Observation.objects.filter(station=self.station_a, hour='09', obs_date=today).exists()
+        )
+        self.assertFalse((Path(self.tmp.name) / 'obs' / 'SM355.12').exists())
+        self.assertFalse((Path(self.tmp.name) / 'obs' / 'SI355.09').exists())
 
     def test_automatic_mode_keeps_the_section_read_only(self):
         self.client.force_login(self.observer_a)
