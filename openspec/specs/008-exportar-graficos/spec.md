@@ -1,70 +1,50 @@
 # Spec — 008-exportar-graficos (capability: graphic-export)
 
-Delta requirements for exporting the MetPy Skew-T + hodograph figure as PNG / PDF / SVG.
-All requirements are anchored to `apps/home/data/plot_generators.py` and the surrounding
-views/urls. RFC2119 keywords (MUST, SHOULD, MAY) are used below.
+Requirements for exporting the Skew-T + hodograph figure as PNG / PDF / SVG.
+The figure is built by the external model API (`https://modelo.cmw.insmet.cu/api/sounding/`);
+the portal only forwards the request and serves the bytes. Implementation:
+`SoundingExportView` and `fetch_sounding_plot` in `apps/home/views/modelos/views.py`.
+RFC2119 keywords (MUST, SHOULD, MAY) are used below.
 
 ## Requirement: GRAPHIC-EXPORT-FORMATS
 
-The system SHALL generate the Skew-T and hodograph figure in PNG, PDF, and SVG from the
-single figure-build routine at `apps/home/data/plot_generators.py:36-341`.
+The system SHALL request the figure in PNG, PDF, and SVG from the external sounding API,
+forwarding the requested `fmt`.
 
-### Scenario: Valid sounding data, PNG output
-- **Given** a `sounding_data` dict with keys `p, T, Td, u, v, z` each carrying `value`/`unit`
-  (per `plot_generators.py:21-33`)
-- **When** `generate_skewt_file(sounding_data, fmt='png')` is called
-- **Then** the returned bytes MUST begin with the PNG magic bytes (`\x89PNG\r\n\x1a\n`).
+### Scenario: Supported format
+- **Given** a GET to `models_sounding_export` with `fmt` in `{png, pdf, svg}`
+- **When** `SoundingExportView` executes
+- **Then** it MUST forward `fmt` to the external API and serve the returned bytes.
 
-### Scenario: Valid sounding data, PDF output
-- **Given** the same valid `sounding_data`
-- **When** `generate_skewt_file(sounding_data, fmt='pdf')` is called
-- **Then** the returned bytes MUST begin with `%PDF`.
-
-### Scenario: Valid sounding data, SVG output
-- **Given** the same valid `sounding_data`
-- **When** `generate_skewt_file(sounding_data, fmt='svg')` is called
-- **Then** the returned bytes MUST contain an `<svg` root element.
-
-### Scenario: Invalid input
-- **Given** a `sounding_data` missing any required key (`plot_generators.py:21`)
-- **When** generation is attempted
-- **Then** the function MUST raise `ValueError` (existing contract at `plot_generators.py:25`).
+### Scenario: Unsupported format
+- **Given** a GET to `models_sounding_export` with `fmt` outside `{png, pdf, svg}`
+- **When** `SoundingExportView` executes
+- **Then** the response MUST be HTTP 400 and the external API MUST NOT be called.
 
 ## Requirement: GRAPHIC-EXPORT-DOWNLOAD
 
 The system SHALL expose an HTTP endpoint that streams the figure bytes as a download.
 
 ### Scenario: Supported format requested
-- **Given** a GET to `models_sounding_export` (registered in `apps/home/urls.py`) with `fmt` in `{png, pdf, svg}`
-- **When** `SoundingExportView` executes (pattern: `DescargarGifView` at `apps/home/views/modelos/views.py:499`)
-- **Then** the response MUST have `Content-Type` `image/png` | `application/pdf` | `image/svg+xml`
-  and a `Content-Disposition: attachment; filename="sounding_<datetime>.<ext>"` header.
-
-### Scenario: Unsupported format requested
-- **Given** a GET to `models_sounding_export` with `fmt` outside `{png, pdf, svg}`
-- **When** `SoundingExportView` executes
-- **Then** the response MUST be HTTP 400.
+- **Given** the external API returns the figure
+- **When** `SoundingExportView` builds the response
+- **Then** the response MUST have `Content-Type` `image/png` | `application/pdf` |
+  `image/svg+xml` and a `Content-Disposition: attachment; filename="sounding_<stamp>.<ext>"`
+  header.
 
 ### Scenario: Upstream sounding API failure
-- **Given** the upstream `modelo.cmw.insmet.cu/api/sounding/` call fails (`apps/home/views/modelos/views.py:316`)
+- **Given** the external `modelo.cmw.insmet.cu/api/sounding/` call fails
 - **When** `SoundingExportView` executes
-- **Then** the response MUST be a non-2xx error (e.g. 502/500) and MUST NOT return a corrupt/empty file.
+- **Then** the response MUST be a non-2xx error (502 on connection or invalid payload, 404 when
+  the API has no data) and MUST NOT return a corrupt or empty file.
 
-## Requirement: GRAPHIC-EXPORT-BACKWARD-COMPAT
+## Requirement: GRAPHIC-EXPORT-INPAGE
 
-The existing in-page Skew-T rendering MUST remain functional and unchanged.
+The in-page Skew-T view MUST keep the JSON contract consumed by `static/dist/js/sounding.js`.
 
 ### Scenario: In-page JSON contract preserved
-- **Given** `SoundingView.post` (`apps/home/views/modelos/views.py:298`) calls `generate_skewt(sounding_data)` (`:324`)
-- **When** the change is deployed
-- **Then** the JSON response MUST still include `plot_image` as a base64 PNG string (`:326-334`),
-  and `generate_skewt` MUST remain a base64 wrapper over the new byte generator.
-
-## Requirement: GRAPHIC-EXPORT-REPORT-EMBED (SHOULD)
-
-The system SHOULD support embedding the figure into `xhtml2pdf` reports via a base64 data URI.
-
-### Scenario: Embed in PDF report
-- **Given** an `xhtml2pdf` report built with `pisa.pisaDocument` (`apps/meteo/views/weather_report.py:395`)
-- **When** a template embeds the figure using the existing `<img src="data:image/...;base64,...">` pattern (`weather_report.py:405`)
-- **Then** the figure MUST render; PDF embeds SHOULD use the PNG variant to bound SVG file size.
+- **Given** `SoundingView.post` fetches the figure from the external API
+- **When** the response is built
+- **Then** the JSON MUST include `plot_image` as a base64 PNG string, plus `datetime` and
+  `params`, whether the API answered the image raw (`image/*`, `application/pdf`) or as a JSON
+  envelope with `plot_image` / `image` in base64 or data URI.
