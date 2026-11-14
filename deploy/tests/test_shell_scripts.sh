@@ -3,16 +3,20 @@
 
 INSTALL_SH=$REPO_ROOT/deploy/install.sh
 DEPLOY_SH=$REPO_ROOT/deploy/deploy.sh
+APPLY_INSTALL_SH=$REPO_ROOT/deploy/install-apply-units.sh
 
 SCRIPTS=(
     deploy/install.sh
     deploy/deploy.sh
     deploy/autodeploy.sh
     deploy/apply-env.sh
+    deploy/install-apply-units.sh
     deploy/tests/run.sh
     deploy/tests/lib.sh
     deploy/tests/test_apply_env_sh.sh
     deploy/tests/test_install_sh_blocks.sh
+    deploy/tests/test_install_apply_units.sh
+    deploy/tests/test_deploy_sh_units.sh
     deploy/tests/test_deploy_sh_progress.sh
     deploy/tests/test_shell_scripts.sh
     run_huey.sh
@@ -47,6 +51,16 @@ deploy_help_rc=$?
 assert_eq 'deploy.sh --help sale 0' 0 "$deploy_help_rc"
 assert_contains 'deploy.sh --help explica el uso' 'webcmp-deploy <commit-sha>' "$deploy_help"
 
+apply_install_help=$(bash "$APPLY_INSTALL_SH" --help 2>&1)
+apply_install_help_rc=$?
+assert_eq 'install-apply-units.sh --help sale 0' 0 "$apply_install_help_rc"
+assert_contains 'install-apply-units.sh --help explica el uso' \
+    'sudo bash deploy/install-apply-units.sh' "$apply_install_help"
+assert_contains 'install-apply-units.sh --help nombra las piezas que instala' \
+    'webcmp-apply.path' "$apply_install_help"
+assert_contains 'install-apply-units.sh --help advierte que no toca el .env' \
+    'No toca el .env' "$apply_install_help"
+
 # El preflight de root va ANTES de cualquier mutacion. Se comprueba el codigo y
 # el mensaje, no solo "falla": un exit 1 por una variable sin definir tambien
 # seria 1 y no probaria nada.
@@ -62,6 +76,17 @@ else
     deploy_noroot_rc=$?
     assert_eq 'deploy.sh sin root sale 1' 1 "$deploy_noroot_rc"
     assert_contains 'deploy.sh sin root lo explica' 'necesita root' "$deploy_noroot_out"
+
+    apply_noroot_out=$(bash "$APPLY_INSTALL_SH" 2>&1)
+    apply_noroot_rc=$?
+    assert_eq 'install-apply-units.sh sin root sale 1' 1 "$apply_noroot_rc"
+    assert_contains 'install-apply-units.sh sin root lo explica' 'necesita root' "$apply_noroot_out"
+
+    apply_bad_out=$(bash "$APPLY_INSTALL_SH" --no-existe 2>&1)
+    apply_bad_rc=$?
+    assert_eq 'install-apply-units.sh rechaza una opcion desconocida' 1 "$apply_bad_rc"
+    assert_contains 'install-apply-units.sh nombra la opcion rechazada' \
+        '--no-existe' "$apply_bad_out"
 fi
 
 # El deploy es pull: nadie entra por red al servidor. Por eso el instalador no

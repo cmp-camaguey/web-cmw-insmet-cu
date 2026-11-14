@@ -3,6 +3,7 @@ import os
 import shutil
 import stat
 import tempfile
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,10 +14,12 @@ from django.test import RequestFactory, SimpleTestCase, TestCase, override_setti
 from django.urls import reverse
 
 from apps.core.env_apply import (
+    PENDING_GRACE_SECONDS,
     RUN_STALE_SECONDS,
     ApplyRequestPendingError,
     apply_status,
     can_request,
+    pending_request,
     request_apply,
 )
 from apps.core.env_config import (
@@ -789,6 +792,58 @@ class EnvApplyStatusTests(SimpleTestCase):
         self.assertFalse(can_request(Path(self.tempdir) / 'no-existe' / 'apply-request'))
 
 
+class EnvApplyPendingRequestTests(SimpleTestCase):
+    """Petición de reinicio que nadie recogió.
+
+    El ejecutor borra el archivo antes de hacer nada, así que una petición que
+    sigue en disco ya no describe un reinicio en curso. Sin esta comprobación el
+    panel no muestra nada, que es indistinguible de "nunca se pidió": el estado
+    exacto de un servidor al que le falta la unidad que vigila el archivo.
+    """
+
+    def setUp(self):
+        self.tempdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tempdir, ignore_errors=True)
+        self.path = Path(self.tempdir) / 'apply-request'
+
+    def _write(self, payload, age_seconds=0):
+        self.path.write_text(json.dumps(payload), encoding='utf-8')
+        if age_seconds:
+            past = time.time() - age_seconds
+            os.utime(self.path, (past, past))
+
+    def test_missing_file_reports_nothing(self):
+        self.assertIsNone(pending_request(self.path))
+
+    def test_fresh_request_is_not_reported_as_orphaned(self):
+        """Recién escrita, el ejecutor todavía puede recogerla."""
+        self._write({'requested_by': 'omar'})
+
+        self.assertIsNone(pending_request(self.path))
+
+    def test_old_request_names_who_asked_and_when(self):
+        self._write({'requested_by': 'omar'}, age_seconds=PENDING_GRACE_SECONDS + 10)
+
+        pending = pending_request(self.path)
+
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending['tone'], 'warning')
+        self.assertIn('quedó sin recoger', pending['text'])
+        self.assertIn('omar', pending['text'])
+        self.assertIn('systemctl status webcmp-apply.path', pending['text'])
+
+    def test_old_request_without_readable_content_still_reports(self):
+        """Lo que se informa es el archivo, no su contenido: el JSON roto no lo borra."""
+        self.path.write_text('{no es json', encoding='utf-8')
+        past = time.time() - (PENDING_GRACE_SECONDS + 10)
+        os.utime(self.path, (past, past))
+
+        pending = pending_request(self.path)
+
+        self.assertIsNotNone(pending)
+        self.assertNotIn('solicitada por', pending['text'])
+
+
 class EnvironmentApplyViewTests(EnvironmentViewTestBase):
     """El botón "Aplicar cambios": guarda y pide el reinicio en un solo paso."""
 
@@ -933,6 +988,25 @@ class EnvironmentApplyViewTests(EnvironmentViewTestBase):
 
         self.assertFalse(response.context['can_apply'])
         self.assertContains(response, 'solo se habilita con el sitio en mantenimiento')
+
+    def test_page_warns_when_the_request_was_never_picked_up(self):
+        """El síntoma del servidor sin la unidad: se pidió y no muestra nada."""
+        self.request_path.write_text('{"requested_by": "omar"}', encoding='utf-8')
+        past = time.time() - (PENDING_GRACE_SECONDS + 10)
+        os.utime(self.request_path, (past, past))
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, 'quedó sin recoger')
+        self.assertContains(response, 'omar')
+
+    def test_page_does_not_warn_right_after_requesting(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(self.apply_url, self._payload(), follow=True)
+
+        self.assertNotContains(response, 'quedó sin recoger')
         self.assertContains(response, f'href="{reverse("core:site_configuration")}"')
 
     def test_apply_is_refused_outside_the_maintenance_window(self):

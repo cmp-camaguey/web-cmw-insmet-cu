@@ -927,15 +927,25 @@ El ejecutor escribe `apply-status.json` y la pagina lo lee en cada visita:
 | `ok` | `systemctl restart` salio 0 | "Ultimo reinicio completado", con fecha y autor |
 | `failed` | `systemctl restart` fallo | "El ultimo reinicio fallo", con el motivo |
 | `stale` | `running` con mas de 180 s (`RUN_STALE_SECONDS`) | "quedo sin confirmar; revise los servicios" |
+| sin recoger | hay una peticion en disco con mas de 30 s (`PENDING_GRACE_SECONDS`) | "la peticion quedo sin recoger; la unidad no esta instalada o no esta activa" |
 
 `stale` existe porque un `running` eterno es peor que un aviso: systemd puede
 matar la unidad por timeout y el panel se quedaria "en curso" para siempre. Un
 estado que no se reconoce, o un JSON a medias, no se muestra como si fuera un
 resultado: la pagina no inventa.
 
+La fila **sin recoger** cubre el unico caso en el que, sin aviso, la pagina no
+decia nada: el operador pulsaba **Aplicar cambios**, leia "Cambios guardados y
+reinicio solicitado" y no volvia a ver nada nunca. El ejecutor borra el archivo
+**antes** de hacer nada, asi que una peticion que sigue en disco no esta en curso:
+no la proceso nadie. Es el estado exacto de un servidor al que le falta
+`webcmp-apply.path`; se arregla con el instalador de la seccion anterior.
+
 Si el directorio no es escribible por el proceso web, el boton queda
 deshabilitado y la pagina lo explica. En un servidor sin esta unidad instalada,
-**Guardar** sigue funcionando y el reinicio se hace a mano.
+**Guardar** sigue funcionando y el reinicio se hace a mano; el boton, en cambio,
+deja la peticion en disco y la pagina lo avisa pasados 30 s. La salida es
+instalar las piezas: `sudo bash /srv/webcmp/deploy/install-apply-units.sh`.
 
 ### Archivos y permisos
 
@@ -950,6 +960,55 @@ deshabilitado y la pagina lo explica. En un servidor sin esta unidad instalada,
 `install.sh` lo instala en `setup_apply()`, junto al andamiaje del boton
 "Actualizar". Con `--skip-deploy-scaffold` no se instala.
 
+### Instalarlo o repararlo sin volver a correr `install.sh`
+
+Las unidades systemd no viajan con el deploy: `deploy.sh` actualiza el checkout y
+reinicia los servicios, y a proposito no escribe en `/etc/systemd/system`, porque
+el checkout lo escribe el usuario del sitio y un unit escrito ahi seria un archivo
+que corre como root bajo su control.
+
+La consecuencia es que un servidor puede quedar corriendo un commit que pide una
+unidad que nunca se instalo. `deploy.sh` se niega a desplegar en ese estado y lo
+dice antes de tocar nada, pero no la instala. Para instalarla:
+
+```bash
+sudo bash /srv/webcmp/deploy/install-apply-units.sh
+sudo bash /srv/webcmp/deploy/install-apply-units.sh --help   # que hace y que no
+```
+
+Es idempotente y solo toca las tres piezas de esta seccion: el ejecutor, el
+`.service` y el `.path`. No reescribe el `.env`, no corre migraciones, no toca el
+venv ni el codigo, y una segunda corrida no cambia ningun archivo. `DRY_RUN=1`
+muestra los comandos sin ejecutarlos.
+
+Si las piezas ya estan instaladas, no hace falta correrlo: el deploy **habilita**
+el `.path` antes del health check. Es decir, un servidor que ya las tiene se
+arregla con el boton **Actualizar** del panel, sin entrar por SSH. Lo que el
+deploy no puede hacer es *instalarlas*: eso es escribir un archivo root a partir
+del checkout, y el checkout lo escribe el usuario del sitio.
+
+### Cuando el cambio toca `deploy.sh`
+
+El boton **Actualizar** ejecuta `/usr/local/sbin/webcmp-deploy`, que es una copia
+root de `deploy/deploy.sh`, no el archivo del checkout. Esa copia no se actualiza
+sola, y no puede hacerlo: si el checkout —escribible por el usuario del sitio—
+pudiera reemplazar un script que corre como root, el boton seria ejecucion
+remota como root. Cambiar `deploy.sh` en el repo, entonces, necesita una sola
+linea de root despues de que el commit este desplegado:
+
+```bash
+sudo install -o root -g root -m 0755 /srv/webcmp/deploy/deploy.sh /usr/local/sbin/webcmp-deploy
+```
+
+Desde ahi, cada **Actualizar** corre el `deploy.sh` nuevo. Es el mismo paso 2 del
+camino manual de mas arriba, y sigue siendo cierto: `install.sh` lo repite al
+reinstalar, pero no hace falta reinstalar nada para actualizar este archivo.
+
+Se niega a habilitar el `.path` si hay una peticion sin recoger en
+`/var/lib/webcmp/apply-request`: `PathExists=` dispara ese reinicio en el mismo
+instante en que la unidad queda activa, fuera de la ventana de mantenimiento.
+Cuando pasa, la salida dice como destrabarlo.
+
 ### Apagarlo
 
 ```bash
@@ -959,11 +1018,15 @@ sudo rm -f /var/lib/webcmp/apply-request
 
 A partir de ahi la peticion queda en disco y nadie la recoge: el boton sigue
 visible, porque lo que lo habilita es el permiso del directorio, no la unidad.
-Como el archivo no se consume, el segundo intento avisa **"Ya hay un reinicio en
-curso"** aunque no haya ninguno. Es el precio de no dejar que el proceso web
-pregunte por systemd; si se apaga la unidad, conviene quitar el boton de la vista
-o volver a habilitarla. **Guardar** no se ve afectado y el reinicio se hace a
-mano. Para volver a habilitarlo, `sudo systemctl enable --now webcmp-apply.path`.
+Pasados 30 s la pagina lo dice (**"quedo sin recoger"**), que es la diferencia con
+no enterarse nunca. El segundo intento, mientras tanto, avisa **"Ya hay un
+reinicio en curso"** aunque no haya ninguno, porque el archivo no se consume. Es
+el precio de no dejar que el proceso web pregunte por systemd; si se apaga la
+unidad, conviene quitar el boton de la vista o volver a habilitarla. **Guardar**
+no se ve afectado y el reinicio se hace a mano. Para volver a habilitarlo,
+`sudo systemctl enable --now webcmp-apply.path`, o directamente
+`sudo bash deploy/install-apply-units.sh`, que ademas deja los archivos como
+corresponden.
 
 ### Diagnosticar
 

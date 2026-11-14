@@ -28,6 +28,7 @@ from apps.core.env_apply import (
     ApplyRequestPendingError,
     apply_status,
     can_request,
+    pending_request,
     request_apply,
 )
 from apps.core.env_config import (
@@ -92,6 +93,11 @@ class EnvironmentConfigView(LoginRequiredMixin, UserPassesTestMixin, TemplateVie
                 'maintenance_mode': maintenance_mode,
                 'can_apply': watcher_available and maintenance_mode,
                 'apply_status': apply_status(settings.ENV_APPLY_STATUS_FILE),
+                # Una peticion que sigue en disco no es un reinicio en curso: es
+                # uno que nadie proceso (falta la unidad `systemd`, o esta
+                # detenida). Se muestra aparte porque es el unico estado en el
+                # que el panel, sin este aviso, no dice nada en absoluto.
+                'apply_pending': pending_request(settings.ENV_APPLY_REQUEST_FILE),
             }
         )
         return context
