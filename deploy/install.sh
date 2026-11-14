@@ -17,7 +17,7 @@
 #   9. proxy: (A) Nginx local con TLS, o (B) Nginx local SIN TLS detras de un
 #      reverse proxy externo (Nginx Proxy Manager) que termina el TLS
 #  10. /etc/webcmp/deploy.env con el destino del health check que corresponde
-#  11. andamiaje de deploy automatico (usuario, sudoers, webcmp-deploy, autodeploy)
+#  11. andamiaje del deploy por boton (usuario, sudoers, webcmp-deploy, autodeploy)
 #      y ejecutor del boton "Aplicar cambios" del panel de entorno
 #  12. superusuario, por systemd-run con la ENCRYPTION_KEY
 #
@@ -3192,7 +3192,7 @@ EOF
     echo "  escrito."
 fi
 
-# --- C.11 Andamiaje de deploy automatico ---------------------------------
+# --- C.11 Andamiaje del deploy por boton --------------------------------
 
 # El andamiaje que el README anterior hacia a mano: usuario de despliegue,
 # sudoers validado y webcmp-deploy en /usr/local/sbin. Ya no genera keypair: el
@@ -3200,7 +3200,7 @@ fi
 setup_deploy_scaffold() {
     local tmp
 
-    log "Andamiaje de deploy automatico (usuario $DEPLOY_LOGIN_USER)"
+    log "Andamiaje del deploy por boton (usuario $DEPLOY_LOGIN_USER)"
 
     if id "$DEPLOY_LOGIN_USER" >/dev/null 2>&1; then
         echo "  el usuario $DEPLOY_LOGIN_USER ya existe."
@@ -3399,7 +3399,7 @@ setup_apply() {
 }
 
 if [ "$SKIP_DEPLOY_SCAFFOLD" -eq 1 ]; then
-    log "Andamiaje de deploy automatico: omitido (--skip-deploy-scaffold)"
+    log "Andamiaje del deploy por boton: omitido (--skip-deploy-scaffold)"
     log "Boton 'Actualizar' del panel: omitido (necesita el usuario $DEPLOY_LOGIN_USER)"
     log "Boton 'Aplicar cambios' del panel: omitido (necesita el usuario $DEPLOY_LOGIN_USER)"
 else

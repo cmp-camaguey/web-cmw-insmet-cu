@@ -1158,7 +1158,7 @@ Dos se detectan antes de tocar produccion:
 
 ## Primer deploy: checklist
 
-Proba el rollback una vez, a mano, antes de confiar en el deploy automatico.
+Proba el rollback una vez, a mano, antes de confiar en el deploy por boton.
 
 ```bash
 # 1. El servidor tiene /etc/webcmp/deploy.env y /etc/webcmp/encryption.env.
