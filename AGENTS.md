@@ -71,7 +71,7 @@ detect-secrets scan --exclude-files "static/|staticfiles/|.*\.min\.js$|.*\.map$|
 
 | Rama | Rol | Reglas |
 |---|---|---|
-| `main` | Producción | `Protect main`: aprobación humana obligatoria. El merge dispara CI y deploy |
+| `main` | Producción | `Protect main`: aprobación humana obligatoria. El merge dispara CI. El despliegue es aparte: lo dispara el botón «Actualizar» del panel, que aplica lo que esté en `main` ([detalle](deploy/README-deploy.md)) |
 | `dev` | Integración | `Protect dev`: sin force push, sin borrado, merge solo con los required checks en verde |
 
 1. Rama corta desde `dev`: `feat/nnn-descripcion`, `fix/nnn-descripcion`, `chore/descripcion`.
