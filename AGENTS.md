@@ -80,9 +80,37 @@ detect-secrets scan --exclude-files "static/|staticfiles/|.*\.min\.js$|.*\.map$|
 4. Promoción por lote: PR `dev` → `main` con **merge commit**, nunca squash.
 5. La promoción necesita una aprobación de `@orl92` o `@yoelvismr` (`CODEOWNERS` + `require_code_owner_review`). Es una por release.
 6. Etiquetar el merge del release: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`.
-7. **Después de cada release o hotfix, PR `main` → `dev`.** Sin ese paso la siguiente promoción sale `BEHIND` aunque el contenido sea idéntico.
+7. Publicar el release en GitHub con el cuerpo descrito en [Cuerpo del release](#cuerpo-del-release).
+8. **Después de cada release o hotfix, PR `main` → `dev`.** Sin ese paso la siguiente promoción sale `BEHIND` aunque el contenido sea idéntico.
+9. **Desplegar.** Pulsar «Actualizar» en el panel y confirmar que muestra el commit del release. Hasta ese momento producción sigue con la versión anterior, aunque el tag y el CI estén en verde.
 
 Un hotfix sale de `main` y vuelve a `dev` igual que un release.
+
+### Cuerpo del release
+
+```bash
+gh release create vX.Y.Z --title vX.Y.Z --notes-file <archivo>
+```
+
+Las secciones van en este orden: `## Features`, `## Fix`, `## Docs`, y el pie de comparación. Una viñeta por PR, con su número y el efecto para quien usa el panel o el portal:
+
+```text
+- **Título corto** (#NNN) — qué cambia para quien lo usa.
+```
+
+`## Migraciones` sólo se incluye si el rango trae migraciones nuevas:
+
+```bash
+git diff --name-only --diff-filter=A vAnterior vX.Y.Z -- '*/migrations/*.py'
+```
+
+Debajo se anota una línea por migración con lo que hace —si sólo crea tablas o índices, o si altera o borra datos— y se nombra la marca `data-safety` cuando la lleva.
+
+El cuerpo cierra con el pie de comparación:
+
+```text
+**Full Changelog**: https://github.com/cmp-camaguey/webcmp/compare/vAnterior...vX.Y.Z
+```
 
 ## CI
 
