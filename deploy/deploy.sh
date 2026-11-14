@@ -320,6 +320,21 @@ HEALTHCHECK_RESOLVE_DEFINED=${HEALTHCHECK_RESOLVE+si}
 : "${DEPLOY_USER:=webcmp}"
 : "${GUNICORN_UNIT:=webcmp}"
 : "${HUEY_UNIT:=webcmp-huey}"
+# Unidades del andamiaje del panel. Este script no las instala (ver
+# `missing_units`), pero necesita sus nombres para comprobar que esten: install.sh
+# los renderiza desde estas mismas variables, asi que un nombre cambiado en
+# deploy.env tiene que llegar a la comprobacion o se reporta un faltante falso.
+: "${AUTODEPLOY_UNIT:=webcmp-autodeploy}"
+: "${APPLY_UNIT:=webcmp-apply}"
+# Estado del boton "Aplicar cambios". Este script no lo instala, pero si deja la
+# unidad vigilando: si el deploy no la habilita, el boton escribe su peticion en
+# un directorio que nadie mira y el operador no ve nada.
+: "${APPLY_STATE_DIR:=/var/lib/webcmp}"
+APPLY_REQUEST_FILE=$APPLY_STATE_DIR/apply-request
+# Variables solo para las pruebas, que no pueden escribir en /etc/systemd ni
+# tocar los servicios de la maquina donde corren.
+: "${SYSTEMD_UNIT_DIR:=/etc/systemd/system}"
+: "${SYSTEMCTL:=systemctl}"
 : "${ENCRYPTION_ENV:=/etc/webcmp/encryption.env}"
 : "${PYTHON:=$APP_DIR/.venv/bin/python}"
 # `PIP` NO se invoca por su shim (`$VENV/bin/pip`): ese shim no existe siempre.
@@ -548,6 +563,78 @@ check_files() {
     fi
 }
 
+# >>> TEST-BLOCK: missing-units
+# Unidades que este commit necesita y que el deploy NO instala.
+#
+# No las instala a proposito. `deploy.sh` corre como root, y la regla del
+# proyecto es que no ejecuta codigo del checkout con ese privilegio (ver la nota
+# de las prompts, mas arriba): el checkout lo escribe $DEPLOY_USER, asi que un
+# `deploy/systemd/*.service` escrito ahi seria un unit root-ejecutable bajo el
+# control del proceso web. Instalarlas sigue siendo trabajo de root, a mano o con
+# `deploy/install-apply-units.sh`.
+#
+# Lo que si puede hacer el deploy es negarse a seguir cuando falta una. Sin esta
+# comprobacion el deploy reinicia, escribe "ok" en el panel, y el servidor queda
+# corriendo un commit que depende de una pieza que no existe: el boton "Aplicar
+# cambios" del panel de entorno escribe su peticion en un directorio que nadie
+# vigila, y el operador ve que no pasa nada.
+missing_units() {
+    local dir=${SYSTEMD_UNIT_DIR:-/etc/systemd/system} f base
+    for f in "$APP_DIR"/deploy/systemd/*.service "$APP_DIR"/deploy/systemd/*.path; do
+        [ -e "$f" ] || continue
+        base=${f##*/}
+        # Solo estas cuatro pueden instalarse con otro nombre, porque install.sh
+        # las renderiza desde GUNICORN_UNIT, HUEY_UNIT, AUTODEPLOY_UNIT y
+        # APPLY_UNIT. El resto se instala con el nombre del archivo.
+        case "$base" in
+            webcmp.service) base=$GUNICORN_UNIT.service ;;
+            webcmp-huey.service) base=$HUEY_UNIT.service ;;
+            webcmp-autodeploy.service | webcmp-autodeploy.path)
+                base=${base/webcmp-autodeploy/$AUTODEPLOY_UNIT}
+                ;;
+            webcmp-apply.service | webcmp-apply.path) base=${base/webcmp-apply/$APPLY_UNIT} ;;
+        esac
+        [ -f "$dir/$base" ] || printf '%s\n' "$base"
+    done
+}
+# <<< TEST-BLOCK: missing-units
+
+# >>> TEST-BLOCK: ensure-apply-path
+# Deja el boton "Aplicar cambios" operativo, sin instalar nada.
+#
+# Este script no puede copiar units desde el checkout (ver `missing_units`), pero
+# si puede habilitar una que ya esta instalada: es `systemctl` con un nombre que
+# sale de la configuracion, igual que el `restart` de mas abajo, no codigo del
+# checkout. Sin esto, un servidor actualizado por el boton "Actualizar" queda con
+# el boton "Aplicar cambios" escribiendo en un directorio que nadie vigila: el
+# sintoma que este cambio vino a cerrar.
+ensure_apply_path() {
+    if [ ! -f "$SYSTEMD_UNIT_DIR/$APPLY_UNIT.path" ]; then
+        log "Sin $SYSTEMD_UNIT_DIR/$APPLY_UNIT.path: el boton 'Aplicar cambios' no esta instalado."
+        return 0
+    fi
+
+    # Una peticion en disco dispara el reinicio en el instante en que el .path
+    # queda activo. El deploy acaba de reiniciar los dos servicios, que es
+    # exactamente lo que la peticion pedia, asi que se da por cumplida: dejarla
+    # solo agrega un segundo reinicio en medio del health check.
+    if [ -e "$APPLY_REQUEST_FILE" ]; then
+        log "Peticion de 'Aplicar cambios' pendiente: el reinicio de este deploy ya la cumple."
+        rm -f "$APPLY_REQUEST_FILE"
+    fi
+
+    # `enable` sobre una unidad ya habilitada es un no-op; el silencio evita que
+    # el log del deploy se llene de "Created symlink" en cada corrida.
+    "$SYSTEMCTL" enable "$APPLY_UNIT.path" >/dev/null 2>&1 || true
+    "$SYSTEMCTL" start "$APPLY_UNIT.path" \
+        || die "No se pudo activar $APPLY_UNIT.path. El boton 'Aplicar cambios' no va a reiniciar."
+
+    "$SYSTEMCTL" is-active --quiet "$APPLY_UNIT.path" \
+        || die "$APPLY_UNIT.path quedo inactivo. El boton 'Aplicar cambios' no va a reiniciar.\n  Revisa: $SYSTEMCTL status $APPLY_UNIT.path"
+    log "Boton 'Aplicar cambios' operativo ($APPLY_UNIT.path vigilando $APPLY_REQUEST_FILE)."
+}
+# <<< TEST-BLOCK: ensure-apply-path
+
 check_units() {
     log "Unidades systemd"
     for unit in "$GUNICORN_UNIT" "$HUEY_UNIT"; do
@@ -557,6 +644,29 @@ check_units() {
             check_fail "Falta /etc/systemd/system/$unit.service (deploy/install.sh lo instala)."
         fi
     done
+    if [ ! -d "$APP_DIR/deploy/systemd" ]; then
+        check_skip "No hay $APP_DIR/deploy/systemd: no se puede comparar contra el checkout."
+    else
+        local missing
+        missing=$(missing_units)
+        if [ -z "$missing" ]; then
+            check_ok 'Todas las unidades de deploy/systemd/ estan instaladas.'
+        else
+            check_fail "Faltan unidades que el codigo necesita: $(printf '%s ' $missing)(deploy/install-apply-units.sh o deploy/install.sh)."
+        fi
+    fi
+    # Instalada no es lo mismo que operativa: una unidad presente y deshabilitada
+    # es justo el estado en el que el boton "Aplicar cambios" escribe su peticion
+    # y no pasa nada. `--check` es el momento de verlo.
+    if [ -f "/etc/systemd/system/$APPLY_UNIT.path" ]; then
+        if systemctl is-enabled --quiet "$APPLY_UNIT.path" 2>/dev/null \
+            && systemctl is-active --quiet "$APPLY_UNIT.path" 2>/dev/null
+        then
+            check_ok "El boton 'Aplicar cambios' esta operativo ($APPLY_UNIT.path activo)."
+        else
+            check_fail "El boton 'Aplicar cambios' no va a reiniciar: $APPLY_UNIT.path esta instalado pero no habilitado. Lo deja habilitado el proximo deploy, o: sudo systemctl enable --now $APPLY_UNIT.path"
+        fi
+    fi
     if [ -n "$PROXY_MODE" ]; then
         case "$PROXY_MODE" in
             nginx-local) check_ok "PROXY_MODE=$PROXY_MODE (Nginx local: el health check necesita 443 en 127.0.0.1)." ;;
@@ -1016,6 +1126,25 @@ gitapp fetch --quiet origin
 gitapp checkout --force --quiet "$target_sha"
 current_sha=$(gitapp rev-parse HEAD)
 
+# 1b. Unidades systemd que este commit necesita
+#
+# Justo aca: despues del checkout, porque una unidad que agrega este mismo commit
+# recien aparece en el arbol nuevo, y antes de pip/migrate, porque el rollback
+# devuelve el codigo y no deshace nada de lo que se haya aplicado despues.
+missing=$(missing_units)
+if [ -n "$missing" ]; then
+    die "Este commit necesita unidades systemd que no estan instaladas:
+$(printf '  %s\n' $missing)
+
+El deploy no las instala a proposito: corre como root y el checkout lo escribe
+$DEPLOY_USER, asi que copiar units desde ahi seria ejecutar como root un archivo
+que el proceso web puede editar.
+
+Instalalas como root y volve a desplegar:
+  sudo bash $APP_DIR/deploy/install-apply-units.sh   # boton 'Aplicar cambios'
+  sudo bash $APP_DIR/deploy/install.sh               # el resto de las unidades"
+fi
+
 # 2. Dependencias
 progress deps
 log "Instalando requirements/prod.txt"
@@ -1115,6 +1244,13 @@ systemctl restart "$HUEY_UNIT"
 
 systemctl is-active --quiet "$GUNICORN_UNIT" || die "$GUNICORN_UNIT quedo inactivo."
 systemctl is-active --quiet "$HUEY_UNIT" || die "$HUEY_UNIT quedo inactivo."
+
+# 8b. Boton "Aplicar cambios"
+#
+# Antes del health check: si la unidad no arranca, el deploy aborta y revierte
+# igual que con cualquier otro servicio caido, y el health check no verifica un
+# sitio que no va a tener el boton operativo.
+ensure_apply_path
 
 # --------------------------------------------------------------------------
 # 9. Health check

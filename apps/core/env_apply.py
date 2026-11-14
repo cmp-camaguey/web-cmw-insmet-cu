@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 # desenlace. Sin esta ventana el panel mostraría "en curso" para siempre.
 RUN_STALE_SECONDS = 180
 
+# Margen antes de declarar huerfana una peticion. El ejecutor consume el archivo
+# en milisegundos, pero la pagina se vuelve a pintar justo despues de crearlo, y
+# sin margen el primer render diria "nadie la recogio" de una peticion que si se
+# estaba procesando. Treinta segundos es mas que cualquier arranque de systemd y
+# menos que lo que tarda un operador en mirar la pantalla y desconfiar.
+PENDING_GRACE_SECONDS = 30
+
 
 class ApplyRequestPendingError(Exception):
     """Ya hay una petición en disco: no se encola otra."""
@@ -71,13 +78,40 @@ def request_apply(path, user) -> dict:
     return payload
 
 
+def pending_request(path, now=None) -> dict | None:
+    """Petición de reinicio que nadie recogió, o `None` si no hay ninguna.
+
+    El ejecutor borra el archivo ANTES de hacer nada, así que una petición que
+    sigue en disco y ya pasó el margen no está "en curso": no la procesó nadie.
+    Sin esta comprobación el panel no distingue "nadie la recogió" de "nunca se
+    pidió", y las dos se ven igual: ningún aviso. Es el estado en el que queda un
+    servidor al que le falta la unidad `systemd` que vigila el archivo.
+    """
+    try:
+        modified = os.stat(path).st_mtime
+    except OSError:
+        return None
+
+    reference = (now or datetime.now(UTC)).timestamp()
+    if reference - modified < PENDING_GRACE_SECONDS:
+        # Recién escrita: el ejecutor todavía puede recogerla.
+        return None
+
+    raw = _read_json(path) or {}
+    return {
+        'tone': 'warning',
+        'icon': 'plug-off',
+        'text': _pending_text(str(raw.get('requested_by') or '').strip(), modified),
+    }
+
+
 def apply_status(path, now=None) -> dict | None:
     """Estado legible del último reinicio, o `None` si no hay nada que informar.
 
     Un archivo ilegible o con una forma que no se reconoce devuelve `None`: el
     panel no puede inventar un resultado a partir de datos que no entiende.
     """
-    raw = _read_status(path)
+    raw = _read_json(path)
     if raw is None:
         return None
 
@@ -123,7 +157,12 @@ _ICONS = {
 }
 
 
-def _read_status(path) -> dict | None:
+def _read_json(path) -> dict | None:
+    """El archivo como objeto JSON, o `None` si no se puede leer.
+
+    Lo usan los dos archivos del mecanismo: el de estado y el de petición. Un
+    archivo ilegible o con una forma que no se reconoce no se adivina.
+    """
     try:
         with open(path, encoding='utf-8') as handle:
             data = json.load(handle)
@@ -169,6 +208,17 @@ def _status_text(state, *, requested_by, started, finished, error) -> str:
         return f'El último reinicio falló{detail}'
     return (
         'El último reinicio quedó sin confirmar. Revise el estado de los servicios en el servidor.'
+    )
+
+
+def _pending_text(requested_by: str, modified: float) -> str:
+    who = f' (solicitada por {requested_by})' if requested_by else ''
+    clock = _clock(datetime.fromtimestamp(modified, tz=UTC))
+    return (
+        f'La petición de reinicio de las {clock} quedó sin recoger{who}. '
+        'Ningún proceso la procesó: la unidad que la vigila no está instalada o no está '
+        'activa en el servidor, así que los cambios guardados siguen sin aplicarse. '
+        'Revise systemctl status webcmp-apply.path en el servidor.'
     )
 
 

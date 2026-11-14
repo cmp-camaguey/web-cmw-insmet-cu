@@ -35,6 +35,16 @@
       </div>
     </div>
   {% endif %}
+  {% if apply_pending %}
+    <div class="alert alert-{{ apply_pending.tone }} mb-3" role="alert">
+      <div class="d-flex">
+        <div class="me-2">
+          <i class="icon ti ti-{{ apply_pending.icon }}"></i>
+        </div>
+        <div>{{ apply_pending.text }}</div>
+      </div>
+    </div>
+  {% endif %}
   {% if can_write and not maintenance_mode %}
     <div class="alert alert-warning mb-3" role="alert">
       <div class="d-flex">
